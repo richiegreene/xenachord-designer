@@ -29,6 +29,13 @@
 (function () {
   'use strict';
 
+  /* The drafted key profiles, read out of the 15 / 17 / 19 Layout
+   * collections.  Key geometry is not modelled analytically any more — it
+   * IS the drafted geometry, with x = alpha + beta * width per vertex.   */
+  const KP = (typeof module !== 'undefined' && module.exports)
+    ? require('./profiles.js')
+    : (typeof window !== 'undefined' ? window : globalThis).XKP;
+
   /* ------------------------------------------------------------------ *
    * 1.  WORLD DATUM                                                     *
    * ------------------------------------------------------------------ */
@@ -83,21 +90,68 @@
     halfB: { x0: 184.72359, x1: 373.29513, yBack: -9.84695, yFront: 0.00005 },
     span: 373.29513 - 0.84933,             // A + B, end to end
 
-    // Screw holes, x measured from the design origin.  "big" holes go all the
-    // way through; the others are counterbores stopping at z = 2.91114.
-    screws: [
-      { x: 3.5805,   big: true  }, { x: 17.4975,  big: false },
-      { x: 31.1310,  big: false }, { x: 70.4945,  big: true  },
-      { x: 89.3770,  big: false }, { x: 140.8700, big: false },
-      { x: 154.4605, big: false }, { x: 168.1025, big: false },
-      { x: 184.0780, big: false }, { x: 208.2210, big: false },
-      { x: 226.4535, big: false }, { x: 277.9210, big: false },
-      { x: 291.5370, big: false }, { x: 305.1375, big: false },
-      { x: 345.1375, big: false }, { x: 356.2370, big: false },
-      { x: 370.6295, big: true  }
-    ],
-    screwStd: { w: 4.7795, d: 3.7795, yc: 5.05295, zFloor: 2.91114 },
-    screwBig: { w: 5.9,    d: 7.047,  yc: 4.92350, zFloor: 0.0 }
+    /* ---------------------------------------------------------------- *
+     * THE PCB CHANNEL                                                  *
+     *                                                                  *
+     * The underside of each half is slotted end to end — open at both  *
+     * x ends — leaving a 1.4 mm wall front and back.  This is where    *
+     * the AKM320 board sits.  Its ceiling, z = 2.911096, is the same   *
+     * plane the mounting holes stop on: the holes open straight down   *
+     * into it, so nothing here is a blind counterbore.                 *
+     *                                                                  *
+     * Read off the bottom faces and the z = 2.911 ceiling faces of     *
+     * "<kind> type Spine - A / - B" in the sandbox.                    *
+     * ---------------------------------------------------------------- */
+    channel: {
+      zTop: 2.911096,
+      A: { y0: -8.44702, y1: -1.40005 },   // 7.04697 across, 1.40005 walls
+      B: { y0: -8.44696, y1: -1.39999 }
+    },
+
+    /* ---------------------------------------------------------------- *
+     * THE 16 MOUNTING HOLES — 8 per half, and they are NOT rectangles.  *
+     *                                                                  *
+     * Every one of them is an obround (a stadium slot): a 32-segment    *
+     * circle cut in half at +/-90 deg and the two halves held           *
+     * `straight` = 1.0 mm apart along x, joined by tangent lines top    *
+     * and bottom.  There are exactly two radii in the sandbox:          *
+     *                                                                  *
+     *   lower  r = 1.889789   ->  4.779578 x 3.779578 mm                *
+     *          the layer that carries the channel, z 2.911096 .. z1     *
+     *   upper  r = 1.619818   ->  4.239636 x 3.239636 mm                *
+     *          every layer stacked above it, full height                *
+     *                                                                  *
+     * so the bore steps in by 0.269971 mm at the first layer seam.      *
+     * A one-type spine has no seam and therefore only the lower bore,   *
+     * exactly as "One type Spine - A / - B" is drawn.                   *
+     *                                                                  *
+     * Centres are stored verbatim, per half and per bore, because the   *
+     * drafted upper bores do not sit dead on top of the lower ones      *
+     * (they wander by up to 0.008 mm).  y is the bore centre in the     *
+     * design frame; the spine front face is y = 0.                      *
+     * ---------------------------------------------------------------- */
+    hole: {
+      seg: 32,               // segments in the full circle
+      straight: 1.0,         // straight run between the two half-circles
+      rLower: 1.889789,
+      rUpper: 1.619818
+    },
+    holesLower: {
+      A: [[  3.92184, -5.05901], [ 17.49740, -5.05305], [ 31.13094, -5.05294],
+          [ 71.16085, -5.05298], [ 89.37692, -5.05305], [140.86996, -5.05193],
+          [154.46059, -5.05292], [168.10250, -5.05390]],
+      B: [[208.22091, -5.05189], [226.45358, -5.05388], [277.92104, -5.05428],
+          [291.53719, -5.05230], [305.13729, -5.05288], [345.13729, -5.05289],
+          [356.23727, -5.05284], [370.35348, -5.05381]]
+    },
+    holesUpper: {
+      A: [[  3.92324, -5.05283], [ 17.49758, -5.05283], [ 31.13076, -5.05286],
+          [ 71.16067, -5.05284], [ 89.36868, -5.05292], [140.87832, -5.05242],
+          [154.46070, -5.05284], [168.09451, -5.05326]],
+      B: [[208.22911, -5.05251], [226.44538, -5.05328], [277.92912, -5.05364],
+          [291.53719, -5.05240], [305.13723, -5.05284], [345.13729, -5.05284],
+          [356.23729, -5.05283], [370.34536, -5.05326]]
+    }
   };
 
   /* ------------------------------------------------------------------ *
@@ -397,147 +451,93 @@
   }
 
   /* ==================================================================== *
-   *  KEY GEOMETRY                                                        *
+   *  KEY GEOMETRY — instantiated from the drafted profiles               *
+   *                                                                      *
+   *  Every key in the 15 / 17 / 19 sheets was measured and reduced to one *
+   *  profile per type (and, for whites, per neighbour context, because    *
+   *  the drafted whites rib differently depending on what sits beside     *
+   *  them).  Each vertex carries                                          *
+   *                                                                      *
+   *      x = alpha + beta * width      y, z constant                      *
+   *                                                                      *
+   *  so a profile spans every size scale: beta 0 pins a feature to the    *
+   *  left edge, 1 to the right edge, 0.5 to the centreline.  Nothing here *
+   *  is a reconstruction of the drafted shape; it is the drafted shape.   *
    * ==================================================================== */
 
-  /** half-width of an accidental at height z (side draft above whiteTop) */
-  function halfW(w, z) {
-    return w / 2 - DRAFT * Math.max(0, z - Z.whiteTop);
+  const ctxKey = (lb, rb) =>
+    (lb == null ? 'n' : lb) + '|' + (rb == null ? 'n' : rb);
+
+  /** the drafted profile for a key type in a given neighbour context */
+  function profileFor(type, lb, rb) {
+    let mirror = false, t = type;
+    if (KP.MIRROR[t]) { mirror = true; t = KP.MIRROR[t]; }
+    const table = KP.INDEX[t];
+    if (!table) throw new Error('no drafted profile for key type: ' + type);
+    const want = ctxKey(lb, rb);
+    if (table[want] != null) return { p: KP.P[table[want]], mirror, exact: true };
+    /* The sheets draw nine of the sixteen possible neighbour contexts.  For
+     * one they never drew, borrow the drafted white whose context is
+     * closest — occupancy first, then the nearer slot bias.               */
+    let best = null, bestScore = Infinity;
+    for (const k of Object.keys(table)) {
+      const parts = k.split('|');
+      const al = parts[0] === 'n' ? null : +parts[0];
+      const bl = parts[1] === 'n' ? null : +parts[1];
+      let sc = ((al === null) === (lb === null) ? 0 : 10) +
+               ((bl === null) === (rb === null) ? 0 : 10);
+      if (al !== null && lb !== null) sc += Math.abs(al - lb);
+      if (bl !== null && rb !== null) sc += Math.abs(bl - rb);
+      if (sc < bestScore) { bestScore = sc; best = table[k]; }
+    }
+    return { p: KP.P[best], mirror, exact: false };
   }
 
-  /** top surface height of an accidental at y (y = 0 at the spine) */
-  function accTopAt(spec, y) {
-    if (y <= TONGUE_Y) return null;                    // tongue region
-    if (y >= spec.peakY) {
-      // nose ramp down to the front face: peakZ at peakY, noseZ at depth
-      const f = (y - spec.peakY) / (spec.depth - spec.peakY);
-      return spec.peakZ + (spec.noseZ - spec.peakZ) * f;
+  /** the profile's vertex positions at width w, left edge at xLeft */
+  function profilePoints(p, mirror, w, xLeft) {
+    const v = p.v, n = p.nv, out = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const j = i * 4;
+      let x = v[j] + v[j + 1] * w;
+      if (mirror) x = w - x;
+      out[i] = [xLeft + x, v[j + 2], v[j + 3]];
     }
-    // rear draft: peak -> Z.accRearTop at y = TONGUE_Y
-    const f = (spec.peakY - y) / (spec.peakY - TONGUE_Y);
-    return spec.peakZ + (Z.accRearTop - spec.peakZ) * f;
+    return out;
   }
 
   /**
-   * Build one accidental key.
-   *   cx     centre x
-   *   w      width (from the size law)
-   *   spec   entry from KEY_TYPES
-   * Returns a flat triangle array.
+   * One key, as a triangle soup.
+   *   cx     centre x            w   width (from the size law)
+   *   type   key type name
+   *   lb/rb  bias of the occupied slot to the left / right, or null
    */
-  function buildAccidental(cx, w, spec) {
-    const t = [];
-    const arm = spec.arm || null;
-    const bodyBackY = arm ? arm.startY : TONGUE_Y;
-
-    // --- Y stations through the body, front (depth) back to bodyBackY ---
-    const ys = [];
-    const push = v => { if (v > bodyBackY + 1e-6 && v < spec.depth - 1e-6) ys.push(v); };
-    ys.push(spec.depth);
-    push(spec.peakY);
-    // a few intermediate stations so the sloped top tessellates cleanly
-    for (let i = 1; i < 6; i++) push(bodyBackY + (spec.peakY - bodyBackY) * i / 6);
-    ys.push(bodyBackY);
-    ys.sort((a, b) => b - a);            // front -> back
-
-    const ringAt = y => {
-      const top = accTopAt(spec, Math.max(y, bodyBackY + 1e-6)) ||
-                  accTopAt(spec, bodyBackY + 1e-6);
-      const zb = Z.accBottom;
-      const hwT = halfW(w, top), hwB = w / 2;
-      const shoulder = Math.min(top, Z.whiteTop);
-      // outer ring, CCW seen from +y
-      return [
-        [cx - hwB, zb], [cx + hwB, zb],
-        [cx + w / 2, shoulder], [cx + hwT, top],
-        [cx - hwT, top], [cx - w / 2, shoulder]
-      ];
-    };
-    for (let i = 0; i < ys.length - 1; i++) {
-      loftRing(t, ringAt(ys[i]), ys[i], ringAt(ys[i + 1]), ys[i + 1],
-               i === 0, i === ys.length - 2);
-    }
-
-    // --- hollow underside: a cavity inset by WALL, open at the bottom ---
-    const cavFront = spec.depth - WALL, cavBack = bodyBackY + WALL;
-    if (cavFront > cavBack + 0.2) {
-      const cav = y => {
-        const top = accTopAt(spec, y) || Z.accRearTop;
-        const ct = Math.min(top - WALL, Z.whiteTop + 3.0);
-        const hw = w / 2 - WALL;
-        return [[cx - hw, Z.accBottom], [cx - hw, ct],
-                [cx + hw, ct], [cx + hw, Z.accBottom]];
-      };
-      const cys = [cavFront];
-      for (let i = 1; i < 5; i++) cys.push(cavFront + (cavBack - cavFront) * i / 5);
-      cys.push(cavBack);
-      for (let i = 0; i < cys.length - 1; i++) {
-        loftRing(t, cav(cys[i]), cys[i], cav(cys[i + 1]), cys[i + 1],
-                 i === 0, i === cys.length - 2);
+  function buildKey(cx, w, type, lb, rb) {
+    const q = profileFor(type, lb, rb);
+    const V = profilePoints(q.p, q.mirror, w, cx - w / 2);
+    const f = q.p.f, t = [];
+    for (let k = 0; k < f.length;) {
+      const m = f[k++];
+      const ring = f.slice(k, k + m); k += m;
+      if (q.mirror) ring.reverse();          // mirroring flips face winding
+      for (let i = 1; i < m - 1; i++) {
+        const a = V[ring[0]], b = V[ring[i]], c = V[ring[i + 1]];
+        t.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
       }
     }
-
-    // --- thin rear arm (the deep "Second" gray keys) ---
-    if (arm) {
-      const hw = w / 2 - 0.6;
-      const ring = z => [[cx - hw, Z.accBottom], [cx + hw, Z.accBottom],
-                         [cx + hw, z], [cx - hw, z]];
-      loftRing(t, ring(arm.startZ), arm.startY, ring(arm.endZ), arm.endY, true, true);
-    }
-
-    // --- rear tongue into the spine ---
-    const tz = spec.layer === 'black' ? Z.blackTongue : Z.grayTongue;
-    pushBox(t, cx - w / 2, cx + w / 2, 0, TONGUE_Y + 0.001, tz[0], tz[1]);
-
     return t;
   }
 
-  /**
-   * Build one white key.  Construction mirrors the .blend: a 1 mm top plate,
-   * two 1 mm outer walls, two 1 mm inner ribs, one centred rib over the
-   * sensor foot, a solid front block and a rear tongue that ramps down onto
-   * the spine.
-   */
-  function buildWhite(cx, w, opts) {
-    const t = [];
-    const o = opts || {};
-    const x0 = cx - w / 2, x1 = cx + w / 2;
-    const D = KEY_TYPES['Full Sized White'].depth;      // 85.0688
-    const topZ = Z.whiteTop, plate = topZ - 1.0;
-
-    const frontBlockY = D - 6.0;      // full-height nose
-    const rampEndY = D - 19.527;      // underside reaches its cruising height
-    const tongueY = 5.0688;
-
-    // clearance the neighbouring accidentals need out of the mid section
-    const shL = o.shL != null ? o.shL : x0;
-    const shR = o.shR != null ? o.shR : x1;
-
-    // ---- front block (solid) ----
-    pushBox(t, x0, x1, frontBlockY, D, Z.whiteBottom, topZ);
-    // ---- underside ramp: a true sloped prism from whiteUnder to whiteBottom --
-    XM_loftPrism(t, x0, x1,
-      rampEndY, Z.whiteUnder, frontBlockY, Z.whiteBottom, topZ);
-    // ---- top plate over the whole body ----
-    pushBox(t, shL, shR, tongueY, rampEndY, plate, topZ);
-    // ---- outer walls ----
-    pushBox(t, shL, shL + 1.0, tongueY, rampEndY, Z.whiteUnder, topZ);
-    pushBox(t, shR - 1.0, shR, tongueY, rampEndY, Z.whiteUnder, topZ);
-    // ---- inner ribs ----
-    const inset = w * SIZE.ribInsetRatio;
-    const rA = x0 + inset, rB = x1 - inset - 1.0;
-    if (rA > shL + 1.0) pushBox(t, rA, rA + 1.0, tongueY, rampEndY, Z.whiteUnder, topZ);
-    if (rB + 1.0 < shR - 1.0) pushBox(t, rB, rB + 1.0, tongueY, rampEndY, Z.whiteUnder, topZ);
-    // ---- centred rib over the sensor foot ----
-    pushBox(t, cx - 0.5, cx + 0.5, FOOT.yCentre - 6.0, FOOT.yCentre + 1.0,
-            Z.whiteUnder, topZ);
-
-    // ---- rear tongue, ramping down onto the spine ----
-    const tz0 = Z.whiteTongue[0];
-    const ringF = [[x0, tz0], [x1, tz0], [x1, topZ], [x0, topZ]];
-    const ringB = [[x0, tz0], [x1, tz0], [x1, 7.08899], [x0, 7.08899]];
-    loftRing(t, ringF, tongueY, ringB, 0, true, true);
-    return t;
+  /** the key's true extent, straight off the profile */
+  function keyExtent(cx, w, type, lb, rb) {
+    const q = profileFor(type, lb, rb);
+    const V = profilePoints(q.p, q.mirror, w, cx - w / 2);
+    const r = [Infinity, -Infinity, Infinity, -Infinity, Infinity, -Infinity];
+    for (const p of V) {
+      r[0] = Math.min(r[0], p[0]); r[1] = Math.max(r[1], p[0]);
+      r[2] = Math.min(r[2], p[1]); r[3] = Math.max(r[3], p[1]);
+      r[4] = Math.min(r[4], p[2]); r[5] = Math.max(r[5], p[2]);
+    }
+    return { x0: r[0], x1: r[1], y0: r[2], y1: r[3], z0: r[4], z1: r[5] };
   }
 
   /* ==================================================================== *
@@ -558,16 +558,117 @@
     rectWithHoles(h.x0, h.x1, h.y1, y1, holes, emit);
   }
 
-  /** screw holes of one AKM320 unit, shifted by `off` mm */
-  function unitScrewHoles(off) {
-    return SPINE.screws.map(s => {
-      const g = s.big ? SPINE.screwBig : SPINE.screwStd;
-      return {
-        x0: s.x + off - g.w / 2, x1: s.x + off + g.w / 2,
-        y0: SPINE.yFront - g.yc - g.d / 2, y1: SPINE.yFront - g.yc + g.d / 2,
-        zFloor: g.zFloor
-      };
-    });
+  /* ------------------------------------------------------------------ *
+   *  THE MOUNTING HOLES ARE OBROUNDS                                    *
+   *                                                                     *
+   *  A 32-segment circle split at +/-90 deg, the halves held `straight`  *
+   *  apart along x and closed with tangent lines: 34 points, CCW.  The   *
+   *  sandbox draws exactly this, to 0.0001 mm.                          *
+   * ------------------------------------------------------------------ */
+  /**
+   * The unit obround: [halfSign, cos, sin] per point, CCW, computed once so
+   * that the Python log can carry these doubles verbatim and Blender never
+   * has to re-run a trig function the browser already ran.
+   *   point = [cx + halfSign * straight / 2 + r * cos, cy + r * sin]
+   */
+  const HOLE_UNIT = (function (n) {
+    const q = n / 4, out = [];
+    for (let k = -q; k <= q; k++) {          // right half, -90 .. +90
+      const a = 2 * Math.PI * k / n;
+      out.push([+1, Math.cos(a), Math.sin(a)]);
+    }
+    for (let k = q; k <= 3 * q; k++) {       // left half, +90 .. +270
+      const a = 2 * Math.PI * k / n;
+      out.push([-1, Math.cos(a), Math.sin(a)]);
+    }
+    return out;
+  })(SPINE.hole.seg);
+
+  function obroundRing(cx, cy, r, straight, unit) {
+    return (unit || HOLE_UNIT).map(u =>
+      [cx + u[0] * straight / 2 + r * u[1], cy + r * u[2]]);
+  }
+
+  /**
+   * The 8 mounting holes of one spine half, as rings plus their bounding
+   * boxes.  `upper` picks the narrower bore that every layer above the
+   * channel-carrying one is drawn with.
+   */
+  function spineHoles(half, upper) {
+    const tbl = upper ? SPINE.holesUpper[half] : SPINE.holesLower[half];
+    const r = upper ? SPINE.hole.rUpper : SPINE.hole.rLower;
+    const s = SPINE.hole.straight;
+    return tbl.map(([cx, cy]) => ({
+      cx, cy, r, ring: obroundRing(cx, cy, r, s),
+      x0: cx - s / 2 - r, x1: cx + s / 2 + r,
+      y0: cy - r,         y1: cy + r
+    }));
+  }
+
+  /** where a ring point lands on the hole's bounding box, on the centre ray */
+  function holeBoxPoint(h, p) {
+    const dx = p[0] - h.cx, dy = p[1] - h.cy;
+    const sx = dx > 0 ? (h.x1 - h.cx) / dx : dx < 0 ? (h.x0 - h.cx) / dx : Infinity;
+    const sy = dy > 0 ? (h.y1 - h.cy) / dy : dy < 0 ? (h.y0 - h.cy) / dy : Infinity;
+    const s = Math.min(sx, sy);
+    // side index, CCW: 0 = +x, 1 = +y, 2 = -x, 3 = -y
+    const side = sx <= sy ? (dx > 0 ? 0 : 2) : (dy > 0 ? 1 : 3);
+    return { p: [h.cx + dx * s, h.cy + dy * s], side };
+  }
+
+  /**
+   * Fill the gap between a hole's bounding box and its obround ring, as a
+   * cap at height z.  `up` is +1 for a face that looks up, -1 for one that
+   * looks down.  This is what turns the rectangular decomposition below
+   * into a rounded hole.
+   */
+  function pushHoleAnnulus(t, h, z, up) {
+    const C = [[h.x1, h.y1], [h.x0, h.y1], [h.x0, h.y0], [h.x1, h.y0]];
+    const tri = (a, b, c) => {
+      // the ring touches its own bounding box at four points, so a few of
+      // these come out with no area at all — drop them rather than ship
+      // slivers into the STL
+      const cr = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+      if (Math.abs(cr) < 1e-12) return;
+      if (up > 0) pushTri(t, [a[0], a[1], z], [b[0], b[1], z], [c[0], c[1], z]);
+      else        pushTri(t, [a[0], a[1], z], [c[0], c[1], z], [b[0], b[1], z]);
+    };
+    const n = h.ring.length;
+    for (let i = 0; i < n; i++) {
+      const a = h.ring[i], b = h.ring[(i + 1) % n];
+      const pa = holeBoxPoint(h, a), pb = holeBoxPoint(h, b);
+      const path = [pa.p];
+      for (let s = pa.side; s !== pb.side; s = (s + 1) % 4) path.push(C[s]);
+      path.push(pb.p);
+      for (let j = 0; j < path.length - 1; j++) tri(a, path[j], path[j + 1]);
+      tri(a, path[path.length - 1], b);
+    }
+  }
+
+  /** the inside wall of one hole, z0 .. z1, normals pointing into the bore */
+  function pushHoleWall(t, h, z0, z1) {
+    const n = h.ring.length;
+    for (let i = 0; i < n; i++) {
+      const a = h.ring[i], b = h.ring[(i + 1) % n];
+      pushQuad(t, [a[0], a[1], z0], [a[0], a[1], z1],
+                  [b[0], b[1], z1], [b[0], b[1], z0]);
+    }
+  }
+
+  /**
+   * One slab of spine: the rectangle x0..x1 by y0..y1, from z0 to z1, with
+   * the given obround holes bored through it.  The bulk is decomposed into
+   * boxes around the holes' bounding boxes (rectWithHoles), then each hole
+   * gets its annulus caps and its bore wall.
+   */
+  function pushSpineSlab(t, x0, x1, y0, y1, z0, z1, holes) {
+    rectWithHoles(x0, x1, y0, y1, holes,
+      (a, b, c, d) => pushBox(t, a, b, c, d, z0, z1));
+    for (const h of holes) {
+      pushHoleAnnulus(t, h, z1, +1);
+      pushHoleAnnulus(t, h, z0, -1);
+      pushHoleWall(t, h, z0, z1);
+    }
   }
 
   const spineKindOf = n => (n >= 3 ? 'three' : n === 2 ? 'two' : 'one');
@@ -582,20 +683,31 @@
    */
   function spineParts(nLayers) {
     const kind = spineKindOf(nLayers);
-    const holes = unitScrewHoles(0);
+    const zc = SPINE.channel.zTop;
     const parts = [];
     for (const [hn, half] of spineHalves()) {
-      for (const L of SPINE.layers[kind][hn]) {
+      const ch = SPINE.channel[hn];
+      const layers = SPINE.layers[kind][hn];
+      layers.forEach((L, i) => {
         const tris = [];
-        const active = holes.filter(h => L.z1 > h.zFloor);
-        rectWithHoles(half.x0, half.x1, half.yBack, half.yFront, active,
-          (a, b, c, d) => pushBox(tris, a, b, c, d, L.z0, L.z1));
+        if (i === 0) {
+          /* The bottom layer carries the PCB channel.  Below the ceiling it
+           * is two strips, front and back; above it, the full section with
+           * the wide bore.  The channel runs out through both x ends.     */
+          pushBox(tris, half.x0, half.x1, half.yBack, ch.y0, L.z0, zc);
+          pushBox(tris, half.x0, half.x1, ch.y1, half.yFront, L.z0, zc);
+          pushSpineSlab(tris, half.x0, half.x1, half.yBack, half.yFront,
+                        zc, L.z1, spineHoles(hn, false));
+        } else {
+          pushSpineSlab(tris, half.x0, half.x1, half.yBack, half.yFront,
+                        L.z0, L.z1, spineHoles(hn, true));
+        }
         parts.push({
           name: 'Spine_' + hn + '_' + L.name, half: hn, layer: L.name,
           x0: half.x0, x1: half.x1, yBack: half.yBack, yFront: half.yFront,
           z0: L.z0, z1: L.z1, tris
         });
-      }
+      });
     }
     return parts;
   }
@@ -662,10 +774,12 @@
     KEY_TYPES, TYPE_ORDER, LAYOUTS, SLOT_BIAS, SLOT_GROUP,
     WHITE_NAMES, SLOT_NAMES,
     whiteWidth, whitePitch, accWidth, slotDelta,
-    pushTri, pushQuad, pushBox, loftRing, rectWithHoles,
-    halfW, accTopAt, buildAccidental, buildWhite, buildSpine, buildFeet,
+    pushTri, pushQuad, pushBox, rectWithHoles,
+    ctxKey, profileFor, profilePoints, buildKey, keyExtent,
+    buildSpine, buildFeet,
     spineKindOf, spineHalves, spineParts, spineZRange, footParts,
-    footCentres, unitScrewHoles,
+    footCentres, obroundRing, spineHoles, holeBoxPoint, HOLE_UNIT,
+    pushHoleAnnulus, pushHoleWall, pushSpineSlab,
     toWorld: (x, y, z) => [x + WORLD.x0, WORLD.y0 - y, z + WORLD.z0]
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

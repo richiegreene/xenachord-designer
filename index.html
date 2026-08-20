@@ -234,6 +234,7 @@
 </div>
 <div id="toast"></div>
 
+<script src="profiles.js"></script>
 <script src="model.js"></script>
 <script src="core.js"></script>
 <script>
@@ -758,13 +759,13 @@ new ResizeObserver(draw).observe(canvas);
 function keyBoxes(){
   if(!L) return [];
   const out=[];
-  const W=XM.KEY_TYPES['Full Sized White'];
-  for(const w of L.whites) out.push({
-    part:'white', kind:'white', ref:w, type:w.type,
-    x0:w.x0, x1:w.x1, y0:0, y1:W.depth, z0:XM.Z.whiteBottom, z1:XM.Z.whiteTop });
-  for(const sl of L.slots) for(const m of sl.members) out.push({
-    part:m.spec.layer, kind:'acc', ref:m, slot:sl, type:m.type,
-    x0:m.x0, x1:m.x1, y0:0, y1:m.spec.depth, z0:XM.Z.accBottom, z1:m.spec.peakZ });
+  /* hit boxes come off the drafted profile, so they track the real key */
+  for(const w of L.whites) out.push(Object.assign({
+    part:'white', kind:'white', ref:w, type:w.type },
+    XM.keyExtent(w.cx, L.wW, w.type, w.ctxL, w.ctxR)));
+  for(const sl of L.slots) for(const m of sl.members) out.push(Object.assign({
+    part:m.spec.layer, kind:'acc', ref:m, slot:sl, type:m.type },
+    XM.keyExtent(m.cx, L.aW, m.type, null, null)));
   L.feet.forEach((fx,i)=>out.push({
     part:'feet', kind:'foot', index:i, type:'sensor foot',
     x0:fx-XM.FOOT.w/2, x1:fx+XM.FOOT.w/2,
@@ -802,9 +803,9 @@ function pickAt(e){
   if(pickBuf){ gl.deleteBuffer(pickBuf.buf); pickBuf=null; }
   if(best){
     let tris=null;
-    if(best.kind==='white') tris=XM.buildWhite(best.ref.cx,best.ref.w,
-      {shL:best.ref.shL,shR:best.ref.shR});
-    else if(best.kind==='acc') tris=XM.buildAccidental(best.ref.cx,best.ref.w,best.ref.spec);
+    if(best.kind==='white') tris=XM.buildKey(best.ref.cx,L.wW,best.type,
+      best.ref.ctxL,best.ref.ctxR);
+    else if(best.kind==='acc') tris=XM.buildKey(best.ref.cx,L.aW,best.type,null,null);
     else { tris=[]; XM.pushBox(tris,best.x0,best.x1,best.y0,best.y1,best.z0,best.z1); }
     if(tris.length) pickBuf=meshToBuffer(tris);
   }

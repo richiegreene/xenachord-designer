@@ -43,6 +43,7 @@ the cut lands.
 
 | file | what it is |
 |---|---|
+| `profiles.js` | The drafted keys themselves, as data — one profile per key type and, for whites, per neighbour context. Generated from the .blend; not hand-edited. |
 | `model.js` | Everything measured out of the .blend: the datum, the spine (per half), the fixed foot relationship, the size law, the seven key types, the part colours, the three layouts, and the parametric mesh builders. |
 | `core.js` | Layout engine (slot arithmetic, validity checks), mesh assembly, STL/ZIP writers, and the Blender Python log generator — which emits `model.js`'s mesh code as Python, so the Blender build and the preview are one model. Also loadable from node. |
 | `index.html` | The app: drag-and-drop palette, period editor, keyboard strip, WebGL preview, export. |
@@ -102,6 +103,42 @@ spine is a replica of the drafted one rather than an idealisation of it. Each
 (half, layer) is built as its own object, matching the sandbox's own
 decomposition of `<kind> type Spine - A` / `- B`.
 
+### The channel and the mounting holes
+
+The spine is not a plain slab, and its holes are **not rectangles**. Both
+features are read straight out of `<kind> type Spine - A` / `- B`:
+
+**The PCB channel.** The underside of each half is slotted end to end, open at
+both x ends, leaving a 1.40005 mm wall at the front and the back:
+
+| half | y band | z band |
+|---|---|---|
+| A | −8.44702 → −1.40005 | 0 → 2.911096 |
+| B | −8.44696 → −1.39999 | 0 → 2.911096 |
+
+That is where the AKM320 board sits. It is one continuous slot per half, not
+three wide through-holes — an earlier reading of the sheet had it as the
+latter, and that is now corrected.
+
+**The 16 mounting holes** — eight per half — are **obrounds**: a 32-segment
+circle cut at ±90° with the two halves held 1.0 mm apart along x and closed
+with tangent lines top and bottom. Thirty-four points, rounded ends, flat
+sides. There are exactly two bores in the sandbox:
+
+| bore | radius | size | where |
+|---|---|---|---|
+| lower | 1.889789 | 4.779578 × 3.779578 | the layer that carries the channel, from z = 2.911096 up |
+| upper | 1.619818 | 4.239636 × 3.239636 | every layer stacked above it, full height |
+
+so the bore steps in by 0.269971 mm at the first layer seam. A one-type spine
+has no seam and therefore only the lower bore, exactly as `One type Spine - A`
+/ `- B` is drawn. The holes bottom out on the channel ceiling — they open
+straight into it, so none of them is a blind counterbore.
+
+Centres are stored per half **and per bore**, verbatim, because the drafted
+upper bores do not sit dead on top of the lower ones; they wander by up to
+0.008 mm and the app reproduces that rather than averaging it away.
+
 ---
 
 ## The size law
@@ -160,6 +197,38 @@ The 17 and 19 sheets are drawn starting on F; the 15 sheet starts on C. The
 **Start on** control rotates which white key lands on period slot 0.
 
 ---
+
+## The keys are the drafted keys
+
+Key geometry is not modelled analytically and never was worth modelling
+analytically. Every key in the 15, 17 and 19 sheets was measured, and each key
+type is stored once in `profiles.js` as a vertex/face profile in which every
+vertex carries
+
+```
+x = alpha + beta * width        (x from the key's left edge)
+y, z                            (invariant with scale)
+```
+
+`beta = 0` pins a feature to the left edge, `1` to the right edge, `0.5` to the
+centreline. The drafted keys use exactly those three plus a quarter — the
+0.65 / 0.99 / 1.0 / 1.55 mm edge detailing is edge-pinned and does **not**
+scale, while the interior rides the centre. `alpha` and `beta` are least-squares
+fits across every width the sheets draw the key at, so a single profile
+reproduces all of them and interpolates sensibly between and beyond.
+
+**Whites carry one profile per neighbour context.** The drafted whites rib
+differently depending on which slots sit either side of them and how those
+slots are biased: three internal ribs when both neighbours are occupied, two
+when one is empty, and the whole rib group shifts with the left slot. The
+sheets draw nine of the sixteen possible contexts; a design that asks for one
+they never drew borrows the closest drafted white (occupancy first, then the
+nearer bias) and the inspector says so.
+
+The two left-handed categories are not stored at all — `Split Black First` is
+the X-mirror of `Split Black Second` and `Split Gray Second` the X-mirror of
+`Split Grey Second`, both verified against the sheet's own meshes at
+**0.00000 mm**.
 
 ## The seven Key Type Categories
 
@@ -287,17 +356,20 @@ Paste it into Blender's Text Editor and press *Run Script*. Structure:
    (always 32), AKM320 units (always 1), spine type, and all four derived widths.
 3. `TEMPLATE` — the seven-slot period, annotated with slot name, bias and group.
 4. `KEYS` — the 32 keys, left to right: name (prefixed `K00`…`K31` by foot
-   index), type, x centre, width, depth, the left and right edges of the white
-   key's mid section after its neighbours have taken their clearance
-   (`None` on accidentals), world X, world Y (back face), world Z (bottom
-   face), and the X of the sensor foot it sits over.
-5. `SPINE` and `FEET` — halves A and B, layers, screw positions, the 32 foot X
+   index), type, x centre, width, depth, the drafted profile it is instantiated
+   from (for a white, including its neighbour context), world X, world Y (back
+   face), world Z (bottom face), and the X of the sensor foot it sits over.
+   `KEY_PROFILES` below carries those profiles, and only those.
+5. `SPINE` and `FEET` — halves A and B, layers, the PCB channel, the two
+   obround bores and their 16 centres, the 32 foot X
    values. Two asserts guarantee `len(KEYS) == len(FEET) == 32`.
 6. Any warnings on the design, as comments.
 7. `WORLD_X0 / WORLD_Y0 / WORLD_Z0 / ORIGIN` — the world placement, editable in
    place if you want to nudge it.
-8. `build()` — a **line-for-line port of the mesh code in `model.js`**, the
-   same code the WebGL preview runs. There are no proxy boxes and no stand-ins.
+8. `build()` — the same code the WebGL preview runs: the drafted profiles
+   instantiated at this design's widths. There are no proxy boxes, no
+   stand-ins and no analytic approximation of a key.
+
    Output goes into a new collection, `Xenachord Generated`, split into
    `Keys - White` / `Keys - Black` / `Keys - Gray` / `Spine` / `Feet` and
    parented to a `Xenachord Root` empty at the origin: one object per key
@@ -342,27 +414,58 @@ The 17 residual is drift in the sheet itself — its white keys are spaced
 27.7081–27.7090 rather than a clean 27.708333, and that accumulates over 24
 keys. The app uses the exact value.
 
-**The 19 default, part by part, against the sheet.** Every generated object was
-checked axis by axis against its counterpart in the .blend, in the design
-frame:
+**Surface accuracy, key by key.** Not bounding boxes — the real thing: for every
+drafted key, the distance from each of its vertices to the generated surface and
+from each generated vertex to the drafted surface, worst of the two.
 
-| against | objects | worst axis error |
+| layout | keys compared | worst surface deviation |
 |---|---|---|
-| `19 Layout`, first 32 keys | 32 | 0.00040 mm |
-| `Three type Spine - A` / `- B` | 6 | 0.00016 mm |
-| `Feet - A` / `- B` | 32 | 0.00002 mm |
+| 15 | 30 | **0.126 mm** |
+| 17 | 32 | **0.007 mm** |
+| 19 | 32 | **0.003 mm** |
 
-The residual is the sheet's own storage precision, not the model's: the sandbox
-sits ~1400 mm from the world origin, where a float32 vertex coordinate steps in
-0.00012 mm — so 0.0004 mm is about three of those steps. Built on the origin,
-as the default `model centre` mode does, the generated model is the more exact
-of the two.
+All of it inside 0.2 mm; two of the three layouts are inside 0.01 mm.
 
-The generated *meshes* are parametric reconstructions, not vertex copies: the
-outer envelope, top slope, nose ramp, side draft, wall thickness, tongue and
-foot datum are all exact, while the hand-modelled interior detailing of the
-originals is simplified. For the originals' own vertices, set
-`USE_BLEND_CATEGORIES = True` in the log.
+The 0.126 mm is not an approximation error — it is a disagreement between the
+sheets themselves. The 15 sheet's `Split Black Second` is missing an edge loop
+that the 17 and 19 ones have, at y = 22.57, z = 5.77. One profile cannot have
+that loop and not have it; the profile keeps it, so the 15 layout differs there
+by the height of the loop. Every other key in every layout is inside 0.02 mm.
+
+(The 15 sheet is also missing the split pair in its slot 1 — two keys the
+pattern calls for that were never drawn. The generator places them; they are
+reported as unmatched rather than silently paired with a neighbour.)
+
+**Spine and feet.** Not bounding boxes either — surface distance, measured in
+Blender against `One / Two / Three type Spine - A`/`- B` and `Feet - A`/`- B`,
+for every one of the three spine types:
+
+| | worst drafted vertex → generated surface |
+|---|---|
+| half A | **0.011 mm** |
+| half B | **0.000133 mm** |
+| feet | 0.00002 mm |
+
+Half B's 0.000133 mm is the sheet's own storage precision — the sandbox sits
+~1400 mm from the world origin, where a float32 vertex coordinate steps in
+0.00012 mm. Half A's 0.011 mm is the levelling: its layer faces are very
+slightly tilted, and `model.js` stores one z per face. Built on the origin, as
+the default `model centre` mode does, the generated model is the more exact of
+the two.
+
+Going the other way, a generated boundary vertex is at most **0.047 mm** from
+the drafted surface, and every one of those sits on an obround's tangent line.
+The sandbox's own rings omit one of the two tangent vertices — on the left in
+some objects and on the right in others — so the drafted hole is a hair
+narrower there, inconsistently. The app draws the symmetric obround.
+
+(For the record: modelling the holes as axis-aligned rectangles, which is what
+this app did before, put the worst drafted vertex **3.394 mm** off the
+generated surface.)
+
+`USE_BLEND_CATEGORIES = True` in the log still duplicates the sandbox's own
+objects, but it is no longer more accurate than building from the profiles —
+within the numbers above, it is the same geometry.
 
 ---
 
