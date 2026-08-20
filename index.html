@@ -21,7 +21,36 @@
   #gl{position:absolute;inset:0;width:100%;height:100%;display:block;
       cursor:grab;touch-action:none}
   #gl:active{cursor:grabbing}
-  .viewbar{position:absolute;top:10px;right:12px;display:flex;gap:6px}
+  .viewbar{position:absolute;top:10px;right:12px;display:flex;gap:5px;flex-wrap:wrap;
+    justify-content:flex-end;max-width:330px}
+  .viewbar button{background:rgba(30,31,37,.82);backdrop-filter:blur(4px)}
+  /* ---------- viewer overlay ---------- */
+  #viewbar2{position:absolute;left:12px;bottom:12px;display:flex;align-items:center;
+    gap:12px;background:rgba(30,31,37,.86);backdrop-filter:blur(4px);
+    border:1px solid var(--line);border-radius:8px;padding:7px 11px;font-size:11px}
+  #viewbar2 .grp{display:flex;align-items:center;gap:7px}
+  #viewbar2 .sep{width:1px;height:20px;background:var(--line)}
+  .vis{display:flex;align-items:center;gap:4px;cursor:pointer;user-select:none;color:var(--dim)}
+  .vis input{accent-color:var(--accent);margin:0}
+  .vis .dot{width:9px;height:9px;border-radius:2px;border:1px solid rgba(0,0,0,.5)}
+  .vis.on{color:var(--text)}
+  #explode{width:104px;accent-color:var(--accent)}
+  #inspect{position:absolute;right:12px;bottom:12px;width:268px;
+    background:rgba(30,31,37,.92);backdrop-filter:blur(4px);
+    border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:11px;
+    display:none;line-height:1.55}
+  #inspect.on{display:block}
+  #inspect h4{margin:0 0 5px;font-size:11.5px;color:var(--accent);
+    display:flex;justify-content:space-between;align-items:center}
+  #inspect h4 b{color:var(--text);font-weight:600}
+  #inspect .x{cursor:pointer;color:var(--dim);font-weight:400}
+  #inspect table{width:100%;border-collapse:collapse}
+  #inspect td{padding:1px 0;vertical-align:top}
+  #inspect td:first-child{color:var(--dim);padding-right:8px;white-space:nowrap}
+  #inspect td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+  #camread{position:absolute;left:12px;top:12px;color:var(--dim);font-size:10.5px;
+    background:rgba(30,31,37,.7);border-radius:5px;padding:3px 7px;
+    font-variant-numeric:tabular-nums;pointer-events:none}
   h1{font-size:15px;margin:2px 0 2px}
   h1 small{color:var(--dim);font-weight:400}
   .sub{color:var(--dim);font-size:11.5px;margin:0 0 12px}
@@ -38,6 +67,9 @@
   .btns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px}
   .btns .wide{grid-column:1/-1}
   .hint{color:var(--dim);font-size:10.5px;margin-top:6px}
+  .fixed-note{color:var(--dim);font-size:10.5px;margin:8px 0 0;padding:5px 7px;
+    border-left:2px solid var(--accent);background:rgba(111,183,255,.07);border-radius:0 4px 4px 0}
+  .fixed-note b{color:var(--text)}
 
   /* ---------- key type palette ---------- */
   #palette{display:grid;grid-template-columns:1fr;gap:5px;margin-top:4px}
@@ -84,6 +116,7 @@
   .kb-m{position:absolute;border-radius:2px;cursor:pointer;border:1px solid rgba(0,0,0,.5)}
   .kb-m.b{background:var(--kb)} .kb-m.g{background:var(--kg)}
   .kb-foot{position:absolute;background:#3d5f7d;border-radius:1px;opacity:.9}
+  .kb-foot.half-b{box-shadow:-2px 0 0 var(--accent)}
   .kb-spine{position:absolute;background:#40414a;border-radius:2px}
   .kb-over{outline:2px solid var(--accent)}
 
@@ -113,12 +146,16 @@
       <select id="preset"></select>
       <div class="row">
         <div><label for="scale">Size scale <i>s</i></label>
-          <input id="scale" type="number" min="6" max="40" step="1" value="19"></div>
-        <div><label for="whites">White keys</label>
-          <input id="whites" type="number" min="2" max="90" step="1" value="23"></div>
+          <input id="scale" type="number" min="4" max="40" step="0.25" value="19"></div>
         <div><label for="rot">Start on</label>
           <select id="rot"></select></div>
+        <div><label>&nbsp;</label>
+          <button id="fit-spine" style="width:100%;padding:5px 6px"
+            title="set s so the 32 keys end exactly at the A+B spine">fit to spine</button></div>
       </div>
+      <p class="fixed-note"><b>32 keys, always.</b> One AKM320 — spine half A
+        and half B, 16 sensor feet each. The white-key count is derived from
+        the pattern, never chosen.</p>
       <p class="hint">Widths follow the sheet's size law:
         white = <i>s</i>×1.5416667, accidental = <i>s</i>×0.6916667,
         slot bias δ = <i>s</i>/6, white gap 1.5 mm.</p>
@@ -165,11 +202,25 @@
     <div id="glwrap">
       <canvas id="gl"></canvas>
       <div class="viewbar">
-        <button id="v-top">top</button>
-        <button id="v-front">front</button>
-        <button id="v-iso">iso</button>
+        <button data-view="iso">iso</button>
+        <button data-view="top">top</button>
+        <button data-view="bottom">bottom</button>
+        <button data-view="front">front</button>
+        <button data-view="back">back</button>
+        <button data-view="left">left</button>
+        <button data-view="right">right</button>
+        <button data-view="under">under-iso</button>
         <button id="v-fit">fit</button>
       </div>
+      <div id="camread"></div>
+      <div id="viewbar2">
+        <div class="grp" id="visgrp"></div>
+        <div class="sep"></div>
+        <div class="grp"><span style="color:var(--dim)">separate combs</span>
+          <input id="explode" type="range" min="0" max="60" step="1" value="0">
+          <span id="explodeval" style="color:var(--dim);width:34px">0 mm</span></div>
+      </div>
+      <div id="inspect"></div>
     </div>
     <div id="strip"><div id="stripInner"></div></div>
   </div>
@@ -205,14 +256,19 @@ presetSel.onchange = () => {
   syncInputs(); rebuild();
 };
 $('rot').innerHTML = XM.WHITE_NAMES.map((n,i)=>`<option value="${i}">${n}</option>`).join('');
-$('scale').onchange = () => { design.scale = clampInt($('scale').value,6,40); design.preset=null; syncInputs(); rebuild(); };
-$('whites').onchange = () => { design.whites = clampInt($('whites').value,2,90); design.preset=null; syncInputs(); rebuild(); };
+$('scale').onchange = () => {
+  design.scale = Math.max(4, Math.min(40, +$('scale').value || 19));
+  design.preset=null; syncInputs(); rebuild();
+};
 $('rot').onchange = () => { design.rotation = +$('rot').value; design.preset=null; rebuild(); };
-const clampInt = (v,lo,hi)=>Math.max(lo,Math.min(hi,Math.round(+v||lo)));
+$('fit-spine').onclick = () => {
+  design.scale = Math.round(XD.suggestScale(design, design.scale) * 100) / 100;
+  design.preset=null; syncInputs(); rebuild();
+  toast(`size scale set to ${design.scale} — 32 keys now end at the spine`);
+};
 
 function syncInputs(){
   $('scale').value = design.scale;
-  $('whites').value = design.whites;
   $('rot').value = ((design.rotation|0)%7+7)%7;
   presetSel.value = design.preset || '';
 }
@@ -313,27 +369,25 @@ function buildStrip(){
   // y in mm from the spine front; the strip draws y downward from the top
   const Y = mm => 14 + mm*1.5;
 
-  // spine
-  for (let u=0; u<L.nUnits; u++){
-    const off = u*XM.SPINE.unitPitch;
-    for (const h of [XM.SPINE.halfA, XM.SPINE.halfB]){
-      const d = document.createElement('div'); d.className='kb-spine';
-      d.style.left = X(h.x0+off)+'px'; d.style.width = ((h.x1-h.x0)*PX)+'px';
-      d.style.top = Y(XM.SPINE.yBack)+'px';
-      d.style.height = (XM.SPINE.depth*1.5)+'px';
-      d.title = 'spine unit '+(u+1);
-      inner.appendChild(d);
-    }
+  // spine — half A and half B, and only ever these two
+  for (const [nm,h] of [['A',XM.SPINE.halfA],['B',XM.SPINE.halfB]]){
+    const d = document.createElement('div'); d.className='kb-spine';
+    d.style.left = X(h.x0)+'px'; d.style.width = ((h.x1-h.x0)*PX)+'px';
+    d.style.top = Y(XM.SPINE.yBack)+'px';
+    d.style.height = (XM.SPINE.depth*1.5)+'px';
+    d.title = `spine half ${nm} — ${(h.x1-h.x0).toFixed(3)} mm, 16 feet`;
+    inner.appendChild(d);
   }
-  // feet
-  for (const fx of L.feet){
+  // the 32 feet
+  L.feet.forEach((fx,i)=>{
     const d = document.createElement('div'); d.className='kb-foot';
+    if (i===XM.FEET_PER_HALF) d.classList.add('half-b');
     d.style.left = X(fx-XM.FOOT.w/2)+'px'; d.style.width=(XM.FOOT.w*PX)+'px';
     d.style.top = Y(XM.FOOT.yCentre-XM.FOOT.d/2)+'px';
     d.style.height = (XM.FOOT.d*1.5)+'px';
-    d.title = 'sensor foot @ x '+fx.toFixed(3);
+    d.title = `foot ${i} (half ${i<XM.FEET_PER_HALF?'A':'B'}) @ x ${fx.toFixed(5)}`;
     inner.appendChild(d);
-  }
+  });
   // whites
   for (const w of L.whites){
     const d = document.createElement('div'); d.className='kb-white';
@@ -391,18 +445,22 @@ function rebuild(){
   const c = {};
   for (const n of L.notes) c[n.type] = (c[n.type]||0)+1;
   st.innerHTML =
-    `<b>${L.notesEq}</b> notes per equave · <b>${L.total}</b> keys · ` +
-    `<b>${L.whites.length}</b> white<br>` +
+    `<b>${L.total}</b> keys on <b>${L.feet.length}</b> sensor feet ` +
+    `(16 on half A, 16 on half B)<br>` +
+    `<b>${L.notesEq}</b> notes per equave · <b>${L.whites.length}</b> white · ` +
+    `${(L.total/L.notesEq).toFixed(2)} equaves<br>` +
     `white ${L.wW.toFixed(4)} mm @ pitch ${L.wP.toFixed(5)} · ` +
     `accidental ${L.aW.toFixed(4)} mm · δ ${L.delta.toFixed(5)}<br>` +
-    `span <b>${L.width.toFixed(1)} mm</b> · ` +
-    `<b>${L.nUnits}</b> AKM320 unit${L.nUnits>1?'s':''} ` +
-    `(${L.feet.length} feet) · <b>${L.spineKind}</b> type spine<br>` +
+    `span <b>${L.width.toFixed(1)} mm</b> vs spine ${XM.SPINE.halfB.x1.toFixed(1)} mm ` +
+    `(${L.overhang>0?'+':''}${L.overhang.toFixed(1)}) · <b>${L.spineKind}</b> type spine<br>` +
+    `widest key→foot reach <b>${L.footDrift.toFixed(2)} mm</b> (key ${L.footDriftAt}) ` +
+    `<span title="Split pairs share one X and still reach two feet 11.3 mm apart. Closing that gap is the bridge edge loop, which is out of scope.">ⓘ</span><br>` +
     Object.keys(c).map(k=>`${c[k]}× ${k}`).join(' · ');
   wn.innerHTML = L.warnings.length
     ? L.warnings.map(w=>`<div class="warning">${w}</div>`).join('')
     : '<div class="okline">✓ geometry consistent with the drafting sandbox</div>';
 
+  picked=null; $('inspect').classList.remove('on');
   buildPeriod(); buildStrip(); uploadMeshes();
   if (rebuild._w !== L.width) { rebuild._w = L.width; fit(); } else draw();
 }
@@ -451,23 +509,46 @@ const COLORS = {
   white:[0.95,0.95,0.93], black:[0.16,0.16,0.19], gray:[0.55,0.55,0.58],
   spine:[0.30,0.31,0.36], feet:[0.24,0.42,0.60]
 };
-const VS = `attribute vec3 aPos;attribute vec3 aNrm;uniform mat4 uMVP;varying vec3 vN;
-void main(){vN=aNrm;gl_Position=uMVP*vec4(aPos,1.0);}`;
-const FS = `precision mediump float;uniform vec3 uC;varying vec3 vN;
-void main(){vec3 n=normalize(vN);
- float d1=max(dot(n,normalize(vec3(0.35,-0.5,0.8))),0.0);
- float d2=max(dot(n,normalize(vec3(-0.5,0.6,0.2))),0.0);
- gl_FragColor=vec4(uC*(0.30+0.60*d1+0.20*d2),1.0);}`;
-let locPos,locNrm,locMVP,locC;
+const PART_LABEL = { white:'white', black:'black', gray:'gray', spine:'spine', feet:'feet' };
+/* how far each comb lifts when "separate combs" is dragged, in units of the
+   slider value.  Order is the assembly order of the spine layers.            */
+const EXPLODE_ORDER = { feet:-0.7, spine:0, gray:1, black:2, white:3 };
+const visible = { white:true, black:true, gray:true, spine:true, feet:true };
+let explode = 0;
+let picked = null, pickBuf = null;
+
+/* ---- shaders: two-sided, view-derived, so undersides are lit properly ---- */
+const VS = `attribute vec3 aPos;attribute vec3 aNrm;
+uniform mat4 uMVP;uniform vec3 uOfs;
+varying vec3 vN;varying vec3 vP;
+void main(){vec3 p=aPos+uOfs;vN=aNrm;vP=p;gl_Position=uMVP*vec4(p,1.0);}`;
+const FS = `precision mediump float;
+uniform vec3 uC;uniform vec3 uEye;
+varying vec3 vN;varying vec3 vP;
+void main(){
+ vec3 n=normalize(vN);
+ vec3 v=normalize(uEye-vP);
+ /* flip the normal toward the camera: geometry-based two-sided shading, so a
+    face seen from underneath is lit, not black, whatever its winding.        */
+ if(dot(n,v)<0.0) n=-n;
+ float key=max(dot(n,normalize(vec3(0.35,-0.5,0.8))),0.0);
+ float fill=max(dot(n,normalize(vec3(-0.5,0.6,0.2))),0.0);
+ float head=max(dot(n,v),0.0);
+ gl_FragColor=vec4(uC*(0.26+0.46*key+0.16*fill+0.22*head),1.0);}`;
+let locPos,locNrm,locMVP,locC,locEye,locOfs;
 if (gl){
-  const sh=(t,s)=>{const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);
+  const sh=(t,src)=>{const o=gl.createShader(t);gl.shaderSource(o,src);gl.compileShader(o);
     if(!gl.getShaderParameter(o,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(o));return o;};
   const pr=gl.createProgram();
   gl.attachShader(pr,sh(gl.VERTEX_SHADER,VS)); gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,FS));
   gl.linkProgram(pr); gl.useProgram(pr);
   locPos=gl.getAttribLocation(pr,'aPos'); locNrm=gl.getAttribLocation(pr,'aNrm');
   locMVP=gl.getUniformLocation(pr,'uMVP'); locC=gl.getUniformLocation(pr,'uC');
+  locEye=gl.getUniformLocation(pr,'uEye'); locOfs=gl.getUniformLocation(pr,'uOfs');
   gl.enable(gl.DEPTH_TEST);
+  /* deliberately NO face culling and NO ground plane — the model can be
+     inspected from any angle, including from directly underneath.           */
+  gl.disable(gl.CULL_FACE);
 } else {
   const m=document.createElement('div');
   m.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#9a9ba3';
@@ -497,7 +578,30 @@ function uploadMeshes(){
   for(const k of Object.keys(buffers)) gl.deleteBuffer(buffers[k].buf);
   buffers={};
   for(const k of Object.keys(meshes)) if(meshes[k].length) buffers[k]=meshToBuffer(meshes[k]);
+  if(pickBuf){ gl.deleteBuffer(pickBuf.buf); pickBuf=null; }
 }
+
+/* ---- visibility toggles ---- */
+function buildVisToggles(){
+  const g=$('visgrp'); g.innerHTML='';
+  for(const k of ['white','black','gray','spine','feet']){
+    const lab=document.createElement('label');
+    lab.className='vis'+(visible[k]?' on':'');
+    const c=COLORS[k].map(v=>Math.round(v*255)).join(',');
+    lab.innerHTML=`<input type="checkbox" ${visible[k]?'checked':''}>`+
+      `<span class="dot" style="background:rgb(${c})"></span>${PART_LABEL[k]}`;
+    lab.querySelector('input').onchange=e=>{
+      visible[k]=e.target.checked; lab.classList.toggle('on',visible[k]); draw(); };
+    g.appendChild(lab);
+  }
+}
+$('explode').oninput=e=>{
+  explode=+e.target.value;
+  $('explodeval').textContent=explode+' mm';
+  draw();
+};
+
+/* ---- matrix helpers ---- */
 function mat4mul(a,b){const o=new Float32Array(16);
   for(let c=0;c<4;c++)for(let r=0;r<4;r++)
     o[c*4+r]=a[r]*b[c*4]+a[4+r]*b[c*4+1]+a[8+r]*b[c*4+2]+a[12+r]*b[c*4+3];
@@ -505,65 +609,258 @@ function mat4mul(a,b){const o=new Float32Array(16);
 function persp(f0,as,n,fq){const f=1/Math.tan(f0/2),nf=1/(n-fq);
   return new Float32Array([f/as,0,0,0, 0,f,0,0, 0,0,(fq+n)*nf,-1, 0,0,2*fq*n*nf,0]);}
 const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
+const mul=(a,k)=>[a[0]*k,a[1]*k,a[2]*k];
 const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 const norm=a=>{const l=Math.hypot(a[0],a[1],a[2])||1;return[a[0]/l,a[1]/l,a[2]/l];};
 function lookAt(e,t,u){const z=norm(sub(e,t)),x=norm(cross(u,z)),y=cross(z,x);
   return new Float32Array([x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0,
     -dot(x,e),-dot(y,e),-dot(z,e),1]);}
+
+/* ---- camera ----
+   pitch is free over the whole sphere except the two poles: +PLIM looks
+   straight down, -PLIM looks straight up from underneath.  There is no ground
+   plane and no lower clamp — you can orbit right under the instrument.     */
+const FOV = 0.7;
+const PLIM = Math.PI/2 - 0.0015;
 const cam={yaw:0,pitch:0.8,dist:420,tx:180,ty:42,tz:4};
+
+function camBasis(){
+  const cp=Math.cos(cam.pitch), sp=Math.sin(cam.pitch);
+  const tgt=[cam.tx,cam.ty,cam.tz];
+  const eye=[cam.tx+cam.dist*Math.sin(cam.yaw)*cp,
+             cam.ty+cam.dist*Math.cos(cam.yaw)*cp,
+             cam.tz+cam.dist*sp];
+  const fwd=norm(sub(tgt,eye));
+  // world up flips sign past the poles; PLIM keeps us inside, so +Z is safe
+  const right=norm(cross(fwd,[0,0,1]));
+  const up=cross(right,fwd);
+  return {eye,tgt,fwd,right,up};
+}
 function fit(){ if(!L) return;
   const w = canvas.clientWidth||1200, h = canvas.clientHeight||700;
-  const fov = 0.7, aspect = w/h, tn = Math.tan(fov/2);
+  const aspect = w/h, tn = Math.tan(FOV/2);
   cam.tx = L.width/2; cam.ty = 38; cam.tz = 4;
   const halfW = (L.width + 60)/2, halfH = (95 + 40)/2;
-  cam.dist = Math.max(halfW/(aspect*tn), halfH/tn, 120);
+  cam.dist = Math.max(halfW/(aspect*tn), halfH/tn, 60);
   draw(); }
-$('v-top').onclick=()=>{cam.yaw=0;cam.pitch=1.55;draw();};
-$('v-front').onclick=()=>{cam.yaw=0;cam.pitch=0.10;draw();};
-$('v-iso').onclick=()=>{cam.yaw=0.25;cam.pitch=0.72;draw();};
+
+const VIEWS = {
+  iso:    {yaw: 0.28, pitch: 0.70},
+  top:    {yaw: 0.00, pitch: PLIM},
+  bottom: {yaw: 0.00, pitch:-PLIM},   // straight up at the underside
+  front:  {yaw: 0.00, pitch: 0.00},
+  back:   {yaw: Math.PI, pitch: 0.00},
+  left:   {yaw:-Math.PI/2, pitch: 0.00},
+  right:  {yaw: Math.PI/2, pitch: 0.00},
+  under:  {yaw: 0.28, pitch:-0.62}    // three-quarter view from below
+};
+document.querySelectorAll('button[data-view]').forEach(b=>{
+  b.onclick=()=>{ const v=VIEWS[b.dataset.view];
+    cam.yaw=v.yaw; cam.pitch=v.pitch; draw(); };
+});
 $('v-fit').onclick=fit;
+
+function drawPart(b, colour, ofs){
+  gl.bindBuffer(gl.ARRAY_BUFFER,b.buf);
+  gl.enableVertexAttribArray(locPos); gl.vertexAttribPointer(locPos,3,gl.FLOAT,false,24,0);
+  gl.enableVertexAttribArray(locNrm); gl.vertexAttribPointer(locNrm,3,gl.FLOAT,false,24,12);
+  gl.uniform3fv(locC, colour);
+  gl.uniform3fv(locOfs, ofs);
+  gl.drawArrays(gl.TRIANGLES,0,b.n);
+}
 function draw(){
-  if(!gl||!buffers.white&&!buffers.spine) return;
+  if(!gl||!Object.keys(buffers).length) return;
   const w=canvas.clientWidth,h=canvas.clientHeight;
   if(canvas.width!==w*devicePixelRatio||canvas.height!==h*devicePixelRatio){
     canvas.width=w*devicePixelRatio; canvas.height=h*devicePixelRatio; }
   gl.viewport(0,0,canvas.width,canvas.height);
   gl.clearColor(0.075,0.08,0.095,1);
   gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
-  const eye=[cam.tx+cam.dist*Math.sin(cam.yaw)*Math.cos(cam.pitch),
-             cam.ty+cam.dist*Math.cos(cam.yaw)*Math.cos(cam.pitch),
-             cam.tz+cam.dist*Math.sin(cam.pitch)];
-  const mvp=mat4mul(persp(0.7,w/h,1,6000),lookAt(eye,[cam.tx,cam.ty,cam.tz],[0,0,1]));
+  const B=camBasis();
+  const mvp=mat4mul(persp(FOV,w/h,0.5,20000),lookAt(B.eye,B.tgt,[0,0,1]));
   gl.uniformMatrix4fv(locMVP,false,mvp);
+  gl.uniform3fv(locEye, B.eye);
   for(const [k,b] of Object.entries(buffers)){
-    gl.bindBuffer(gl.ARRAY_BUFFER,b.buf);
-    gl.enableVertexAttribArray(locPos); gl.vertexAttribPointer(locPos,3,gl.FLOAT,false,24,0);
-    gl.enableVertexAttribArray(locNrm); gl.vertexAttribPointer(locNrm,3,gl.FLOAT,false,24,12);
-    gl.uniform3fv(locC, COLORS[k]||[1,0,1]);
-    gl.drawArrays(gl.TRIANGLES,0,b.n);
+    if(!visible[k]) continue;
+    drawPart(b, COLORS[k]||[1,0,1], [0,0,(EXPLODE_ORDER[k]||0)*explode]);
   }
+  // highlight pass: nudged toward the camera so it always wins the depth test
+  if(picked && pickBuf && visible[picked.part]){
+    const z=(EXPLODE_ORDER[picked.part]||0)*explode;
+    const n=mul(norm(sub(B.eye,B.tgt)), Math.max(0.25, cam.dist*0.0016));
+    drawPart(pickBuf, [0.44,0.72,1.0], [n[0],n[1],z+n[2]]);
+  }
+  $('camread').textContent =
+    `az ${(cam.yaw*180/Math.PI).toFixed(0).padStart(4)}°  ` +
+    `el ${(cam.pitch*180/Math.PI).toFixed(0).padStart(4)}°  ` +
+    `${cam.dist.toFixed(0)} mm` + (cam.pitch<0 ? '   · viewing from below' : '');
 }
+
+/* ---- orbit / pan / zoom : screen-space pan works from any angle ---- */
 let drag=null;
-canvas.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,pan:e.shiftKey||e.button===2};
-  canvas.setPointerCapture(e.pointerId);});
+canvas.addEventListener('pointerdown',e=>{
+  drag={x:e.clientX,y:e.clientY,x0:e.clientX,y0:e.clientY,
+        pan:e.shiftKey||e.button===1||e.button===2,moved:false};
+  canvas.setPointerCapture(e.pointerId);
+});
 canvas.addEventListener('pointermove',e=>{
   if(!drag)return;
   const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
   drag.x=e.clientX; drag.y=e.clientY;
-  if(drag.pan){ const s=cam.dist/700;
-    cam.tx-=dx*s*Math.cos(cam.yaw); cam.ty+=dx*s*Math.sin(cam.yaw); cam.tz+=dy*s; }
-  else { cam.yaw+=dx*0.008; cam.pitch=Math.max(0.03,Math.min(1.56,cam.pitch+dy*0.008)); }
+  if(Math.abs(e.clientX-drag.x0)+Math.abs(e.clientY-drag.y0)>3) drag.moved=true;
+  if(drag.pan){
+    const B=camBasis();
+    const s=cam.dist*Math.tan(FOV/2)*2/Math.max(canvas.clientHeight,1);
+    const shift=add(mul(B.right,-dx*s), mul(B.up, dy*s));
+    cam.tx+=shift[0]; cam.ty+=shift[1]; cam.tz+=shift[2];
+  } else {
+    cam.yaw+=dx*0.008;
+    // no lower clamp: -PLIM is straight up from underneath the instrument
+    cam.pitch=Math.max(-PLIM,Math.min(PLIM,cam.pitch+dy*0.008));
+  }
   draw();
 });
-canvas.addEventListener('pointerup',()=>{drag=null;});
+canvas.addEventListener('pointerup',e=>{
+  const wasDrag=drag;
+  drag=null;
+  if(wasDrag && !wasDrag.moved && e.button===0) pickAt(e);
+});
 canvas.addEventListener('wheel',e=>{e.preventDefault();
-  cam.dist=Math.max(40,Math.min(4000,cam.dist*Math.exp(e.deltaY*0.0012))); draw();},{passive:false});
+  cam.dist=Math.max(8,Math.min(20000,cam.dist*Math.exp(e.deltaY*0.0012))); draw();},{passive:false});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
+canvas.addEventListener('dblclick',()=>{ picked=null; $('inspect').classList.remove('on'); draw(); });
 new ResizeObserver(draw).observe(canvas);
 
+/* ===================== click to inspect ===================== */
+function keyBoxes(){
+  if(!L) return [];
+  const out=[];
+  const W=XM.KEY_TYPES['Full Sized White'];
+  for(const w of L.whites) out.push({
+    part:'white', kind:'white', ref:w, type:w.type,
+    x0:w.x0, x1:w.x1, y0:0, y1:W.depth, z0:XM.Z.whiteBottom, z1:XM.Z.whiteTop });
+  for(const sl of L.slots) for(const m of sl.members) out.push({
+    part:m.spec.layer, kind:'acc', ref:m, slot:sl, type:m.type,
+    x0:m.x0, x1:m.x1, y0:0, y1:m.spec.depth, z0:XM.Z.accBottom, z1:m.spec.peakZ });
+  L.feet.forEach((fx,i)=>out.push({
+    part:'feet', kind:'foot', index:i, type:'sensor foot',
+    x0:fx-XM.FOOT.w/2, x1:fx+XM.FOOT.w/2,
+    y0:XM.FOOT.yCentre-XM.FOOT.d/2, y1:XM.FOOT.yCentre+XM.FOOT.d/2,
+    z0:XM.FOOT.z-0.4, z1:XM.FOOT.z+0.4 }));
+  return out;
+}
+function rayBox(o,d,b,zo){
+  let tmin=-Infinity, tmax=Infinity;
+  const lo=[b.x0,b.y0,b.z0+zo], hi=[b.x1,b.y1,b.z1+zo];
+  for(let i=0;i<3;i++){
+    if(Math.abs(d[i])<1e-9){ if(o[i]<lo[i]||o[i]>hi[i]) return null; continue; }
+    let t1=(lo[i]-o[i])/d[i], t2=(hi[i]-o[i])/d[i];
+    if(t1>t2){const t=t1;t1=t2;t2=t;}
+    tmin=Math.max(tmin,t1); tmax=Math.min(tmax,t2);
+    if(tmin>tmax) return null;
+  }
+  return tmax<0?null:(tmin>=0?tmin:tmax);
+}
+function pickAt(e){
+  if(!gl||!L) return;
+  const r=canvas.getBoundingClientRect();
+  const px=e.clientX-r.left, py=e.clientY-r.top;
+  const ndx=(2*px/r.width-1), ndy=(1-2*py/r.height);
+  const B=camBasis(), tn=Math.tan(FOV/2), aspect=r.width/r.height;
+  const dir=norm(add(B.fwd, add(mul(B.right,ndx*tn*aspect), mul(B.up,ndy*tn))));
+  let best=null, bt=Infinity;
+  for(const b of keyBoxes()){
+    if(!visible[b.part]) continue;
+    const zo=(EXPLODE_ORDER[b.part]||0)*explode;
+    const t=rayBox(B.eye,dir,b,zo);
+    if(t!=null && t<bt){ bt=t; best=b; }
+  }
+  picked=best;
+  if(pickBuf){ gl.deleteBuffer(pickBuf.buf); pickBuf=null; }
+  if(best){
+    let tris=null;
+    if(best.kind==='white') tris=XM.buildWhite(best.ref.cx,best.ref.w,
+      {shL:best.ref.shL,shR:best.ref.shR});
+    else if(best.kind==='acc') tris=XM.buildAccidental(best.ref.cx,best.ref.w,best.ref.spec);
+    else { tris=[]; XM.pushBox(tris,best.x0,best.x1,best.y0,best.y1,best.z0,best.z1); }
+    if(tris.length) pickBuf=meshToBuffer(tris);
+  }
+  showInspect(best);
+  draw();
+}
+const mm=(v,n)=>v==null?'—':Number(v).toFixed(n==null?4:n);
+function showInspect(b){
+  const box=$('inspect');
+  if(!b){ box.classList.remove('on'); return; }
+  const W=XM.WORLD;
+  const rows=[];
+  const R=(k,v)=>rows.push(`<tr><td>${k}</td><td>${v}</td></tr>`);
+  let title, sub;
+  if(b.kind==='foot'){
+    title='Sensor foot'; sub='#'+b.index;
+    const cx=(b.x0+b.x1)/2;
+    R('centre x', mm(cx,5));
+    R('pad', `${mm(XM.FOOT.w,3)} × ${mm(XM.FOOT.d,3)}`);
+    R('y centre', mm(XM.FOOT.yCentre,5));
+    R('z', mm(XM.FOOT.z,5));
+    R('spine half', b.index < XM.FEET_PER_HALF ? 'A' : 'B');
+    R('index on half', b.index % XM.FEET_PER_HALF);
+    if(b.index>0) R('step from prev', mm(cx-((keyBoxes().filter(q=>q.kind==='foot')[b.index-1].x0+keyBoxes().filter(q=>q.kind==='foot')[b.index-1].x1)/2),5));
+    R('world x', mm(cx+W.x0,4));
+  } else {
+    const r=b.ref, spec=XM.KEY_TYPES[b.type];
+    title=b.type;
+    sub = b.kind==='white' ? `white ${r.i} · ${r.name}`
+                           : `slot ${b.slot.i} · ${b.slot.name}`;
+    R('centre x', mm(r.cx,5));
+    R('width', mm(r.w,5));
+    R('depth (y)', mm(spec.depth,4));
+    R('z range', `${mm(b.z0,5)} → ${mm(b.z1,5)}`);
+    R('spine layer', spec.layer);
+    if(b.kind==='acc'){
+      R('slot bias', (XM.SLOT_BIAS[b.slot.period]>0?'+δ':XM.SLOT_BIAS[b.slot.period]<0?'−δ':'0')
+        + ` (${mm(XM.SLOT_BIAS[b.slot.period]*L.delta,4)})`);
+      R('slot group', XM.SLOT_GROUP[b.slot.period]);
+      if(spec.pairRole) R('pair role', spec.pairRole);
+      if(b.slot.overridden) R('', '<span style="color:var(--accent)">slot overridden</span>');
+    }
+    R('note #', r.noteIndex);
+    R('degree', r.degree + ' of ' + L.notesEq);
+    if(r.foot!=null){
+      R('sensor foot x', mm(r.foot,5));
+      R('key − foot', mm(r.cx-r.foot,4));
+    } else R('sensor foot', '<span style="color:var(--warn)">none</span>');
+    R('world x', mm(r.cx+W.x0,4));
+    R('world y back', mm(W.y0,4));
+    R('world z bottom', mm(b.z0+W.z0,5));
+  }
+  box.innerHTML = `<h4><b>${title}</b><span class="x" title="close">✕</span></h4>` +
+    `<div style="color:var(--dim);margin:-3px 0 5px">${sub}</div>` +
+    `<table>${rows.join('')}</table>`;
+  box.querySelector('.x').onclick=()=>{ picked=null; box.classList.remove('on'); draw(); };
+  box.classList.add('on');
+}
+
+/* keyboard: F fit, B bottom, T top, arrows orbit */
+window.addEventListener('keydown',e=>{
+  if(/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+  const step=e.shiftKey?0.02:0.09;
+  if(e.key==='f'||e.key==='F') fit();
+  else if(e.key==='b'||e.key==='B'){ cam.pitch=-PLIM; draw(); }
+  else if(e.key==='t'||e.key==='T'){ cam.pitch= PLIM; draw(); }
+  else if(e.key==='ArrowLeft'){ cam.yaw-=step; draw(); }
+  else if(e.key==='ArrowRight'){ cam.yaw+=step; draw(); }
+  else if(e.key==='ArrowUp'){ cam.pitch=Math.min(PLIM,cam.pitch+step); draw(); }
+  else if(e.key==='ArrowDown'){ cam.pitch=Math.max(-PLIM,cam.pitch-step); draw(); }
+  else if(e.key==='Escape'){ picked=null; $('inspect').classList.remove('on'); draw(); }
+  else return;
+  e.preventDefault();
+});
+
 /* ===================== boot ===================== */
-buildPalette(); syncInputs(); rebuild();
+buildPalette(); buildVisToggles(); syncInputs(); rebuild();
 requestAnimationFrame(()=>{ fit(); requestAnimationFrame(fit); });
 </script>
 </body>

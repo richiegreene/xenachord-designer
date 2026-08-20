@@ -5,9 +5,12 @@
  * All geometry and sizing comes from model.js (XM), which is measured out of
  * Cimbalo_Cromatico_Drafting_Sandbox_Leveling.blend.
  *
+ * THE INSTRUMENT IS FIXED AT 32 KEYS.  One AKM320: spine half A + half B,
+ * 16 sensor feet on each, 32 feet in total, one key per foot, never more.
+ * The white-key count is therefore DERIVED from the pattern, not chosen.
+ *
  * A design is:
  *   scale      the size number s — every width is linear in it
- *   whites     how many white keys the instrument has
  *   rotation   which of the seven period slots white #0 starts on
  *   template   7 entries, each null or an array of key-type names
  *   overrides  per-absolute-slot replacements  { slotIndex: names|null }
@@ -26,7 +29,6 @@
     if (!L) throw new Error('no drafted layout for ' + edo);
     return {
       scale: edo,
-      whites: L.sheetWhites,
       rotation: L.rotation || 0,
       template: L.slots.map(s => (s ? s.slice() : null)),
       overrides: {},
@@ -56,41 +58,68 @@
     const warnings = [];
     const rot = ((design.rotation | 0) % 7 + 7) % 7;
 
-    /* ---- white backbone ---- */
-    const whites = [];
-    for (let i = 0; i < design.whites; i++) {
+    /* ------------------------------------------------------------------
+     * The instrument is one AKM320: 32 sensor feet, therefore EXACTLY 32
+     * keys.  White keys are not a free parameter — they fall out of the
+     * pattern.  Lay notes down left to right (white i, then slot i, then
+     * white i+1, ...) and stop the moment the 32nd note is placed.
+     *
+     * That order is already sorted in x: a slot centre is
+     *   white_i.cx + pitch/2 + bias·δ,
+     * and |bias·δ| ≤ s/6 < pitch/2, so every slot lands strictly between
+     * its two whites.
+     * ------------------------------------------------------------------ */
+    const NOTES = XM.NOTES;
+    const whites = [], slots = [];
+    let placed = 0, cut = null;
+
+    for (let i = 0; placed < NOTES; i++) {
+      const wp = (i + rot) % 7;
       const x0 = i * wP;
       whites.push({
         i, x0, x1: x0 + wW, cx: x0 + wW / 2, w: wW,
-        period: (i + rot) % 7,
-        name: XM.WHITE_NAMES[(i + rot) % 7],
-        type: 'Full Sized White'
+        period: wp, name: XM.WHITE_NAMES[wp], type: 'Full Sized White'
       });
-    }
+      placed++;
+      if (placed >= NOTES) break;
 
-    /* ---- accidental slots ---- */
-    const slots = [];
-    for (let i = 0; i < design.whites - 1; i++) {
       const p = (i + rot) % 7;
       const names = Object.prototype.hasOwnProperty.call(design.overrides, i)
         ? design.overrides[i]
         : design.template[p];
+      const wanted = names || [];
+      if (!wanted.length) {
+        slots.push({
+          i, period: p, cx: whites[i].cx + wP / 2 + XM.SLOT_BIAS[p] * delta,
+          w: aW, names: names ? names.slice() : null, members: [],
+          group: XM.SLOT_GROUP[p], name: XM.SLOT_NAMES[p],
+          overridden: Object.prototype.hasOwnProperty.call(design.overrides, i)
+        });
+        continue;
+      }
+
       const cx = whites[i].cx + wP / 2 + XM.SLOT_BIAS[p] * delta;
-      const members = (names || []).map((n, k) => {
-        const spec = XM.KEY_TYPES[n];
-        if (!spec) throw new Error('unknown key type: ' + n);
-        return {
-          type: n, spec, cx, w: aW,
-          x0: cx - aW / 2, x1: cx + aW / 2,
-          slot: i, ord: k
-        };
-      });
+      const members = [];
+      for (let k = 0; k < wanted.length && placed < NOTES; k++) {
+        const spec = XM.KEY_TYPES[wanted[k]];
+        if (!spec) throw new Error('unknown key type: ' + wanted[k]);
+        members.push({
+          type: wanted[k], spec, cx, w: aW,
+          x0: cx - aW / 2, x1: cx + aW / 2, slot: i, ord: k
+        });
+        placed++;
+      }
+      if (members.length < wanted.length) cut = { slot: i, kept: members.length, wanted: wanted.length };
       slots.push({
         i, period: p, cx, w: aW, names: names ? names.slice() : null,
         members, group: XM.SLOT_GROUP[p], name: XM.SLOT_NAMES[p],
+        truncated: members.length < wanted.length,
         overridden: Object.prototype.hasOwnProperty.call(design.overrides, i)
       });
     }
+    // a trailing empty slot carries no notes and no geometry — drop it
+    while (slots.length && slots[slots.length - 1].i >= whites.length - 1 &&
+           !slots[slots.length - 1].members.length) slots.pop();
 
     /* ---- clearance the accidentals cut out of each white ---- */
     for (const w of whites) {
@@ -117,42 +146,83 @@
         `Slot ${sl.i} (${sl.name}) mixes a full-sized key with a split key.`);
     }
 
-    /* ---- sensors ---- */
+    /* ---- sensors: exactly 32, one per key, no chaining ---- */
     const notesEq = notesPerPeriod(design.template);
     const total = whites.length + slots.reduce((n, sl) => n + sl.members.length, 0);
-    const nUnits = Math.max(1, Math.ceil(
-      (whites.length ? whites[whites.length - 1].x1 : 0) / XM.SPINE.unitPitch));
-    const feet = XM.footCentres(nUnits);
-    if (total > feet.length) warnings.push(
-      `${total} keys but only ${feet.length} sensor feet (${nUnits} AKM320 unit${nUnits > 1 ? 's' : ''}). ` +
-      `Add a unit or shorten the design.`);
+    const feet = XM.footCentres();
 
-    /* ---- assign each note, left to right, to the next free foot ---- */
+    if (cut) warnings.push(
+      `The 32-note limit lands inside slot ${cut.slot} (${XM.SLOT_NAMES[(cut.slot + rot) % 7]}): ` +
+      `${cut.kept} of ${cut.wanted} keys placed. Change the pattern or the rotation if you want a whole slot there.`);
+
+    /* ---- one note per foot, left to right ---- */
     const notes = [];
     for (const w of whites) {
       notes.push({ kind: 'white', ref: w, cx: w.cx, type: w.type });
-      const sl = slots[w.i];
+      const sl = slots.find(q => q.i === w.i);
       if (sl) for (const m of sl.members) notes.push({ kind: 'acc', ref: m, cx: m.cx, type: m.type });
     }
     notes.sort((a, b) => a.cx - b.cx || (a.kind === 'white' ? -1 : 1));
+    let footDrift = 0, footDriftAt = null;
     notes.forEach((n, k) => {
       n.index = k;
-      n.foot = k < feet.length ? feet[k] : null;
+      n.foot = feet[k];
       n.degree = k % notesEq;
       n.equave = Math.floor(k / notesEq);
       n.ref.noteIndex = k;
       n.ref.foot = n.foot;
       n.ref.degree = n.degree;
+      n.ref.half = k < XM.FEET_PER_HALF ? 'A' : 'B';
+      const d = Math.abs(n.cx - n.foot);
+      if (d > footDrift) { footDrift = d; footDriftAt = k; }
     });
+
+    const width = whites.length ? whites[whites.length - 1].x1 : 0;
+    const overhang = width - XM.SPINE.halfB.x1;
+    if (overhang > 0.5) warnings.push(
+      `The 32 keys span ${width.toFixed(1)} mm but the A+B spine ends at ` +
+      `${XM.SPINE.halfB.x1.toFixed(1)} mm — the last ${overhang.toFixed(1)} mm overhangs. ` +
+      `Lower the size scale s to about ${suggestScale(design, s).toFixed(2)}.`);
+    /* NOTE: a large key-to-foot X offset is expected, not an error.  The two
+     * halves of a split pair share one X and still have to reach two adjacent
+     * feet 11.3 mm apart; closing that gap is the bridge edge-loop, which is
+     * deliberately out of scope.  The figure is reported as a statistic. */
 
     const layers = layerCount(design.template, design.overrides);
     const spineKind = layers >= 3 ? 'three' : layers === 2 ? 'two' : 'one';
 
     return {
-      design, whites, slots, notes, feet, nUnits, warnings,
-      wW, wP, aW, delta, notesEq, total, layers, spineKind,
-      width: whites.length ? whites[whites.length - 1].x1 : 0
+      design, whites, slots, notes, feet, warnings,
+      nUnits: XM.UNITS, wW, wP, aW, delta, notesEq, total, layers, spineKind,
+      width, overhang, footDrift, footDriftAt, cut
     };
+  }
+
+  /** how many white keys the 32-note limit yields for this pattern */
+  function whiteCount(design) {
+    const rot = ((design.rotation | 0) % 7 + 7) % 7;
+    let placed = 0, last = 0;
+    for (let i = 0; placed < XM.NOTES; i++) {
+      last = i; placed++;
+      if (placed >= XM.NOTES) break;
+      const names = Object.prototype.hasOwnProperty.call(design.overrides, i)
+        ? design.overrides[i] : design.template[(i + rot) % 7];
+      placed += Math.min((names || []).length, XM.NOTES - placed);
+    }
+    return last + 1;
+  }
+  /** width(s) = 1.5·(n−1) + (37/24)·s·n  — linear, so solvable in closed form */
+  function widthAt(design, s) {
+    const n = whiteCount(design);
+    return (n - 1) * XM.whitePitch(s) + XM.whiteWidth(s);
+  }
+  /** the size scale s at which the 32 keys just reach the end of the A+B spine */
+  function suggestScale(design, s) {
+    const n = whiteCount(design);
+    const b = XM.SIZE.whitePerUnit * n;
+    const a = XM.SIZE.whiteGap * (n - 1);
+    if (Math.abs(b) < 1e-9) return s;
+    return Math.max(1, (XM.SPINE.halfB.x1 - a) / b);
   }
 
   /* ------------------------------------------------------------------ *
@@ -170,10 +240,10 @@
         out[m.spec.layer].push(...t);
       }
     }
-    const spine = XM.buildSpine(L.nUnits, L.layers);
+    const spine = XM.buildSpine(L.layers);
     out.spine = [];
     for (const k of Object.keys(spine)) out.spine.push(...spine[k]);
-    out.feet = XM.buildFeet(L.nUnits);
+    out.feet = XM.buildFeet();
     return out;
   }
 
@@ -297,10 +367,10 @@
     p('DESIGN = {');
     p('    "scale":        ', d.scale, ',            # every width is linear in this');
     p('    "notes_equave": ', L.notesEq, ',');
-    p('    "whites":       ', L.whites.length, ',');
+    p('    "whites":       ', L.whites.length, ',            # derived, not a free parameter');
     p('    "rotation":     ', ((d.rotation | 0) % 7 + 7) % 7, ',            # white #0 sits on period slot this index');
-    p('    "total_keys":   ', L.total, ',');
-    p('    "akm320_units": ', L.nUnits, ',');
+    p('    "total_keys":   ', L.total, ',            # ALWAYS 32 — one per sensor foot');
+    p('    "akm320_units": 1,            # always one: spine half A + half B');
     p('    "spine_type":   "', L.spineKind, ' type",');
     p('    "white_width":  ', f(L.wW), ',');
     p('    "white_pitch":  ', f(L.wP), ',');
@@ -322,17 +392,18 @@
     p('');
 
     /* --- key table ---------------------------------------------------- */
-    p('# --- every key on screen, left to right --------------------------------');
+    p('# --- the 32 keys, left to right, one per sensor foot -------------------');
     p('# (name, type, x_centre, width, depth, world_x, world_y_back, world_z_bottom, foot_x)');
+    p('# KEYS is always exactly 32 entries long. KEYS[i] belongs to FEET[i].');
     p('KEYS = [');
     for (const n of L.notes) {
       const r = n.ref;
       const spec = XM.KEY_TYPES[n.type];
       const depth = spec.depth;
       const zb = spec.kind === 'white' ? XM.Z.whiteBottom : XM.Z.accBottom;
-      const nm = n.kind === 'white'
-        ? 'W' + r.i + '_' + r.name
-        : 'A' + r.slot + '_' + (r.ord + 1);
+      const nm = 'K' + String(n.index).padStart(2, '0') + '_' +
+        (n.kind === 'white' ? 'W' + r.i + '_' + r.name
+                            : 'A' + r.slot + '_' + (r.ord + 1));
       p('    ("', nm, '", "', n.type, '", ',
         f(r.cx), ', ', f(spec.kind === 'white' ? L.wW : L.aW), ', ', f(depth), ', ',
         f(r.cx + W.x0, 4), ', ', f(W.y0, 4), ', ', f(zb + W.z0), ', ',
@@ -350,28 +421,24 @@
     for (const lay of layers)
       p('        ("', lay.name, '", ', f(lay.z0), ', ', f(lay.z1), '),');
     p('    ],');
-    p('    "halves": [');
-    for (let u = 0; u < L.nUnits; u++) {
-      const off = u * XM.SPINE.unitPitch;
-      p('        ("unit', u, '_A", ', f(XM.SPINE.halfA.x0 + off), ', ', f(XM.SPINE.halfA.x1 + off), '),');
-      p('        ("unit', u, '_B", ', f(XM.SPINE.halfB.x0 + off), ', ', f(XM.SPINE.halfB.x1 + off), '),');
-    }
+    p('    "halves": [           # 16 sensor feet each, and only ever these two');
+    p('        ("A", ', f(XM.SPINE.halfA.x0), ', ', f(XM.SPINE.halfA.x1), '),');
+    p('        ("B", ', f(XM.SPINE.halfB.x0), ', ', f(XM.SPINE.halfB.x1), '),');
     p('    ],');
     p('    "screws": [');
-    for (let u = 0; u < L.nUnits; u++) {
-      const off = u * XM.SPINE.unitPitch;
-      for (const s of XM.SPINE.screws)
-        p('        (', f(s.x + off), ', ', s.big ? 'True' : 'False', '),');
-    }
+    for (const sc of XM.SPINE.screws)
+      p('        (', f(sc.x), ', ', sc.big ? 'True' : 'False', '),');
     p('    ],');
     p('}');
     p('');
-    p('# --- sensor feet (fixed to the spine) -----------------------------------');
+    p('# --- the 32 sensor feet (16 on half A, 16 on half B) --------------------');
     p('FEET = [');
     const fc = L.feet;
     for (let i = 0; i < fc.length; i += 8)
       p('    ', fc.slice(i, i + 8).map(v => f(v)).join(', '), ',');
     p(']');
+    p('assert len(KEYS) == 32, "this keyboard has exactly 32 keys"');
+    p('assert len(FEET) == 32, "one AKM320: 16 feet on half A, 16 on half B"');
     p('');
     if (L.warnings.length) {
       p('# --- warnings on this design -------------------------------------------');
@@ -519,7 +586,8 @@ pyDict('Z_TOP', s => (s.kind === 'white' ? XM.Z.whiteTop : s.peakZ)),
 
   const api = {
     presetDesign, computeLayout, buildMeshes, toSTL, makeZip,
-    pythonLog, summary, notesPerPeriod, layerCount
+    pythonLog, summary, notesPerPeriod, layerCount,
+    whiteCount, widthAt, suggestScale
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else (typeof window !== 'undefined' ? window : globalThis).XD = api;

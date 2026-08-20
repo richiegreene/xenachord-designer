@@ -11,6 +11,34 @@ drafted layouts. Nothing here is guessed.
 
 ---
 
+## The instrument is 32 keys. Always.
+
+One AKM320: **spine half A + spine half B, 16 sensor feet on each, 32 feet in
+total.** A design therefore has exactly 32 keys — one per foot — and the app
+will not generate a 33rd, in the browser or in the Blender log. Nothing chains;
+there is no multi-unit mode.
+
+The consequence: **the white-key count is derived, not chosen.** Keys are laid
+down left to right — white *i*, then slot *i*, then white *i+1* — and the run
+stops the instant the 32nd note is placed. Change the pattern and the white
+count moves with it:
+
+| pattern | notes/equave | white keys | accidentals | span |
+|---|---|---|---|---|
+| 15-EDO | 15 | 15 | 17 | 367.9 mm |
+| 17-EDO | 17 | 13 | 19 | 358.7 mm |
+| 19-EDO | 19 | 12 | 20 | 368.0 mm |
+| all-white | 7 | 32 | 0 | 983.8 mm |
+
+If the 32nd note falls inside a split slot you get one half of the pair and a
+warning saying so — the first note of the pair is the one kept, since that is
+the one that comes next in scale order. Rotating with **Start on** moves where
+the cut lands.
+
+`FEET[i]` is the foot under `KEYS[i]`; the Python log asserts both are 32 long.
+
+---
+
 ## Files
 
 | file | what it is |
@@ -18,6 +46,9 @@ drafted layouts. Nothing here is guessed.
 | `model.js` | Everything measured out of the .blend: the datum, the spine, the fixed foot relationship, the size law, the seven key types, the three layouts, and the parametric mesh builders. |
 | `core.js` | Layout engine (slot arithmetic, validity checks), mesh assembly, STL/ZIP writers, and the Blender Python log generator. Also loadable from node. |
 | `index.html` | The app: drag-and-drop palette, period editor, keyboard strip, WebGL preview, export. |
+
+The only layout controls are **size scale `s`** and **Start on** (rotation).
+Everything else follows from the 32-key limit and the seven-slot template.
 
 ---
 
@@ -87,7 +118,11 @@ slot bias δ      = s / 6
 | 19 | 29.2917 | 30.79167 | 13.14167 | 3.16667 |
 
 `s` defaults to the EDO number but is an independent control — you can draw a
-19-note layout at 15-size, or scale a 17 sheet up.
+19-note layout at 15-size, or scale a 17 sheet up. Because the key count is
+fixed at 32, `s` is what decides whether those 32 keys fit the A+B spine: the
+**fit to spine** button sets `s` so the last white key ends exactly at
+x = 373.30 mm. The status panel shows the span against the spine either way,
+and warns on an overhang.
 
 ---
 
@@ -149,6 +184,53 @@ Where to drop:
 
 ---
 
+## Viewing and inspecting the model
+
+There is **no ground plane and no lower clamp on the camera** — you can orbit
+right under the instrument and look up at the undersides, the tongues and the
+foot clearance. Faces are shaded two-sided from the view direction, so nothing
+goes black when you get beneath it, and back-face culling is off.
+
+| action | control |
+|---|---|
+| orbit | drag (elevation runs the full −90°…+90°) |
+| pan | shift-drag, middle-drag or right-drag — screen-space, so it works from any angle |
+| zoom | wheel (8 mm to 20 m) |
+| inspect a part | click it |
+| clear the inspector | click ✕, double-click, or Esc |
+| fit | `fit` button or **F** |
+| straight down / straight up | **T** / **B** |
+| nudge the orbit | arrow keys (shift = fine) |
+
+View presets: `iso`, `top`, `bottom`, `front`, `back`, `left`, `right`,
+`under-iso`. The readout at the top-left shows azimuth, elevation and distance,
+and says so when you are below the instrument.
+
+**Layer visibility** — the checkboxes at the bottom of the viewer switch the
+white / black / gray combs, the spine and the feet on and off independently.
+Hiding the whites is the quickest way to see how the accidental stems sit over
+their sensor feet.
+
+**Separate combs** — the slider lifts each comb apart along Z in assembly order
+(feet, spine, gray, black, white), so you can see the three-layer stack the way
+it comes apart.
+
+**Key → foot reach** — the status panel reports the widest distance from a key's
+centre to the centre of its sensor foot. Large values are expected, not errors:
+the two halves of a split pair share one X and still have to reach two adjacent
+feet 11.3 mm apart. Closing that gap is the bridge edge loop, which is out of
+scope (see the last section).
+
+**Click to inspect** — clicking a key highlights it and opens a readout with its
+type, centre X, width, depth, Z range, spine layer, slot name, slot bias and
+group, pair role, note index, degree, the X of the sensor foot under it, the
+**key − foot** offset, and the full world coordinates. Clicking a sensor foot
+reports its pad size, its spine half and index on that half, its step from the
+previous foot (which is where the uneven half-A spacing shows up), and its
+world X.
+
+---
+
 ## Export
 
 * **Copy Python Log** — puts a complete, runnable Blender script on the
@@ -162,13 +244,14 @@ Where to drop:
 Paste it into Blender's Text Editor and press *Run Script*. Structure:
 
 1. A readable header — the datum, the fixed spine↔foot relationship.
-2. `DESIGN` — scale, notes per equave, white count, rotation, key count,
-   AKM320 units, spine type, and all four derived widths.
+2. `DESIGN` — scale, notes per equave, derived white count, rotation, key count
+   (always 32), AKM320 units (always 1), spine type, and all four derived widths.
 3. `TEMPLATE` — the seven-slot period, annotated with slot name, bias and group.
-4. `KEYS` — every key on screen, left to right: name, type, x centre, width,
-   depth, world X, world Y (back face), world Z (bottom face), and the X of the
-   sensor foot it sits over.
-5. `SPINE` and `FEET` — halves, layers, screw positions, every foot X.
+4. `KEYS` — the 32 keys, left to right: name (prefixed `K00`…`K31` by foot
+   index), type, x centre, width, depth, world X, world Y (back face), world Z
+   (bottom face), and the X of the sensor foot it sits over.
+5. `SPINE` and `FEET` — halves A and B, layers, screw positions, the 32 foot X
+   values. Two asserts guarantee `len(KEYS) == len(FEET) == 32`.
 6. Any warnings on the design, as comments.
 7. `build()` — if the current .blend has a **Key Type Categories** collection it
    duplicates those real meshes and places them; otherwise it drops proxy boxes.
@@ -187,7 +270,9 @@ So the loop is: design here → copy the log → run it in a fresh Blender sessi
 
 ## Accuracy against the drafting sandbox
 
-All three drafted layouts are reproduced from the size law alone:
+All three drafted layouts are reproduced from the size law alone (the sheets
+run to 59–61 keys; the app generates the first 32 of each, which is the whole
+instrument):
 
 | layout | max white-centre error | max slot-centre error |
 |---|---|---|

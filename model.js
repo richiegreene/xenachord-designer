@@ -63,7 +63,7 @@
     // One AKM320 unit = spine half A + spine half B (32 feet between them).
     halfA: { x0: 0.8493, x1: 183.4323 },   // length 182.583
     halfB: { x0: 184.7236, x1: 373.2951 }, // length 188.5715
-    unitPitch: 373.2951 - 0.8493,          // repeat distance for a chained unit
+    span: 373.2951 - 0.8493,               // A + B, end to end
 
     // Screw holes, x measured from the design origin.  "big" holes go all the
     // way through; the others are counterbores stopping at z = 2.91114.
@@ -83,7 +83,18 @@
   };
 
   /* ------------------------------------------------------------------ *
-   * 3.  FEET  (the sensor pushers — fixed to the spine, forever)         *
+   * 3.  HARD LIMITS OF THE INSTRUMENT                                    *
+   *                                                                     *
+   * This keyboard is one AKM320: one spine half A + one spine half B,    *
+   * 16 sensor feet on each, 32 feet in total.  A design therefore has    *
+   * EXACTLY 32 keys — one per foot — and never more.  Nothing chains.    *
+   * ------------------------------------------------------------------ */
+  const NOTES = 32;          // keys in a design; also the number of feet
+  const UNITS = 1;           // AKM320 units; always one
+  const FEET_PER_HALF = 16;
+
+  /* ------------------------------------------------------------------ *
+   * 4.  FEET  (the sensor pushers — fixed to the spine, forever)         *
    * ------------------------------------------------------------------ */
   const FOOT = {
     pitch: 11.30005,
@@ -104,7 +115,7 @@
   };
 
   /* ------------------------------------------------------------------ *
-   * 4.  SIZE LAW                                                        *
+   * 5.  SIZE LAW                                                        *
    *                                                                     *
    * Read straight off the three drafted layouts.  Every horizontal       *
    * dimension is linear in the layout's "scale" number s (which is the   *
@@ -138,7 +149,7 @@
   const SLOT_GROUP = ['three', 'three', 'three', 'single', 'two', 'two', 'single'];
 
   /* ------------------------------------------------------------------ *
-   * 5.  KEY TYPE CATEGORIES                                             *
+   * 6.  KEY TYPE CATEGORIES                                             *
    *                                                                     *
    * The seven categories drawn in the "Key Type Categories" collection.  *
    * In the .blend they were pulled from different sheets (19 and 15) and *
@@ -238,7 +249,7 @@
   ];
 
   /* ------------------------------------------------------------------ *
-   * 6.  THE THREE DRAFTED LAYOUTS                                       *
+   * 7.  THE THREE DRAFTED LAYOUTS                                       *
    *                                                                     *
    * Slot contents per seven-white period, read off the sheets.          *
    * null = no accidental in that slot.                                  *
@@ -523,42 +534,37 @@
     });
   }
 
-  /** Build the spine for a design: `units` chained AKM320 units, `nLayers` deep */
-  function buildSpine(nUnits, nLayers) {
+  /** Build the one and only spine: half A + half B, `nLayers` deep */
+  function buildSpine(nLayers) {
     const key = nLayers >= 3 ? 'three' : nLayers === 2 ? 'two' : 'one';
     const layers = SPINE.layers[key];
     const out = {};
     for (const L of layers) out[L.name] = [];
-    for (let u = 0; u < nUnits; u++) {
-      const off = u * SPINE.unitPitch;
-      const holes = unitScrewHoles(off);
-      for (const half of [SPINE.halfA, SPINE.halfB]) {
-        for (const L of layers) {
-          const active = holes.filter(h => L.z1 > h.zFloor);
-          rectWithHoles(half.x0 + off, half.x1 + off, SPINE.yBack, SPINE.yFront,
-            active, (a, b, c, d) => pushBox(out[L.name], a, b, c, d, L.z0, L.z1));
-        }
+    const holes = unitScrewHoles(0);
+    for (const half of [SPINE.halfA, SPINE.halfB]) {
+      for (const L of layers) {
+        const active = holes.filter(h => L.z1 > h.zFloor);
+        rectWithHoles(half.x0, half.x1, SPINE.yBack, SPINE.yFront,
+          active, (a, b, c, d) => pushBox(out[L.name], a, b, c, d, L.z0, L.z1));
       }
     }
     return out;
   }
 
-  /** X centres of every foot for `nUnits` chained AKM320 units */
-  function footCentres(nUnits) {
+  /** X centres of the 32 feet — 16 on half A, 16 on half B. Always 32. */
+  function footCentres() {
     const out = [];
-    for (let u = 0; u < nUnits; u++) {
-      let x = FOOT.x0 + u * SPINE.unitPitch;
-      out.push(x);
-      for (let i = 0; i < 15; i++) { x += FOOT.stepsA[i]; out.push(x); }
-      x += FOOT.gapAB; out.push(x);
-      for (let i = 0; i < 15; i++) { x += FOOT.stepsB; out.push(x); }
-    }
+    let x = FOOT.x0;
+    out.push(x);
+    for (let i = 0; i < FEET_PER_HALF - 1; i++) { x += FOOT.stepsA[i]; out.push(x); }
+    x += FOOT.gapAB; out.push(x);
+    for (let i = 0; i < FEET_PER_HALF - 1; i++) { x += FOOT.stepsB; out.push(x); }
     return out;
   }
 
-  function buildFeet(nUnits) {
+  function buildFeet() {
     const t = [];
-    for (const cx of footCentres(nUnits)) {
+    for (const cx of footCentres()) {
       const y0 = FOOT.yCentre - FOOT.d / 2, y1 = FOOT.yCentre + FOOT.d / 2;
       // a flat plane, exactly as in the .blend — given a hair of thickness
       // so it survives STL export
@@ -573,6 +579,7 @@
    * ==================================================================== */
   const api = {
     WORLD, SPINE, FOOT, SIZE, Z, DRAFT, WALL, TONGUE_Y,
+    NOTES, UNITS, FEET_PER_HALF,
     KEY_TYPES, TYPE_ORDER, LAYOUTS, SLOT_BIAS, SLOT_GROUP,
     WHITE_NAMES, SLOT_NAMES,
     whiteWidth, whitePitch, accWidth, slotDelta,
