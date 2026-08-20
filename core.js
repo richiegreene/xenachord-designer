@@ -44,11 +44,19 @@
 
   /** the layer stack a design needs: white + whichever accidental layers are used */
   function layerCount(template, overrides) {
+    return XM.spineLayerCount(
+      XM.spineKindForColours(templateColours(template, overrides)));
+  }
+
+  /** the colours a template *asks* for — a quick answer for the palette UI.
+   *  The spine a design actually gets is decided by the keys it places, in
+   *  computeLayout below, because the 32-note limit can cut a slot off. */
+  function templateColours(template, overrides) {
     const used = new Set(['white']);
     const scan = s => { if (s) for (const n of s) used.add(XM.KEY_TYPES[n].layer); };
-    template.forEach(scan);
+    (template || []).forEach(scan);
     Object.values(overrides || {}).forEach(scan);
-    return used.size;
+    return used;
   }
 
   function computeLayout(design) {
@@ -194,12 +202,24 @@
      * feet 11.3 mm apart; closing that gap is the bridge edge-loop, which is
      * deliberately out of scope.  The figure is reported as a statistic. */
 
-    const layers = layerCount(design.template, design.overrides);
-    const spineKind = layers >= 3 ? 'three' : layers === 2 ? 'two' : 'one';
+    /* ---- which of the six drafted spines this design needs ----
+     * One slab per key colour actually PLACED — not per colour the template
+     * mentions, because the 32-note limit can cut a slot off before its keys
+     * are laid down, and an override on a slot the run never reaches is not
+     * part of the instrument.  Gray takes the full three-layer stack: its
+     * tongue is the bottom band and black's sits above it, so a design that
+     * uses gray at all needs the three-type spine.  See spineKindForColours
+     * in model.js.                                                        */
+    const colours = new Set(['white']);
+    for (const sl of slots) for (const m of sl.members) colours.add(m.spec.layer);
+    const spineKind = XM.spineKindForColours(colours);
+    const layers = XM.spineLayerCount(spineKind);
+    const spineColours = ['gray', 'black', 'white'].filter(c => colours.has(c));
 
     return {
       design, whites, slots, notes, feet, warnings,
-      nUnits: XM.UNITS, wW, wP, aW, delta, notesEq, total, layers, spineKind,
+      nUnits: XM.UNITS, wW, wP, aW, delta, notesEq, total,
+      layers, spineKind, colours, spineColours,
       width, overhang, footDrift, footDriftAt, cut
     };
   }
@@ -294,7 +314,7 @@
       for (const m of sl.members)
         out[m.spec.layer].push(...XM.buildKey(m.cx, L.aW, m.type, null, null));
     }
-    const spine = XM.buildSpine(L.layers);
+    const spine = XM.buildSpine(L.spineKind);
     out.spine = [];
     for (const k of Object.keys(spine)) out.spine.push(...spine[k]);
     out.feet = XM.buildFeet();
@@ -449,7 +469,12 @@
     p('    "rotation":     ', ((d.rotation | 0) % 7 + 7) % 7, ',            # white #0 sits on period slot this index');
     p('    "total_keys":   ', L.total, ',            # ALWAYS 32 — one per sensor foot');
     p('    "akm320_units": 1,            # always one: spine half A + half B');
-    p('    "spine_type":   "', L.spineKind, ' type",');
+    p('    "key_colours":  ', L.spineColours.length, ',            # ',
+      L.spineColours.join(' + '));
+    p('    "spine_type":   "', L.spineKind, ' type",   # ', L.layers,
+      ' layer', L.layers === 1 ? '' : 's', ' — one per key colour',
+      L.colours.has('gray')
+        ? '; gray always takes all three' : '');
     p('    "white_width":  ', f(L.wW), ',');
     p('    "white_pitch":  ', f(L.wP), ',');
     p('    "acc_width":    ', f(L.aW), ',');
@@ -504,6 +529,13 @@
 
     /* --- spine + feet ------------------------------------------------- */
     p('# --- spine --------------------------------------------------------------');
+    p('# This design places ', L.spineColours.length, ' key colour',
+      L.spineColours.length === 1 ? '' : 's', ' (', L.spineColours.join(', '),
+      '), so it takes the');
+    p('# ', L.spineKind, '-type spine: one slab per colour, each key\'s rear tongue');
+    p('# plugging into the layer belonging to its own colour.  Gray always takes');
+    p('# all three layers — its tongue is the bottom band and black\'s sits above');
+    p('# it, so the two are stacked rather than alternatives.');
     p('# Halves A and B were drafted separately and their layer bands differ by');
     p('# up to 0.011 mm, so each half carries its own faces and its own stack —');
     p('# read verbatim out of "', L.spineKind, ' type Spine - A" / "- B".');
@@ -680,37 +712,147 @@ ${pyProfiles(seen)}
 
 
 # =========================================================================
+# FACE TRIANGULATION — ear clipping, NOT a fan
+#
+# The drafted faces are n-gons and many of them are CONCAVE: the step a
+# white key takes around its neighbouring accidentals is cut into the key's
+# own top, underside and shoulder faces, so those polygons have reflex
+# corners by construction.  A fan from vertex 0 is only valid on a convex
+# polygon; on these it lays triangles straight across the notch — a wall
+# joining two corners that nothing joins in the sheet, and on a white key
+# it paves over the very clearance the key is cut back to provide.
+#
+# This is a literal transliteration of triangulateFace() in model.js, so
+# the Blender build, the WebGL preview and the exported STLs stay the same
+# mesh, triangle for triangle.
+# =========================================================================
+TRI_EPS = 1e-9
+
+
+def _tri2(a, b, c):
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+
+def _in_tri2(p, a, b, c):
+    # strictly inside — a point exactly on an edge does not block the ear
+    return (_tri2(a, b, p) > TRI_EPS and
+            _tri2(b, c, p) > TRI_EPS and
+            _tri2(c, a, p) > TRI_EPS)
+
+
+def triangulate_face(V, ring):
+    """ring is a list of indices into V; returns index triples wound to
+    match the face's own (Newell) normal."""
+    m = len(ring)
+    if m < 3:
+        return []
+    if m == 3:
+        return [(ring[0], ring[1], ring[2])]
+
+    nx = ny = nz = 0.0
+    for i in range(m):
+        a = V[ring[i]]
+        b = V[ring[(i + 1) % m]]
+        nx += (a[1] - b[1]) * (a[2] + b[2])
+        ny += (a[2] - b[2]) * (a[0] + b[0])
+        nz += (a[0] - b[0]) * (a[1] + b[1])
+    ax, ay, az = abs(nx), abs(ny), abs(nz)
+
+    # drop the dominant axis; the remaining pair is cyclic, so the sign of
+    # the 2-D signed area is the sign of that axis' normal component
+    if az >= ax and az >= ay:
+        pick = lambda p: (p[0], p[1]); sign = nz
+    elif ay >= ax:
+        pick = lambda p: (p[2], p[0]); sign = ny
+    else:
+        pick = lambda p: (p[1], p[2]); sign = nx
+
+    P = [pick(V[i]) for i in ring]
+    flip = sign < 0.0
+    poly = [(m - 1 - i) if flip else i for i in range(m)]
+    out = []
+
+    def emit(i0, i1, i2):
+        if flip:
+            out.append((ring[i2], ring[i1], ring[i0]))
+        else:
+            out.append((ring[i0], ring[i1], ring[i2]))
+
+    guard = 4 * m * m + 16
+    while len(poly) > 3 and guard > 0:
+        guard -= 1
+        clipped = False
+        for i in range(len(poly)):
+            n = len(poly)
+            i0, i1, i2 = poly[i], poly[(i + 1) % n], poly[(i + 2) % n]
+            a, b, c = P[i0], P[i1], P[i2]
+            if _tri2(a, b, c) <= TRI_EPS:
+                continue                       # reflex or degenerate
+            blocked = False
+            for j in range(n):
+                q = poly[j]
+                if q == i0 or q == i1 or q == i2:
+                    continue
+                if _in_tri2(P[q], a, b, c):
+                    blocked = True
+                    break
+            if blocked:
+                continue
+            emit(i0, i1, i2)
+            del poly[(i + 1) % n]
+            clipped = True
+            break
+        if clipped:
+            continue
+        # No ear this pass — the drafted polygon is degenerate here (a
+        # collinear run) or self-intersecting in its own plane, which a few
+        # sheet faces are.  Clip the least-bad corner anyway and EMIT it: a
+        # zero-area triangle costs nothing and keeps every boundary edge
+        # paired, so the key stays watertight for the slicer.
+        bi, bs = 0, -1e300
+        for i in range(len(poly)):
+            n = len(poly)
+            s = _tri2(P[poly[i]], P[poly[(i + 1) % n]], P[poly[(i + 2) % n]])
+            if s > bs:
+                bs, bi = s, i
+        n = len(poly)
+        emit(poly[bi], poly[(bi + 1) % n], poly[(bi + 2) % n])
+        del poly[(bi + 1) % n]
+    if len(poly) == 3:
+        emit(poly[0], poly[1], poly[2])
+    else:
+        for i in range(1, len(poly) - 1):
+            emit(poly[0], poly[i], poly[i + 1])
+    return out
+
+
+# =========================================================================
 # KEY GEOMETRY — a drafted profile, instantiated
 # =========================================================================
 def build_key(cx, w, prof):
     v, n, mirror = prof["v"], prof["nv"], prof["mirror"]
     x_left = cx - w / 2.0
-    X = [0.0] * n
-    Y = [0.0] * n
-    Z = [0.0] * n
+    V = [None] * n
     for i in range(n):
         j = i * 4
         x = v[j] + v[j + 1] * w
         if mirror:
             x = w - x
-        X[i] = x_left + x
-        Y[i] = v[j + 2]
-        Z[i] = v[j + 3]
+        V[i] = (x_left + x, v[j + 2], v[j + 3])
     t = []
     f = prof["f"]
     k = 0
     while k < len(f):
         m = f[k]
         k += 1
-        ring = f[k:k + m]
+        ring = list(f[k:k + m])
         k += m
         if mirror:
             ring = ring[::-1]          # mirroring flips face winding
-        for i in range(1, m - 1):
-            a, b, c = ring[0], ring[i], ring[i + 1]
-            t.append((X[a], Y[a], Z[a]))
-            t.append((X[b], Y[b], Z[b]))
-            t.append((X[c], Y[c], Z[c]))
+        for (a, b, c) in triangulate_face(V, ring):
+            t.append(V[a])
+            t.append(V[b])
+            t.append(V[c])
     return t
 
 
@@ -1079,7 +1221,7 @@ if __name__ == "__main__":
 
   const api = {
     presetDesign, computeLayout, buildMeshes, toSTL, makeZip,
-    pythonLog, summary, notesPerPeriod, layerCount,
+    pythonLog, summary, notesPerPeriod, layerCount, templateColours,
     whiteCount, widthAt, suggestScale,
     bounds, worldOffset, ORIGIN_MODES
   };

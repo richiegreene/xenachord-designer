@@ -87,15 +87,45 @@ Half A of the real PCB is not perfectly even (steps alternate 11.20899 /
 11.39099 / 11.30018); half B is dead uniform at 11.30005. Both are stored
 verbatim in `model.js`, so foot X positions are reproduced to the micron.
 
-The spine is 9.84706 mm deep, ~7.1 mm tall, and splits into 1, 2 or 3 stacked
-layers depending on how many key colours the design uses. Each key's rear
-tongue plugs into its own layer:
+The spine is 9.84706 mm deep and ~7.1 mm tall, and the sandbox draws it three
+ways, in six objects. **A design uses exactly one of them, and which one is not
+a setting — it is the number of key colours the design places.** One slab per
+colour, each key's rear tongue plugging into the layer belonging to its own
+colour:
 
-| layer | z band (half A) | z band (half B) | tongue |
+| colours placed | spine | layers | sandbox objects |
 |---|---|---|---|
-| gray | 0 → 5.08934 | −0.00006 → 5.07835 | 4.08924 → 5.09074 |
-| black | 5.09072 → 6.10034 | 5.07829 → 6.08932 | 5.08924 → 6.08924 |
-| white | 6.07824 → 7.10034 | 6.08926 → 7.11137 | 6.08924 → 8.62804 |
+| white only | one type | 1 | `One type Spine - A` / `- B` |
+| white + black | two type | 2 | `Two type Spine - A` / `- B` |
+| **anything using gray** | three type | 3 | `Three type Spine - A` / `- B` |
+
+**Gray always takes the full three-layer stack**, even in a design that places
+no black key at all. The drafted gray tongue is z 4.08924 → 5.09074 and the
+black one 5.08924 → 6.08924: they are stacked bands, not alternatives, so
+reaching for gray means reaching for the bottom band of the three-layer spine
+and the black band has to exist above it. A two-type spine merges those two
+into a single 0 → 6.07832 slab, which is the white + black case and only that
+one. The status panel names the colours it counted and the spine they chose.
+
+The count is taken from the keys the design actually **places**, not from the
+colours its template mentions — the 32-note limit can cut a slot off before its
+keys are laid down, and an override on a slot the run never reaches is not part
+of the instrument.
+
+The bands, per spine type:
+
+| spine | layer | z band (half A) | z band (half B) | tongue it takes |
+|---|---|---|---|---|
+| one | all | 0 → 7.10039 | −0.00006 → 7.08935 | white 6.08924 → 8.62804 |
+| two | lower | 0 → 6.07832 | −0.00006 → 6.08932 | black 5.08924 → 6.08924 |
+| two | upper | 6.07826 → 7.07833 | 6.08928 → 7.08936 | white 6.08924 → 8.62804 |
+| three | gray | 0 → 5.08934 | −0.00006 → 5.07835 | gray 4.08924 → 5.09074 |
+| three | black | 5.09072 → 6.10034 | 5.07829 → 6.08932 | black 5.08924 → 6.08924 |
+| three | white | 6.07824 → 7.10034 | 6.08926 → 7.11137 | white 6.08924 → 8.62804 |
+
+Every tongue engages its band over ~1.00 mm — its full thickness — in all three
+spine types and on both halves, which is what makes the choice above the right
+one rather than a convention.
 
 Halves A and B were drafted separately and their layer bands differ by up to
 0.011 mm. Both are stored verbatim (for all three spine types), so a generated
@@ -230,6 +260,42 @@ the X-mirror of `Split Black Second` and `Split Gray Second` the X-mirror of
 `Split Grey Second`, both verified against the sheet's own meshes at
 **0.00000 mm**.
 
+### The clearance around an accidental is part of the white key
+
+A white key is not a slab. Its rear half is stepped back on whichever side has
+an accidental beside it, and the step is what leaves the printed keys free of
+each other. The step runs to the depth of the neighbour it clears — y = 54.07
+beside a split pair (whose front half is 52.57 deep), y = 44.07 beside a
+`Full Sized Gray` (42.57 deep) — and its X depends on that slot's bias, which
+is why the whites carry one profile per neighbour context rather than one
+profile. The gaps that fall out, measured surface to surface over every
+overlapping (y, z):
+
+| layout | white ↔ split pair | white ↔ full-sized gray |
+|---|---|---|
+| 15 | 0.875 mm | — |
+| 17 | 0.892 mm | — |
+| 19 | 0.908 mm | 1.146 mm |
+
+They scale with `s`, since the step is pinned by `beta` to the key's own width.
+
+**These steps are cut into concave faces**, and until they were triangulated
+properly the preview, the STLs and the Blender build all paved straight across
+them: a triangle fan is only valid on a convex polygon, and 138 of the 880
+drafted faces are not convex. The fan laid down as much as 587 mm² of surface
+that is not in the sheet — long triangles reaching corner to corner across a
+key, which closed the clearance channel and read as a white key running full
+width all the way back to the spine. `triangulateFace()` in `model.js` ear-clips
+each face in its own plane instead, and the generated Blender log carries a
+line-for-line transliteration of it, so the three outputs stay the same mesh.
+
+What survives is 12.7 mm² on a handful of faces the sheet draws
+self-intersecting or twisted in their own plane — the front face of
+`Split Grey Second`, where vertex 27 sits 0.224 mm above the face's own top
+edge, and five-sided side walls that twist along x. No triangulation can flatten
+those; they are drafting artefacts, and they are listed here so they are not
+mistaken for tessellation error.
+
 ## The seven Key Type Categories
 
 Drag these from the palette into a slot. In the .blend they were pulled from
@@ -353,7 +419,8 @@ Paste it into Blender's Text Editor and press *Run Script*. Structure:
 1. A readable header — the world placement it will build at (with the resulting
    bounding box), the design-frame datum, and the fixed spine↔foot relationship.
 2. `DESIGN` — scale, notes per equave, derived white count, rotation, key count
-   (always 32), AKM320 units (always 1), spine type, and all four derived widths.
+   (always 32), AKM320 units (always 1), the key-colour count and the spine type
+   it selected, and all four derived widths.
 3. `TEMPLATE` — the seven-slot period, annotated with slot name, bias and group.
 4. `KEYS` — the 32 keys, left to right: name (prefixed `K00`…`K31` by foot
    index), type, x centre, width, depth, the drafted profile it is instantiated
@@ -466,6 +533,25 @@ generated surface.)
 `USE_BLEND_CATEGORIES = True` in the log still duplicates the sandbox's own
 objects, but it is no longer more accurate than building from the profiles —
 within the numbers above, it is the same geometry.
+
+### Mesh integrity
+
+Checked by pairing every edge across the 32 keys of the 19 layout: 5 948
+triangles, **0 degenerate, 0 boundary edges, 0 non-manifold edges, 0 reversed
+windings**. Every key is a closed solid, which is what the slicer wants. The
+feet are clean too (384 triangles, closed).
+
+**The spine is not, and that is a separate outstanding bug.** Each slab carries
+**608 boundary edges and 32 non-manifold edges — 76 and 4 per mounting hole.**
+`pushSpineSlab` decomposes the slab into closed boxes around each hole's
+bounding box and then fills between that box and the obround with
+`pushHoleAnnulus`, and the two tessellations do not share vertices along the
+bounding box: the annulus subdivides each side at its ring projections while
+the box wall is one quad. The doubled interior walls between adjacent boxes are
+what the non-manifold count is. Nothing about it is visible in the shaded
+preview, and slicers generally repair it, but the spine STL is not watertight
+and the box seams show as spurious edges in Blender's wireframe. Fixing it means
+capping each slab as one polygon with holes rather than as a pile of boxes.
 
 ---
 

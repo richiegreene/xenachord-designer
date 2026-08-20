@@ -505,6 +505,116 @@
     return out;
   }
 
+  /* ------------------------------------------------------------------ *
+   *  FACE TRIANGULATION — ear clipping, NOT a fan                        *
+   *                                                                     *
+   *  The drafted faces are n-gons and a great many of them are CONCAVE:  *
+   *  the step a white key takes around its neighbouring accidentals is   *
+   *  cut into the key's own top, underside and shoulder faces, so those  *
+   *  polygons have reflex corners by construction.  A triangle fan from  *
+   *  vertex 0 is only valid on a convex polygon; run it on these and it  *
+   *  lays triangles straight across the notch, which is exactly the      *
+   *  "wall connecting two corners" artefact — and on a white key it      *
+   *  paves over the very clearance the key is cut back to provide, so    *
+   *  the white reads as full width all the way to the spine.            *
+   *                                                                     *
+   *  Ear clipping in the face's own plane reproduces the drafted outline *
+   *  instead.  The algorithm is deterministic and is duplicated verbatim *
+   *  in the generated Blender log, so the browser, the STLs and the      *
+   *  Blender build stay the same mesh.                                   *
+   * ------------------------------------------------------------------ */
+  const TRI_EPS = 1e-9;
+
+  /** signed area of (a, b, c) in the projected plane */
+  function tri2(a, b, c) {
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  }
+
+  /** strictly inside — a point exactly on an edge does not block the ear */
+  function inTri2(p, a, b, c) {
+    return tri2(a, b, p) > TRI_EPS &&
+           tri2(b, c, p) > TRI_EPS &&
+           tri2(c, a, p) > TRI_EPS;
+  }
+
+  /**
+   * Triangulate one face.
+   *   V     3-D vertex positions
+   *   ring  vertex indices, in the drafted winding
+   * Returns index triples wound to match the face's own normal.
+   */
+  function triangulateFace(V, ring) {
+    const m = ring.length, out = [];
+    if (m < 3) return out;
+    if (m === 3) return [[ring[0], ring[1], ring[2]]];
+
+    /* Newell normal — robust for the near-planar drafted faces */
+    let nx = 0, ny = 0, nz = 0;
+    for (let i = 0; i < m; i++) {
+      const a = V[ring[i]], b = V[ring[(i + 1) % m]];
+      nx += (a[1] - b[1]) * (a[2] + b[2]);
+      ny += (a[2] - b[2]) * (a[0] + b[0]);
+      nz += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+
+    /* drop the dominant axis; the remaining pair is cyclic, so the sign of
+     * the 2-D signed area is the sign of that axis' normal component */
+    let pick, sign;
+    if (az >= ax && az >= ay)      { pick = p => [p[0], p[1]]; sign = nz; }
+    else if (ay >= ax)             { pick = p => [p[2], p[0]]; sign = ny; }
+    else                           { pick = p => [p[1], p[2]]; sign = nx; }
+
+    const P = ring.map(i => pick(V[i]));          // 2-D, indexed by ring slot
+    const flip = sign < 0;                        // make the working loop CCW
+    let poly = [];
+    for (let i = 0; i < m; i++) poly.push(flip ? m - 1 - i : i);
+
+    const emit = (i0, i1, i2) => out.push(flip
+      ? [ring[i2], ring[i1], ring[i0]]
+      : [ring[i0], ring[i1], ring[i2]]);
+
+    let guard = 4 * m * m + 16;
+    while (poly.length > 3 && guard-- > 0) {
+      let clipped = false;
+      for (let i = 0; i < poly.length; i++) {
+        const n = poly.length;
+        const i0 = poly[i], i1 = poly[(i + 1) % n], i2 = poly[(i + 2) % n];
+        const a = P[i0], b = P[i1], c = P[i2];
+        if (tri2(a, b, c) <= TRI_EPS) continue;   // reflex or degenerate
+        let blocked = false;
+        for (let j = 0; j < n; j++) {
+          const q = poly[j];
+          if (q === i0 || q === i1 || q === i2) continue;
+          if (inTri2(P[q], a, b, c)) { blocked = true; break; }
+        }
+        if (blocked) continue;
+        emit(i0, i1, i2);
+        poly.splice((i + 1) % n, 1);
+        clipped = true;
+        break;
+      }
+      if (clipped) continue;
+      /* No ear this pass — the drafted polygon is degenerate here (collinear
+       * run) or self-intersecting in its own plane, which a few sheet faces
+       * are.  Clip the least-bad corner anyway and EMIT it: a zero-area
+       * triangle costs nothing and keeps every boundary edge paired, so the
+       * key stays watertight for the slicer.                              */
+      let bi = 0, bs = -Infinity;
+      for (let i = 0; i < poly.length; i++) {
+        const n = poly.length;
+        const s = tri2(P[poly[i]], P[poly[(i + 1) % n]], P[poly[(i + 2) % n]]);
+        if (s > bs) { bs = s; bi = i; }
+      }
+      const n = poly.length;
+      emit(poly[bi], poly[(bi + 1) % n], poly[(bi + 2) % n]);
+      poly.splice((bi + 1) % n, 1);
+    }
+    if (poly.length === 3) emit(poly[0], poly[1], poly[2]);
+    else for (let i = 1; i + 1 < poly.length; i++) emit(poly[0], poly[i], poly[i + 1]);
+    return out;
+  }
+
   /**
    * One key, as a triangle soup.
    *   cx     centre x            w   width (from the size law)
@@ -519,12 +629,26 @@
       const m = f[k++];
       const ring = f.slice(k, k + m); k += m;
       if (q.mirror) ring.reverse();          // mirroring flips face winding
-      for (let i = 1; i < m - 1; i++) {
-        const a = V[ring[0]], b = V[ring[i]], c = V[ring[i + 1]];
+      for (const tri of triangulateFace(V, ring)) {
+        const a = V[tri[0]], b = V[tri[1]], c = V[tri[2]];
         t.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
       }
     }
     return t;
+  }
+
+  /** the same key as the drafted polygons, un-triangulated (for Blender) */
+  function keyPolygons(cx, w, type, lb, rb) {
+    const q = profileFor(type, lb, rb);
+    const V = profilePoints(q.p, q.mirror, w, cx - w / 2);
+    const f = q.p.f, out = [];
+    for (let k = 0; k < f.length;) {
+      const m = f[k++];
+      const ring = f.slice(k, k + m); k += m;
+      if (q.mirror) ring.reverse();
+      out.push(ring.map(i => V[i]));
+    }
+    return out;
   }
 
   /** the key's true extent, straight off the profile */
@@ -671,18 +795,57 @@
     }
   }
 
-  const spineKindOf = n => (n >= 3 ? 'three' : n === 2 ? 'two' : 'one');
+  /* ------------------------------------------------------------------ *
+   *  WHICH SPINE A DESIGN NEEDS                                          *
+   *                                                                     *
+   *  The sandbox draws three, in six objects, and a design uses exactly  *
+   *  one of them.  The choice is the number of KEY COLOURS the design    *
+   *  places — one slab per colour, each key's rear tongue plugging into  *
+   *  the layer belonging to its own colour:                              *
+   *                                                                     *
+   *    colours placed          spine                    layers           *
+   *    white only              "One type Spine - A/-B"      1            *
+   *    white + black           "Two type Spine - A/-B"      2            *
+   *    anything using gray     "Three type Spine - A/-B"    3            *
+   *                                                                     *
+   *  Gray takes the full three-layer stack rather than sharing a slab    *
+   *  with black.  The drafted gray tongue is z 4.08924 .. 5.09074 and    *
+   *  the black one 5.08924 .. 6.08924: they are stacked, not             *
+   *  alternatives, so a design that reaches for gray at all is drawing   *
+   *  on the bottom band of the three-layer spine and needs the black     *
+   *  band above it whether or not it happens to place a black key.       *
+   *  A two-type spine merges those two bands into one 0 .. 6.07832 slab, *
+   *  which is the white + black case and only that one.                  *
+   * ------------------------------------------------------------------ */
+  const SPINE_KIND_BY_LAYERS = { 1: 'one', 2: 'two', 3: 'three' };
+
+  /** the drafted spine for a set (or array) of key colours */
+  function spineKindForColours(used) {
+    const s = (used instanceof Set) ? used : new Set(used || []);
+    if (s.has('gray')) return 'three';
+    if (s.has('black')) return 'two';
+    return 'one';
+  }
+
+  /** how many layers that spine is drawn in */
+  const spineLayerCount = kind => SPINE.layers[kind].A.length;
+
+  /** accepts a kind ('one'/'two'/'three') or a plain layer count */
+  const spineKindOf = n => (typeof n === 'string')
+    ? n
+    : (SPINE_KIND_BY_LAYERS[n] || (n >= 3 ? 'three' : n === 2 ? 'two' : 'one'));
 
   /** the halves of the one and only spine, in build order */
   const spineHalves = () => [['A', SPINE.halfA], ['B', SPINE.halfB]];
 
   /**
-   * The one and only spine, `nLayers` deep, as one part per (half, layer) —
-   * the same decomposition the drafting sandbox uses, so each generated part
-   * has a one-to-one counterpart in "<kind> type Spine - A / - B".
+   * The one and only spine, as one part per (half, layer) — the same
+   * decomposition the drafting sandbox uses, so each generated part has a
+   * one-to-one counterpart in "<kind> type Spine - A / - B".
+   * `spine` is a kind name or a layer count.
    */
-  function spineParts(nLayers) {
-    const kind = spineKindOf(nLayers);
+  function spineParts(spine) {
+    const kind = spineKindOf(spine);
     const zc = SPINE.channel.zTop;
     const parts = [];
     for (const [hn, half] of spineHalves()) {
@@ -712,9 +875,9 @@
     return parts;
   }
 
-  /** the spine's design-frame z extent for a given layer count */
-  function spineZRange(nLayers) {
-    const kind = spineKindOf(nLayers);
+  /** the spine's design-frame z extent for a given kind or layer count */
+  function spineZRange(spine) {
+    const kind = spineKindOf(spine);
     let z0 = Infinity, z1 = -Infinity;
     for (const [hn] of spineHalves()) {
       const ls = SPINE.layers[kind][hn];
@@ -724,10 +887,10 @@
     return [z0, z1];
   }
 
-  /** Build the one and only spine: half A + half B, `nLayers` deep */
-  function buildSpine(nLayers) {
+  /** Build the one and only spine: half A + half B, for a kind or count */
+  function buildSpine(spine) {
     const out = {};
-    for (const p of spineParts(nLayers)) out[p.name] = p.tris;
+    for (const p of spineParts(spine)) out[p.name] = p.tris;
     return out;
   }
 
@@ -775,9 +938,11 @@
     WHITE_NAMES, SLOT_NAMES,
     whiteWidth, whitePitch, accWidth, slotDelta,
     pushTri, pushQuad, pushBox, rectWithHoles,
-    ctxKey, profileFor, profilePoints, buildKey, keyExtent,
+    ctxKey, profileFor, profilePoints, buildKey, keyPolygons,
+    triangulateFace, keyExtent,
     buildSpine, buildFeet,
-    spineKindOf, spineHalves, spineParts, spineZRange, footParts,
+    spineKindOf, spineKindForColours, spineLayerCount,
+    spineHalves, spineParts, spineZRange, footParts,
     footCentres, obroundRing, spineHoles, holeBoxPoint, HOLE_UNIT,
     pushHoleAnnulus, pushHoleWall, pushSpineSlab,
     toWorld: (x, y, z) => [x + WORLD.x0, WORLD.y0 - y, z + WORLD.z0]
