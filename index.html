@@ -643,6 +643,15 @@ const norm=a=>{const l=Math.hypot(a[0],a[1],a[2])||1;return[a[0]/l,a[1]/l,a[2]/l
 function lookAt(e,t,u){const z=norm(sub(e,t)),x=norm(cross(u,z)),y=cross(z,x);
   return new Float32Array([x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0,
     -dot(x,e),-dot(y,e),-dot(z,e),1]);}
+/* Builds the view matrix straight from an explicit (right, up, forward)
+ * basis instead of re-deriving it from an up-hint the way lookAt() does.
+ * camBasis() fixes up the reading direction of "right" independently of
+ * "up" and of the eye's position — recomputing x/y from scratch here
+ * (as lookAt(eye,tgt,upHint) would) throws that fix away. */
+function lookAtBasis(e,right,up,fwd){
+  const x=right, y=up, z=mul(fwd,-1);
+  return new Float32Array([x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0,
+    -dot(x,e),-dot(y,e),-dot(z,e),1]);}
 
 /* ---- camera ----
    pitch is free over the whole sphere except the two poles: +PLIM looks
@@ -650,19 +659,57 @@ function lookAt(e,t,u){const z=norm(sub(e,t)),x=norm(cross(u,z)),y=cross(z,x);
    plane and no lower clamp — you can orbit right under the instrument.     */
 const FOV = 0.7;
 const PLIM = Math.PI/2 - 0.0015;
-const cam={yaw:0,pitch:0.8,dist:420,tx:180,ty:42,tz:4};
+const cam={yaw:-181*Math.PI/180,pitch:82*Math.PI/180,dist:326,tx:180,ty:42,tz:4};
 
 function camBasis(){
   const cp=Math.cos(cam.pitch), sp=Math.sin(cam.pitch);
   const tgt=[cam.tx,cam.ty,cam.tz];
+  /* Orbiting starts from the near (player/key-front) side looking back at
+   * the spine — this is the ORIGINAL, untouched eye placement.  It's the
+   * one that keeps the spine the farther of the two from the camera by
+   * default (matching the keyboard strip, which draws the spine as the far
+   * edge) and keeps the render right-side-up.  Do not "fix" left/right by
+   * moving the eye to the opposite side — that also swaps which side faces
+   * the camera (spine ends up nearest instead of farthest). Left/right is
+   * fixed below, entirely independently of where the eye sits. */
   const eye=[cam.tx+cam.dist*Math.sin(cam.yaw)*cp,
              cam.ty+cam.dist*Math.cos(cam.yaw)*cp,
              cam.tz+cam.dist*sp];
   const fwd=norm(sub(tgt,eye));
-  // world up flips sign past the poles; PLIM keeps us inside, so +Z is safe
-  const right=norm(cross(fwd,[0,0,1]));
-  const up=cross(right,fwd);
-  return {eye,tgt,fwd,right,up};
+  /* world-up hint for the right/up basis — (0,0,1) everywhere except close
+   * to the two poles (straight down / straight up).  A true elevation or
+   * iso view (front, back, left, right, iso, under-iso) is a real view of
+   * one side of a real object, and orbiting to the far side of it SHOULD
+   * mirror "ascending X reads left to right" — that's correct, unavoidable
+   * 3D behaviour, the same as walking around a real keyboard to look at it
+   * from the far side, and this hint leaves it untouched.
+   *
+   * Near-vertical top/bottom views are different: there "azimuth" no longer
+   * points at one side of the object, it only spins the frame in place —
+   * the same overhead view rendered upside-down-and-backwards depending on
+   * which way you approached the pole from, with no physical "correct"
+   * side to prefer.  Since that spin has no physical meaning, we pin it to
+   * match the keyboard strip (spine at the top, ascending X left to right)
+   * by flipping the hint's sign with the yaw hemisphere — only inside a
+   * band close enough to the pole that "top"/"bottom" (which always use
+   * yaw 0) are the only views actually affected; every elevation/iso
+   * preset keeps its normal, correctly-mirrored back side. */
+  const NEAR_POLE = Math.PI/2 - 0.2;   // within ~11.5° of straight up/down
+  const upHint = Math.abs(cam.pitch) > NEAR_POLE
+    ? [0,0,Math.cos(cam.yaw)>=0?1:-1]
+    : [0,0,1];
+  /* "up" comes straight off the (eye, upHint) pair above — that's the
+   * vertical framing, and it is correct as-is (right-side-up, spine at the
+   * back) for the same reason the untouched eye placement is correct.
+   * "right" is what needs fixing, and it is fixed by negating it AFTER
+   * up is derived, not by feeding a flipped vector into the same cross
+   * product that produces up — the two once shared one calculation
+   * (right, then up = cross(right, fwd)), which is why a fix aimed at
+   * "right" kept dragging "up" — and the eye placement — along with it. */
+  const right0=norm(cross(fwd,upHint));
+  const up=cross(right0,fwd);
+  const right=mul(right0,-1);
+  return {eye,tgt,fwd,right,up,upHint};
 }
 function fit(){ if(!L) return;
   const w = canvas.clientWidth||1200, h = canvas.clientHeight||700;
@@ -705,7 +752,7 @@ function draw(){
   gl.clearColor(0.075,0.08,0.095,1);
   gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
   const B=camBasis();
-  const mvp=mat4mul(persp(FOV,w/h,0.5,20000),lookAt(B.eye,B.tgt,[0,0,1]));
+  const mvp=mat4mul(persp(FOV,w/h,0.5,20000),lookAtBasis(B.eye,B.right,B.up,B.fwd));
   gl.uniformMatrix4fv(locMVP,false,mvp);
   gl.uniform3fv(locEye, B.eye);
   for(const [k,b] of Object.entries(buffers)){
