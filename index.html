@@ -183,6 +183,13 @@
 
     <fieldset>
       <legend>Export</legend>
+      <label for="origin">Blender world origin</label>
+      <select id="origin">
+        <option value="centre">model centre at 0, 0, 0</option>
+        <option value="spine">X centred · Y 0 at spine front · Z 0 at spine bottom</option>
+        <option value="sheet">drafting sandbox position (round-trips into Leveling.blend)</option>
+      </select>
+      <p class="hint" id="origininfo"></p>
       <div class="btns">
         <button class="primary wide" id="copy-py">⧉ Copy Python Log</button>
         <button class="wide" id="dl-py">⬇ Save design log (.py)</button>
@@ -235,6 +242,7 @@ const $ = id => document.getElementById(id);
 const LS = 'xenachord-designer-v2';
 
 let design = load() || XD.presetDesign(19);
+if (!design.origin) design.origin = 'centre';
 let L = null, meshes = null, dragType = null;
 
 function load(){ try{
@@ -261,6 +269,7 @@ $('scale').onchange = () => {
   design.preset=null; syncInputs(); rebuild();
 };
 $('rot').onchange = () => { design.rotation = +$('rot').value; design.preset=null; rebuild(); };
+$('origin').onchange = () => { design.origin = $('origin').value; save(); showOrigin(); if(picked) showInspect(picked); };
 $('fit-spine').onclick = () => {
   design.scale = Math.round(XD.suggestScale(design, design.scale) * 100) / 100;
   design.preset=null; syncInputs(); rebuild();
@@ -270,7 +279,21 @@ $('fit-spine').onclick = () => {
 function syncInputs(){
   $('scale').value = design.scale;
   $('rot').value = ((design.rotation|0)%7+7)%7;
+  $('origin').value = design.origin || 'centre';
   presetSel.value = design.preset || '';
+}
+/* where the generated keyboard lands in Blender, under the chosen origin */
+function originOf(){ return XD.worldOffset(L, design.origin || 'centre'); }
+function showOrigin(){
+  if(!L) return;
+  const O = originOf(), b = O.b;
+  const r = (v)=>v.toFixed(2);
+  $('origininfo').innerHTML =
+    `Builds into <b>X</b> ${r(b.x0+O.x0)} … ${r(b.x1+O.x0)} · ` +
+    `<b>Y</b> ${r(O.y0-b.y1)} … ${r(O.y0-b.y0)} · ` +
+    `<b>Z</b> ${r(b.z0+O.z0)} … ${r(b.z1+O.z0)}<br>` +
+    `centre ${r(b.cx+O.x0)}, ${r(O.y0-b.cy)}, ${r(b.cz+O.z0)} — ` +
+    `everything is parented to a <i>Xenachord Root</i> empty at 0, 0, 0.`;
 }
 
 /* ===================== palette ===================== */
@@ -461,7 +484,7 @@ function rebuild(){
     : '<div class="okline">✓ geometry consistent with the drafting sandbox</div>';
 
   picked=null; $('inspect').classList.remove('on');
-  buildPeriod(); buildStrip(); uploadMeshes();
+  buildPeriod(); buildStrip(); showOrigin(); uploadMeshes();
   if (rebuild._w !== L.width) { rebuild._w = L.width; fit(); } else draw();
 }
 
@@ -483,17 +506,17 @@ $('dl-zip').onclick = ()=>{
   const files = ['white','black','gray','spine','feet'].map(p=>({
     name:`${baseName()}-${p}.stl`, data: XD.toSTL(meshes[p], p) }));
   files.push({ name: `${baseName()}-design-log.py`,
-               data: new TextEncoder().encode(XD.pythonLog(L)) });
+               data: new TextEncoder().encode(XD.pythonLog(L, {origin: design.origin})) });
   download(`${baseName()}.zip`, XD.makeZip(files), 'application/zip');
 };
 $('dl-py').onclick = ()=>{
   if(!L) return;
   download(`${baseName()}-design-log.py`,
-           new TextEncoder().encode(XD.pythonLog(L)), 'text/x-python');
+           new TextEncoder().encode(XD.pythonLog(L, {origin: design.origin})), 'text/x-python');
 };
 $('copy-py').onclick = async ()=>{
   if(!L) return;
-  const txt = XD.pythonLog(L);
+  const txt = XD.pythonLog(L, {origin: design.origin});
   try { await navigator.clipboard.writeText(txt); toast(`Python log copied — ${txt.split('\n').length} lines`); }
   catch(e){
     const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta);
@@ -505,10 +528,8 @@ $('copy-py').onclick = async ()=>{
 /* ===================== 3D preview ===================== */
 const canvas = $('gl');
 const gl = canvas.getContext('webgl',{antialias:true}) || canvas.getContext('experimental-webgl');
-const COLORS = {
-  white:[0.95,0.95,0.93], black:[0.16,0.16,0.19], gray:[0.55,0.55,0.58],
-  spine:[0.30,0.31,0.36], feet:[0.24,0.42,0.60]
-};
+/* one table, shared with the Blender log's materials — see XM.COLORS */
+const COLORS = XM.COLORS;
 const PART_LABEL = { white:'white', black:'black', gray:'gray', spine:'spine', feet:'feet' };
 /* how far each comb lifts when "separate combs" is dragged, in units of the
    slider value.  Order is the assembly order of the spine layers.            */
@@ -794,7 +815,7 @@ const mm=(v,n)=>v==null?'—':Number(v).toFixed(n==null?4:n);
 function showInspect(b){
   const box=$('inspect');
   if(!b){ box.classList.remove('on'); return; }
-  const W=XM.WORLD;
+  const W=originOf();
   const rows=[];
   const R=(k,v)=>rows.push(`<tr><td>${k}</td><td>${v}</td></tr>`);
   let title, sub;
@@ -809,6 +830,8 @@ function showInspect(b){
     R('index on half', b.index % XM.FEET_PER_HALF);
     if(b.index>0) R('step from prev', mm(cx-((keyBoxes().filter(q=>q.kind==='foot')[b.index-1].x0+keyBoxes().filter(q=>q.kind==='foot')[b.index-1].x1)/2),5));
     R('world x', mm(cx+W.x0,4));
+    R('world y', mm(W.y0-XM.FOOT.yCentre,4));
+    R('world z', mm(XM.FOOT.z+W.z0,4));
   } else {
     const r=b.ref, spec=XM.KEY_TYPES[b.type];
     title=b.type;
@@ -835,6 +858,7 @@ function showInspect(b){
     R('world x', mm(r.cx+W.x0,4));
     R('world y back', mm(W.y0,4));
     R('world z bottom', mm(b.z0+W.z0,5));
+    R('origin mode', W.mode);
   }
   box.innerHTML = `<h4><b>${title}</b><span class="x" title="close">✕</span></h4>` +
     `<div style="color:var(--dim);margin:-3px 0 5px">${sub}</div>` +

@@ -226,6 +226,54 @@
   }
 
   /* ------------------------------------------------------------------ *
+   *  BOUNDS + WORLD ORIGIN                                              *
+   * ------------------------------------------------------------------ */
+  /** bounding box of the whole instrument — keys, spine and feet — in design mm */
+  function bounds(L) {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity,
+        z0 = Infinity, z1 = -Infinity;
+    const grow = (a, b, c, d, e, g) => {
+      x0 = Math.min(x0, a); x1 = Math.max(x1, b);
+      y0 = Math.min(y0, c); y1 = Math.max(y1, d);
+      z0 = Math.min(z0, e); z1 = Math.max(z1, g);
+    };
+    const W = XM.KEY_TYPES['Full Sized White'];
+    for (const w of L.whites) grow(w.x0, w.x1, 0, W.depth, XM.Z.whiteBottom, XM.Z.whiteTop);
+    for (const sl of L.slots) for (const m of sl.members)
+      grow(m.x0, m.x1, 0, m.spec.depth, XM.Z.accBottom, m.spec.peakZ);
+    for (const [hn, half] of XM.spineHalves()) {
+      const ls = XM.SPINE.layers[L.spineKind][hn];
+      grow(half.x0, half.x1, half.yBack, half.yFront,
+           ls[0].z0, ls[ls.length - 1].z1);
+    }
+    grow(L.feet[0] - XM.FOOT.w / 2, L.feet[L.feet.length - 1] + XM.FOOT.w / 2,
+         XM.FOOT.yCentre - XM.FOOT.d / 2, XM.FOOT.yCentre + XM.FOOT.d / 2,
+         XM.FOOT.z - 0.05, XM.FOOT.z + 0.05);
+    return { x0, x1, y0, y1, z0, z1,
+             cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, cz: (z0 + z1) / 2,
+             w: x1 - x0, d: y1 - y0, h: z1 - z0 };
+  }
+
+  /* Where the design frame lands in Blender's world.
+   *   X_world = x + off.x0
+   *   Y_world = off.y0 - y
+   *   Z_world = z + off.z0                                              */
+  const ORIGIN_MODES = {
+    centre: 'model centre at the world origin (0, 0, 0)',
+    spine:  'X centred on 0; Y = 0 at the spine front face; Z = 0 at the spine bottom face',
+    sheet:  'the drafting sandbox world position (round-trips into the Leveling .blend)'
+  };
+  function worldOffset(L, mode) {
+    const b = bounds(L);
+    if (mode === 'sheet')
+      return { x0: XM.WORLD.x0, y0: XM.WORLD.y0, z0: XM.WORLD.z0, mode: 'sheet', b };
+    if (mode === 'spine')
+      return { x0: -b.cx, y0: 0, z0: 0, mode: 'spine', b };
+    // default: the whole instrument's bounding box is centred on (0, 0, 0)
+    return { x0: -b.cx, y0: b.cy, z0: -b.cz, mode: 'centre', b };
+  }
+
+  /* ------------------------------------------------------------------ *
    *  MESHES                                                             *
    * ------------------------------------------------------------------ */
   function buildMeshes(L) {
@@ -342,8 +390,23 @@
    * ------------------------------------------------------------------ */
   const f = (v, n) => Number(v).toFixed(n == null ? 5 : n);
 
-  function pythonLog(L) {
-    const d = L.design, W = XM.WORLD;
+  /* Every number the generated builder computes with goes through pn().
+   * String(v) is JavaScript's shortest decimal that round-trips to the very
+   * same double, so Python's float() reads back the identical bits — which
+   * is what makes the Blender build and the WebGL preview the same model
+   * rather than two models that agree to a few decimals.  Display-only
+   * columns still use f(); geometry never does.                           */
+  const pn = v => {
+    if (v == null) return 'None';
+    if (!isFinite(v)) return String(v);
+    const s = String(v);
+    return /[.e]/.test(s) ? s : s + '.0';
+  };
+
+  function pythonLog(L, opts) {
+    const d = L.design;
+    const O = worldOffset(L, (opts && opts.origin) || 'centre');
+    const W = O, b = O.b;
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const out = [];
     const p = (...a) => out.push(a.join(''));
@@ -352,10 +415,18 @@
     p('# XENACHORD DESIGNER — DESIGN LOG');
     p('# generated ', now, '  (paste into Blender\'s Text Editor and Run Script)');
     p('#');
-    p('# Datum (matches ', W.file, '):');
-    p('#   X_world = x + ', f(W.x0, 4), '     x = 0 at the leftmost white key\'s left edge');
-    p('#   Y_world = ', f(W.y0, 4), ' - y     y = 0 at the spine front face, + toward the player');
-    p('#   Z_world = z + ', f(W.z0, 5), '     z = 0 at the spine bottom face');
+    p('# WORLD PLACEMENT: ', ORIGIN_MODES[O.mode]);
+    p('#   the built keyboard spans');
+    p('#     X  ', f(b.x0 + O.x0, 4), ' .. ', f(b.x1 + O.x0, 4), '   (', f(b.w, 4), ' mm)');
+    p('#     Y  ', f(O.y0 - b.y1, 4), ' .. ', f(O.y0 - b.y0, 4), '   (', f(b.d, 4), ' mm)');
+    p('#     Z  ', f(b.z0 + O.z0, 4), ' .. ', f(b.z1 + O.z0, 4), '   (', f(b.h, 4), ' mm)');
+    p('#   centre ', f(b.cx + O.x0, 4), ', ', f(O.y0 - b.cy, 4), ', ', f(b.cz + O.z0, 4));
+    p('#');
+    p('# Design frame (x/y/z below) -> Blender world:');
+    p('#   X_world = x + ', pn(O.x0), '     x = 0 at the leftmost white key\'s left edge');
+    p('#   Y_world = ', pn(O.y0), ' - y     y = 0 at the spine front face, + toward the player');
+    p('#   Z_world = z + ', pn(O.z0), '     z = 0 at the spine bottom face');
+    p('#   (set ORIGIN below to \'sheet\' to get the drafting sandbox position instead)');
     p('#');
     p('# FIXED SPINE <-> FOOT RELATIONSHIP (never varies)');
     p('#   foot pad        ', f(XM.FOOT.w, 3), ' x ', f(XM.FOOT.d, 3), ' mm');
@@ -378,6 +449,12 @@
     p('    "slot_delta":   ', f(L.delta), ',');
     p('}');
     p('');
+    p('# --- world placement -----------------------------------------------------');
+    p('WORLD_X0 = ', pn(O.x0), '      # X_world = x + WORLD_X0');
+    p('WORLD_Y0 = ', pn(O.y0), '      # Y_world = WORLD_Y0 - y');
+    p('WORLD_Z0 = ', pn(O.z0), '      # Z_world = z + WORLD_Z0');
+    p('ORIGIN   = "', O.mode, '"        # ', ORIGIN_MODES[O.mode]);
+    p('');
     p('# --- repeating seven-slot template (one period = 7 white keys) ----------');
     p('TEMPLATE = [');
     for (let i = 0; i < 7; i++) {
@@ -393,19 +470,26 @@
 
     /* --- key table ---------------------------------------------------- */
     p('# --- the 32 keys, left to right, one per sensor foot -------------------');
-    p('# (name, type, x_centre, width, depth, world_x, world_y_back, world_z_bottom, foot_x)');
+    p('# (name, type, x_centre, width, depth, clear_l, clear_r,');
+    p('#  world_x, world_y_back, world_z_bottom, foot_x)');
+    p('# clear_l / clear_r are the left and right edges of a white key\'s mid');
+    p('# section once its neighbouring accidentals have taken their clearance;');
+    p('# they are None on accidentals.  The builder needs them, so they are');
+    p('# part of the record rather than something re-derived downstream.');
     p('# KEYS is always exactly 32 entries long. KEYS[i] belongs to FEET[i].');
     p('KEYS = [');
     for (const n of L.notes) {
       const r = n.ref;
       const spec = XM.KEY_TYPES[n.type];
       const depth = spec.depth;
-      const zb = spec.kind === 'white' ? XM.Z.whiteBottom : XM.Z.accBottom;
+      const white = spec.kind === 'white';
+      const zb = white ? XM.Z.whiteBottom : XM.Z.accBottom;
       const nm = 'K' + String(n.index).padStart(2, '0') + '_' +
         (n.kind === 'white' ? 'W' + r.i + '_' + r.name
                             : 'A' + r.slot + '_' + (r.ord + 1));
       p('    ("', nm, '", "', n.type, '", ',
-        f(r.cx), ', ', f(spec.kind === 'white' ? L.wW : L.aW), ', ', f(depth), ', ',
+        pn(r.cx), ', ', pn(white ? L.wW : L.aW), ', ', pn(depth), ', ',
+        white ? pn(r.shL) : 'None', ', ', white ? pn(r.shR) : 'None', ', ',
         f(r.cx + W.x0, 4), ', ', f(W.y0, 4), ', ', f(zb + W.z0), ', ',
         r.foot == null ? 'None' : f(r.foot + W.x0, 4), '),');
     }
@@ -414,20 +498,25 @@
 
     /* --- spine + feet ------------------------------------------------- */
     p('# --- spine --------------------------------------------------------------');
+    p('# Halves A and B were drafted separately and their layer bands differ by');
+    p('# up to 0.011 mm, so each half carries its own faces and its own stack —');
+    p('# read verbatim out of "', L.spineKind, ' type Spine - A" / "- B".');
     p('SPINE = {');
-    p('    "y_back": ', f(XM.SPINE.yBack), ', "y_front": ', f(XM.SPINE.yFront), ',');
-    p('    "layers": [');
-    const layers = XM.SPINE.layers[L.spineKind];
-    for (const lay of layers)
-      p('        ("', lay.name, '", ', f(lay.z0), ', ', f(lay.z1), '),');
-    p('    ],');
-    p('    "halves": [           # 16 sensor feet each, and only ever these two');
-    p('        ("A", ', f(XM.SPINE.halfA.x0), ', ', f(XM.SPINE.halfA.x1), '),');
-    p('        ("B", ', f(XM.SPINE.halfB.x0), ', ', f(XM.SPINE.halfB.x1), '),');
+    p('    "y_back": ', pn(XM.SPINE.yBack), ', "y_front": ', pn(XM.SPINE.yFront),
+      ',   # nominal; per-half faces below');
+    p('    "halves": [   # (half, x0, x1, y_back, y_front, layers)');
+    p('                  # 16 sensor feet each, and only ever these two');
+    for (const [hn, half] of XM.spineHalves()) {
+      p('        ("', hn, '", ', pn(half.x0), ', ', pn(half.x1), ', ',
+        pn(half.yBack), ', ', pn(half.yFront), ', [');
+      for (const lay of XM.SPINE.layers[L.spineKind][hn])
+        p('            ("', lay.name, '", ', pn(lay.z0), ', ', pn(lay.z1), '),');
+      p('        ]),');
+    }
     p('    ],');
     p('    "screws": [');
     for (const sc of XM.SPINE.screws)
-      p('        (', f(sc.x), ', ', sc.big ? 'True' : 'False', '),');
+      p('        (', pn(sc.x), ', ', sc.big ? 'True' : 'False', '),');
     p('    ],');
     p('}');
     p('');
@@ -435,7 +524,7 @@
     p('FEET = [');
     const fc = L.feet;
     for (let i = 0; i < fc.length; i += 8)
-      p('    ', fc.slice(i, i + 8).map(v => f(v)).join(', '), ',');
+      p('    ', fc.slice(i, i + 8).map(v => pn(v)).join(', '), ',');
     p(']');
     p('assert len(KEYS) == 32, "this keyboard has exactly 32 keys"');
     p('assert len(FEET) == 32, "one AKM320: 16 feet on half A, 16 on half B"');
@@ -447,133 +536,546 @@
     }
 
     /* --- builder ------------------------------------------------------ */
-    p(BUILDER);
+    p(builderSource());
     return out.join('\n');
   }
+  /* ------------------------------------------------------------------ *
+   *  THE GENERATED BUILDER                                              *
+   *                                                                     *
+   *  The Python below is a line-for-line port of the mesh code in        *
+   *  model.js — the same code the WebGL preview runs.  Every constant    *
+   *  is injected from XM rather than retyped, and every number goes      *
+   *  through pn(), so Blender evaluates the identical doubles the        *
+   *  browser did.  Run the log and you get the preview: same parts,      *
+   *  same vertices, same faces.                                         *
+   * ------------------------------------------------------------------ */
+  function pySpecs() {
+    const rows = XM.TYPE_ORDER.map(n => {
+      const s = XM.KEY_TYPES[n];
+      const bits = ['"kind": "' + s.kind + '"', '"layer": "' + s.layer + '"',
+                    '"depth": ' + pn(s.depth)];
+      if (s.kind === 'white') {
+        bits.push('"z0": ' + pn(XM.Z.whiteBottom), '"z1": ' + pn(XM.Z.whiteTop));
+      } else {
+        bits.push('"nose_z": ' + pn(s.noseZ), '"peak_y": ' + pn(s.peakY),
+                  '"peak_z": ' + pn(s.peakZ),
+                  '"arm": ' + (s.arm
+                    ? '(' + [s.arm.startY, s.arm.startZ, s.arm.endY, s.arm.endZ]
+                        .map(pn).join(', ') + ')'
+                    : 'None'),
+                  '"z0": ' + pn(XM.Z.accBottom), '"z1": ' + pn(s.peakZ));
+      }
+      return '    "' + n + '": {' + bits.join(', ') + '},';
+    });
+    return 'KEY_SPECS = {\n' + rows.join('\n') + '\n}';
+  }
 
-  const pyDict = (name, fn) => name + ' = {\n' +
-    Object.keys(XM.KEY_TYPES).map(n => '    "' + n + '": ' + fn(XM.KEY_TYPES[n])).join(',\n') +
-    ',\n}';
+  function pyColours() {
+    const rows = Object.keys(XM.COLORS).map(k =>
+      '    "' + k + '": (' + XM.COLORS[k].map(pn).join(', ') + '),');
+    return 'COLOURS = {\n' + rows.join('\n') + '\n}';
+  }
 
-  const BUILDER = [
-'# =========================================================================',
-'# BUILDER',
-'# Run this file in Blender.  If the "Key Type Categories" collection exists',
-'# in the current .blend, its real meshes are duplicated and placed - that',
-'# gives geometry identical to the drafting sandbox.  Otherwise proxy boxes',
-'# are used so the layout is still readable.',
-'#',
-'# A duplicated category is scaled in X only.  That matches the size law',
-'# (every horizontal dimension is linear in DESIGN["scale"]) for the outer',
-'# envelope; the 0.65 / 1.0 / 1.544 mm edge detailing stretches with it, so',
-'# re-cut those by hand if you are printing.',
-'# =========================================================================',
-'import bpy',
-'from mathutils import Vector',
-'',
-'WORLD_X0 = ' + XM.WORLD.x0,
-'WORLD_Y0 = ' + XM.WORLD.y0,
-'WORLD_Z0 = ' + XM.WORLD.z0,
-'',
-'CATEGORY_COLLECTION = "Key Type Categories"',
-'TARGET_COLLECTION   = "Xenachord Generated"',
-'',
-'',
-'def to_world(x, y, z):',
-'    return (x + WORLD_X0, WORLD_Y0 - y, z + WORLD_Z0)',
-'',
-'',
-'def get_collection(name):',
-'    c = bpy.data.collections.get(name)',
-'    if c is None:',
-'        c = bpy.data.collections.new(name)',
-'        bpy.context.scene.collection.children.link(c)',
-'    return c',
-'',
-'',
-'def find_category(type_name):',
-'    """Categories are named e.g. \'Full Sized Black (from 15)\'."""',
-'    col = bpy.data.collections.get(CATEGORY_COLLECTION)',
-'    if col is None:',
-'        return None',
-'    for ob in col.objects:',
-'        if ob.name.split("(from")[0].strip() == type_name:',
-'            return ob',
-'    return None',
-'',
-'',
-'def world_bbox(ob):',
-'    ws = [ob.matrix_world @ Vector(c) for c in ob.bound_box]',
-'    return (min(v.x for v in ws), max(v.x for v in ws),',
-'            min(v.y for v in ws), max(v.y for v in ws),',
-'            min(v.z for v in ws), max(v.z for v in ws))',
-'',
-'',
-'def place_from_category(src, name, x_centre, width, coll):',
-'    ob = src.copy()',
-'    ob.data = src.data.copy()',
-'    ob.name = name',
-'    coll.objects.link(ob)',
-'    x0, x1, y0, y1, z0, z1 = world_bbox(src)',
-'    src_w = x1 - x0',
-'    if src_w > 1e-9 and abs(width - src_w) > 1e-4:',
-'        ob.scale = (ob.scale.x * (width / src_w), ob.scale.y, ob.scale.z)',
-'    bpy.context.view_layer.update()',
-'    nx0, nx1, ny0, ny1, nz0, nz1 = world_bbox(ob)',
-'    ob.location.x += (x_centre + WORLD_X0) - (nx0 + nx1) / 2.0',
-'    ob.location.y += WORLD_Y0 - ny1        # back face onto the spine front',
-'    return ob',
-'',
-'',
-'def proxy_box(name, x0, x1, y0, y1, z0, z1, coll):',
-'    """x/y/z are DESIGN coordinates; converted to world here."""',
-'    me = bpy.data.meshes.new(name)',
-'    ob = bpy.data.objects.new(name, me)',
-'    coll.objects.link(ob)',
-'    vs = [to_world(a, b, c) for a in (x0, x1) for b in (y0, y1) for c in (z0, z1)]',
-'    fs = [(0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1),',
-'          (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)]',
-'    me.from_pydata(vs, [], fs)',
-'    me.update()',
-'    return ob',
-'',
-'',
-pyDict('DEPTH', s => s.depth),
-pyDict('Z_BOTTOM', s => (s.kind === 'white' ? XM.Z.whiteBottom : XM.Z.accBottom)),
-pyDict('Z_TOP', s => (s.kind === 'white' ? XM.Z.whiteTop : s.peakZ)),
-'',
-'',
-'def build():',
-'    coll = get_collection(TARGET_COLLECTION)',
-'    made, proxied = 0, 0',
-'    for (name, ktype, cx, width, depth, wx, wy, wz, foot) in KEYS:',
-'        src = find_category(ktype)',
-'        if src is not None:',
-'            place_from_category(src, name, cx, width, coll)',
-'            made += 1',
-'        else:',
-'            proxy_box(name, cx - width / 2.0, cx + width / 2.0, 0.0, depth,',
-'                      Z_BOTTOM[ktype], Z_TOP[ktype], coll)',
-'            proxied += 1',
-'',
-'    for (hname, hx0, hx1) in SPINE["halves"]:',
-'        for (lname, lz0, lz1) in SPINE["layers"]:',
-'            proxy_box("Spine_%s_%s" % (hname, lname), hx0, hx1,',
-'                      SPINE["y_back"], SPINE["y_front"], lz0, lz1, coll)',
-'',
-'    fw, fd, fz = ' + XM.FOOT.w + ', ' + XM.FOOT.d + ', ' + XM.FOOT.z,
-'    fy = ' + XM.FOOT.yCentre,
-'    for i, fx in enumerate(FEET):',
-'        proxy_box("Foot_%03d" % i, fx - fw / 2.0, fx + fw / 2.0,',
-'                  fy - fd / 2.0, fy + fd / 2.0, fz - 0.05, fz + 0.05, coll)',
-'',
-'    print("Xenachord: %d keys from Key Type Categories, %d proxies, %d feet."',
-'          % (made, proxied, len(FEET)))',
-'',
-'',
-'if __name__ == "__main__":',
-'    build()'
-  ].join('\n');
+  function builderSource() {
+    const S = XM.SPINE.screwStd, B = XM.SPINE.screwBig;
+    return `# =========================================================================
+# BUILDER — a direct port of the designer's own mesh code
+#
+# Everything below is the arithmetic model.js runs for the WebGL preview,
+# transcribed into Python.  Run this in Blender and you get the preview:
+# the same parts, the same vertices, the same faces, in the same places.
+# Nothing here is a stand-in box.
+#
+# Parts land in "${'Xenachord Generated'}" as one object per key (named for its
+# sensor foot), one object per spine half and layer, and one object per
+# foot — the same decomposition the drafting sandbox uses.
+#
+# USE_BLEND_CATEGORIES = True swaps the parametric keys, spine and feet for
+# the hand-modelled originals.  That only works inside the drafting sandbox
+# .blend, and the interior detailing then differs from the preview; the
+# outer envelope, the layout and the datum are identical either way.
+# =========================================================================
+import bpy
+from mathutils import Vector
+
+TARGET_COLLECTION    = "Xenachord Generated"
+ROOT_EMPTY           = "Xenachord Root"
+CATEGORY_COLLECTION  = "Key Type Categories"
+USE_BLEND_CATEGORIES = False
+
+# The drafting sandbox datum.  Used only by the USE_BLEND_CATEGORIES path,
+# to lift the sheet's geometry onto whatever origin this log was cut for.
+SHEET_X0, SHEET_Y0, SHEET_Z0 = ${pn(XM.WORLD.x0)}, ${pn(XM.WORLD.y0)}, ${pn(XM.WORLD.z0)}
+
+# --- constants, injected from the designer's model -----------------------
+DRAFT            = ${pn(XM.DRAFT)}      # side draft above the white playing surface
+WALL             = ${pn(XM.WALL)}      # shell wall thickness
+TONGUE_Y         = ${pn(XM.TONGUE_Y)}   # every accidental's tongue runs y 0 .. this
+RIB_INSET_RATIO  = ${pn(XM.SIZE.ribInsetRatio)}
+Z_ACC_BOTTOM     = ${pn(XM.Z.accBottom)}
+Z_WHITE_TOP      = ${pn(XM.Z.whiteTop)}
+Z_WHITE_BOTTOM   = ${pn(XM.Z.whiteBottom)}
+Z_WHITE_UNDER    = ${pn(XM.Z.whiteUnder)}
+Z_ACC_REAR_TOP   = ${pn(XM.Z.accRearTop)}
+GRAY_TONGUE      = (${pn(XM.Z.grayTongue[0])}, ${pn(XM.Z.grayTongue[1])})
+BLACK_TONGUE     = (${pn(XM.Z.blackTongue[0])}, ${pn(XM.Z.blackTongue[1])})
+WHITE_TONGUE     = (${pn(XM.Z.whiteTongue[0])}, ${pn(XM.Z.whiteTongue[1])})
+FOOT_W, FOOT_D   = ${pn(XM.FOOT.w)}, ${pn(XM.FOOT.d)}
+FOOT_YC, FOOT_Z  = ${pn(XM.FOOT.yCentre)}, ${pn(XM.FOOT.z)}
+SCREW_STD        = (${pn(S.w)}, ${pn(S.d)}, ${pn(S.yc)}, ${pn(S.zFloor)})   # w, d, y centre, floor z
+SCREW_BIG        = (${pn(B.w)}, ${pn(B.d)}, ${pn(B.yc)}, ${pn(B.zFloor)})
+
+${pySpecs()}
+
+${pyColours()}
+
+LAYER_PART = {"white": "Keys - White", "black": "Keys - Black", "gray": "Keys - Gray"}
+
+
+# =========================================================================
+# MESH PRIMITIVES  (model.js: pushTri / pushQuad / pushBox / loftRing)
+# =========================================================================
+def push_tri(t, a, b, c):
+    t.append(a); t.append(b); t.append(c)
+
+
+def push_quad(t, a, b, c, d):
+    push_tri(t, a, b, c); push_tri(t, a, c, d)
+
+
+def push_box(t, x0, x1, y0, y1, z0, z1):
+    if x1 - x0 < 1e-5 or y1 - y0 < 1e-5 or z1 - z0 < 1e-5:
+        return
+    p = lambda x, y, z: (x, y, z)
+    push_quad(t, p(x0,y0,z0), p(x0,y1,z0), p(x1,y1,z0), p(x1,y0,z0))   # -z
+    push_quad(t, p(x0,y0,z1), p(x1,y0,z1), p(x1,y1,z1), p(x0,y1,z1))   # +z
+    push_quad(t, p(x0,y0,z0), p(x1,y0,z0), p(x1,y0,z1), p(x0,y0,z1))   # -y
+    push_quad(t, p(x1,y0,z0), p(x1,y1,z0), p(x1,y1,z1), p(x1,y0,z1))   # +x
+    push_quad(t, p(x1,y1,z0), p(x0,y1,z0), p(x0,y1,z1), p(x1,y1,z1))   # +y
+    push_quad(t, p(x0,y1,z0), p(x0,y0,z0), p(x0,y0,z1), p(x0,y1,z1))   # -x
+
+
+def fan_cap(t, ring, y, flip):
+    for i in range(1, len(ring) - 1):
+        a = (ring[0][0], y, ring[0][1])
+        b = (ring[i][0], y, ring[i][1])
+        c = (ring[i + 1][0], y, ring[i + 1][1])
+        if flip:
+            push_tri(t, a, c, b)
+        else:
+            push_tri(t, a, b, c)
+
+
+def loft_ring(t, ring_a, ya, ring_b, yb, cap_a, cap_b):
+    """Winding matters: push_box emits outward-facing quads, so the lofts
+    have to as well.  Holds for back-to-front lofts (ya < yb) and for the
+    clockwise rings that cut the hollow undersides."""
+    n = len(ring_a)
+    fwd = ya >= yb
+    for i in range(n):
+        j = (i + 1) % n
+        ai = (ring_a[i][0], ya, ring_a[i][1]); aj = (ring_a[j][0], ya, ring_a[j][1])
+        bi = (ring_b[i][0], yb, ring_b[i][1]); bj = (ring_b[j][0], yb, ring_b[j][1])
+        if fwd:
+            push_quad(t, ai, aj, bj, bi)
+        else:
+            push_quad(t, ai, bi, bj, aj)
+    if cap_a:
+        fan_cap(t, ring_a, ya, fwd)
+    if cap_b:
+        fan_cap(t, ring_b, yb, not fwd)
+
+
+def loft_prism(t, x0, x1, ya, za, yb, zb, z_top):
+    """a slab whose floor slopes from (ya, za) to (yb, zb) under a flat top"""
+    ring_a = [(x0, za), (x1, za), (x1, z_top), (x0, z_top)]
+    ring_b = [(x0, zb), (x1, zb), (x1, z_top), (x0, z_top)]
+    loft_ring(t, ring_a, ya, ring_b, yb, True, True)
+
+
+# =========================================================================
+# KEY GEOMETRY  (model.js: halfW / accTopAt / buildAccidental / buildWhite)
+# =========================================================================
+def half_w(w, z):
+    """half-width of an accidental at height z — side draft above the top"""
+    return w / 2.0 - DRAFT * max(0.0, z - Z_WHITE_TOP)
+
+
+def acc_top_at(spec, y):
+    """top surface height of an accidental at y (y = 0 at the spine)"""
+    if y <= TONGUE_Y:
+        return None                                   # tongue region
+    peak_y, peak_z, depth = spec["peak_y"], spec["peak_z"], spec["depth"]
+    if y >= peak_y:
+        # nose ramp down to the front face
+        f = (y - peak_y) / (depth - peak_y)
+        return peak_z + (spec["nose_z"] - peak_z) * f
+    # rear draft: peak -> Z_ACC_REAR_TOP at y = TONGUE_Y
+    f = (peak_y - y) / (peak_y - TONGUE_Y)
+    return peak_z + (Z_ACC_REAR_TOP - peak_z) * f
+
+
+def build_accidental(cx, w, spec):
+    t = []
+    arm = spec["arm"]
+    depth, peak_y = spec["depth"], spec["peak_y"]
+    body_back_y = arm[0] if arm else TONGUE_Y
+
+    # --- Y stations through the body, front (depth) back to body_back_y ---
+    ys = [depth]
+    def add(v):
+        if v > body_back_y + 1e-6 and v < depth - 1e-6:
+            ys.append(v)
+    add(peak_y)
+    for i in range(1, 6):
+        add(body_back_y + (peak_y - body_back_y) * i / 6.0)
+    ys.append(body_back_y)
+    ys.sort(reverse=True)                              # front -> back
+
+    def ring_at(y):
+        top = acc_top_at(spec, max(y, body_back_y + 1e-6))
+        if not top:
+            top = acc_top_at(spec, body_back_y + 1e-6)
+        zb = Z_ACC_BOTTOM
+        hw_t, hw_b = half_w(w, top), w / 2.0
+        shoulder = min(top, Z_WHITE_TOP)
+        # outer ring, CCW seen from +y
+        return [(cx - hw_b, zb), (cx + hw_b, zb),
+                (cx + w / 2.0, shoulder), (cx + hw_t, top),
+                (cx - hw_t, top), (cx - w / 2.0, shoulder)]
+
+    for i in range(len(ys) - 1):
+        loft_ring(t, ring_at(ys[i]), ys[i], ring_at(ys[i + 1]), ys[i + 1],
+                  i == 0, i == len(ys) - 2)
+
+    # --- hollow underside: a cavity inset by WALL, open at the bottom ---
+    cav_front, cav_back = depth - WALL, body_back_y + WALL
+    if cav_front > cav_back + 0.2:
+        def cav(y):
+            top = acc_top_at(spec, y)
+            if not top:
+                top = Z_ACC_REAR_TOP
+            ct = min(top - WALL, Z_WHITE_TOP + 3.0)
+            hw = w / 2.0 - WALL
+            return [(cx - hw, Z_ACC_BOTTOM), (cx - hw, ct),
+                    (cx + hw, ct), (cx + hw, Z_ACC_BOTTOM)]
+        cys = [cav_front]
+        for i in range(1, 5):
+            cys.append(cav_front + (cav_back - cav_front) * i / 5.0)
+        cys.append(cav_back)
+        for i in range(len(cys) - 1):
+            loft_ring(t, cav(cys[i]), cys[i], cav(cys[i + 1]), cys[i + 1],
+                      i == 0, i == len(cys) - 2)
+
+    # --- thin rear arm (the deep "Second" gray keys) ---
+    if arm:
+        start_y, start_z, end_y, end_z = arm
+        hw = w / 2.0 - 0.6
+        ring = lambda z: [(cx - hw, Z_ACC_BOTTOM), (cx + hw, Z_ACC_BOTTOM),
+                          (cx + hw, z), (cx - hw, z)]
+        loft_ring(t, ring(start_z), start_y, ring(end_z), end_y, True, True)
+
+    # --- rear tongue into the spine ---
+    tz = BLACK_TONGUE if spec["layer"] == "black" else GRAY_TONGUE
+    push_box(t, cx - w / 2.0, cx + w / 2.0, 0.0, TONGUE_Y + 0.001, tz[0], tz[1])
+    return t
+
+
+def build_white(cx, w, sh_l, sh_r):
+    """1 mm top plate, two outer walls, two inner ribs, one rib centred over
+    the sensor foot, a solid front block and a rear tongue onto the spine."""
+    t = []
+    x0, x1 = cx - w / 2.0, cx + w / 2.0
+    D = KEY_SPECS["Full Sized White"]["depth"]
+    top_z = Z_WHITE_TOP
+    plate = top_z - 1.0
+
+    front_block_y = D - 6.0            # full-height nose
+    ramp_end_y    = D - 19.527         # underside reaches its cruising height
+    tongue_y      = ${pn(XM.TONGUE_Y)}
+
+    if sh_l is None:
+        sh_l = x0
+    if sh_r is None:
+        sh_r = x1
+
+    push_box(t, x0, x1, front_block_y, D, Z_WHITE_BOTTOM, top_z)
+    loft_prism(t, x0, x1, ramp_end_y, Z_WHITE_UNDER,
+               front_block_y, Z_WHITE_BOTTOM, top_z)
+    push_box(t, sh_l, sh_r, tongue_y, ramp_end_y, plate, top_z)
+    push_box(t, sh_l, sh_l + 1.0, tongue_y, ramp_end_y, Z_WHITE_UNDER, top_z)
+    push_box(t, sh_r - 1.0, sh_r, tongue_y, ramp_end_y, Z_WHITE_UNDER, top_z)
+
+    inset = w * RIB_INSET_RATIO
+    r_a, r_b = x0 + inset, x1 - inset - 1.0
+    if r_a > sh_l + 1.0:
+        push_box(t, r_a, r_a + 1.0, tongue_y, ramp_end_y, Z_WHITE_UNDER, top_z)
+    if r_b + 1.0 < sh_r - 1.0:
+        push_box(t, r_b, r_b + 1.0, tongue_y, ramp_end_y, Z_WHITE_UNDER, top_z)
+
+    push_box(t, cx - 0.5, cx + 0.5, FOOT_YC - 6.0, FOOT_YC + 1.0,
+             Z_WHITE_UNDER, top_z)
+
+    tz0 = WHITE_TONGUE[0]
+    ring_f = [(x0, tz0), (x1, tz0), (x1, top_z), (x0, top_z)]
+    ring_b = [(x0, tz0), (x1, tz0), (x1, 7.08899), (x0, 7.08899)]
+    loft_ring(t, ring_f, tongue_y, ring_b, 0.0, True, True)
+    return t
+
+
+# =========================================================================
+# SPINE + FEET GEOMETRY  (model.js: rectWithHoles / buildSpine / buildFeet)
+# =========================================================================
+def rect_with_holes(x0, x1, y0, y1, holes, emit):
+    if x1 - x0 < 1e-4 or y1 - y0 < 1e-4:
+        return
+    hit = None
+    for c in holes:
+        a, b = max(x0, c[0]), min(x1, c[1])
+        p, q = max(y0, c[2]), min(y1, c[3])
+        if b - a > 1e-4 and q - p > 1e-4:
+            hit = (a, b, p, q)
+            break
+    if hit is None:
+        emit(x0, x1, y0, y1)
+        return
+    rect_with_holes(x0, hit[0], y0, y1, holes, emit)
+    rect_with_holes(hit[1], x1, y0, y1, holes, emit)
+    rect_with_holes(hit[0], hit[1], y0, hit[2], holes, emit)
+    rect_with_holes(hit[0], hit[1], hit[3], y1, holes, emit)
+
+
+def unit_screw_holes():
+    out = []
+    for (sx, big) in SPINE["screws"]:
+        gw, gd, gyc, gzf = SCREW_BIG if big else SCREW_STD
+        out.append((sx - gw / 2.0, sx + gw / 2.0,
+                    SPINE["y_front"] - gyc - gd / 2.0,
+                    SPINE["y_front"] - gyc + gd / 2.0, gzf))
+    return out
+
+
+def build_spine_slab(x0, x1, y_back, y_front, z0, z1):
+    t = []
+    active = [h for h in unit_screw_holes() if z1 > h[4]]
+    rect_with_holes(x0, x1, y_back, y_front, active,
+                    lambda a, b, c, d: push_box(t, a, b, c, d, z0, z1))
+    return t
+
+
+def build_foot(cx):
+    t = []
+    push_box(t, cx - FOOT_W / 2.0, cx + FOOT_W / 2.0,
+             FOOT_YC - FOOT_D / 2.0, FOOT_YC + FOOT_D / 2.0,
+             FOOT_Z - 0.05, FOOT_Z + 0.05)
+    return t
+
+
+# =========================================================================
+# BLENDER PLUMBING
+# =========================================================================
+def to_world(x, y, z):
+    return (x + WORLD_X0, WORLD_Y0 - y, z + WORLD_Z0)
+
+
+def new_collection(name, parent):
+    c = bpy.data.collections.new(name)
+    parent.children.link(c)
+    return c
+
+
+def get_material(key):
+    rgb = COLOURS[key]
+    name = "Xenachord " + key
+    m = bpy.data.materials.get(name)
+    if m is None:
+        m = bpy.data.materials.new(name)
+        if not getattr(m, "use_nodes", True):
+            m.use_nodes = True          # a no-op from Blender 6 on
+        bsdf = m.node_tree.nodes.get("Principled BSDF")
+        if bsdf is not None:
+            bsdf.inputs["Base Color"].default_value = (rgb[0], rgb[1], rgb[2], 1.0)
+            if "Roughness" in bsdf.inputs:
+                bsdf.inputs["Roughness"].default_value = 0.45
+    m.diffuse_color = (rgb[0], rgb[1], rgb[2], 1.0)
+    return m
+
+
+def make_mesh_object(name, tris, coll, mat):
+    """tris is the flat triangle soup the browser hands to WebGL, in design
+    coordinates.  design -> world flips Y, which mirrors handedness, so each
+    face is emitted reversed to keep its normal pointing outward."""
+    verts, faces, index = [], [], {}
+    for i in range(0, len(tris), 3):
+        face = []
+        for k in (0, 2, 1):
+            p = to_world(*tris[i + k])
+            key = (round(p[0], 6), round(p[1], 6), round(p[2], 6))
+            j = index.get(key)
+            if j is None:
+                j = len(verts)
+                index[key] = j
+                verts.append(p)
+            face.append(j)
+        if len(set(face)) == 3:
+            faces.append(tuple(face))
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], faces)
+    me.validate(verbose=False)
+    me.update()
+    if mat is not None:
+        me.materials.append(mat)
+    ob = bpy.data.objects.new(name, me)
+    coll.objects.link(ob)
+    return ob
+
+
+def make_root(coll):
+    # An empty at the world origin.  Everything is parented to it, so the
+    # keyboard as a whole is driven from (0, 0, 0).
+    root = bpy.data.objects.new(ROOT_EMPTY, None)
+    root.empty_display_type = "PLAIN_AXES"
+    root.empty_display_size = 25.0
+    root.location = (0.0, 0.0, 0.0)
+    coll.objects.link(root)
+    return root
+
+
+# ---- the optional "use the sandbox's own meshes" path -------------------
+def world_bbox(ob):
+    ws = [ob.matrix_world @ Vector(c) for c in ob.bound_box]
+    return (min(v.x for v in ws), max(v.x for v in ws),
+            min(v.y for v in ws), max(v.y for v in ws),
+            min(v.z for v in ws), max(v.z for v in ws))
+
+
+def find_category(type_name):
+    """Categories are named e.g. 'Full Sized Black (from 15)'."""
+    col = bpy.data.collections.get(CATEGORY_COLLECTION)
+    if col is None:
+        return None
+    for ob in col.objects:
+        if ob.name.split("(from")[0].strip() == type_name:
+            return ob
+    return None
+
+
+def place_from_category(src, name, x_centre, width, coll):
+    ob = src.copy()
+    ob.data = src.data.copy()
+    ob.name = name
+    coll.objects.link(ob)
+    x0, x1, y0, y1, z0, z1 = world_bbox(src)
+    src_w = x1 - x0
+    if src_w > 1e-9 and abs(width - src_w) > 1e-9:
+        ob.scale = (ob.scale.x * (width / src_w), ob.scale.y, ob.scale.z)
+    bpy.context.view_layer.update()
+    nx0, nx1, ny0, ny1, nz0, nz1 = world_bbox(ob)
+    ob.location.x += (x_centre + WORLD_X0) - (nx0 + nx1) / 2.0
+    ob.location.y += WORLD_Y0 - ny1          # back face onto the spine front
+    ob.location.z += WORLD_Z0 - SHEET_Z0     # spine bottom face onto z = 0
+    return ob
+
+
+def copy_sheet_collection(src_name, dst_coll):
+    """Duplicate a sandbox collection wholesale onto this log's origin."""
+    col = bpy.data.collections.get(src_name)
+    if col is None:
+        return 0
+    dx, dy, dz = WORLD_X0 - SHEET_X0, WORLD_Y0 - SHEET_Y0, WORLD_Z0 - SHEET_Z0
+    n = 0
+    for src in col.objects:
+        ob = src.copy()
+        if src.data is not None:
+            ob.data = src.data.copy()
+        dst_coll.objects.link(ob)
+        ob.location = (ob.location.x + dx, ob.location.y + dy, ob.location.z + dz)
+        n += 1
+    return n
+
+
+# =========================================================================
+def build():
+    scene = bpy.context.scene.collection
+    root_coll = new_collection(TARGET_COLLECTION, scene)
+    part = {}
+    for nm in ("Keys - White", "Keys - Black", "Keys - Gray", "Spine", "Feet"):
+        part[nm] = new_collection(nm, root_coll)
+    root = make_root(root_coll)
+    mats = dict((k, get_material(k)) for k in COLOURS)
+
+    keys_from_sheet = 0
+    for (name, ktype, cx, width, depth, clear_l, clear_r,
+         wx, wy, wz, foot) in KEYS:
+        spec = KEY_SPECS[ktype]
+        coll = part[LAYER_PART[spec["layer"]]]
+        if USE_BLEND_CATEGORIES:
+            src = find_category(ktype)
+            if src is not None:
+                place_from_category(src, name, cx, width, coll)
+                keys_from_sheet += 1
+                continue
+        if spec["kind"] == "white":
+            tris = build_white(cx, width, clear_l, clear_r)
+        else:
+            tris = build_accidental(cx, width, spec)
+        make_mesh_object(name, tris, coll, mats[spec["layer"]])
+
+    spine_from_sheet = feet_from_sheet = 0
+    if USE_BLEND_CATEGORIES:
+        kind = DESIGN["spine_type"].split()[0].capitalize()
+        spine_from_sheet = (copy_sheet_collection(kind + " type Spine - A", part["Spine"]) +
+                            copy_sheet_collection(kind + " type Spine - B", part["Spine"]))
+        feet_from_sheet = (copy_sheet_collection("Feet - A", part["Feet"]) +
+                           copy_sheet_collection("Feet - B", part["Feet"]))
+
+    if not spine_from_sheet:
+        for (hname, hx0, hx1, hy_back, hy_front, layers) in SPINE["halves"]:
+            for (lname, lz0, lz1) in layers:
+                tris = build_spine_slab(hx0, hx1, hy_back, hy_front, lz0, lz1)
+                make_mesh_object("Spine_%s_%s" % (hname, lname), tris,
+                                 part["Spine"], mats["spine"])
+
+    if not feet_from_sheet:
+        for i, fx in enumerate(FEET):
+            make_mesh_object("Foot_%s_%02d" % ("A" if i < 16 else "B", i % 16 + 1),
+                             build_foot(fx), part["Feet"], mats["feet"])
+
+    # parent everything to the root empty at (0, 0, 0), in place
+    bpy.context.view_layer.update()
+    inv = root.matrix_world.inverted()
+    objects = [ob for c in [root_coll] + list(root_coll.children) for ob in c.objects]
+    for ob in objects:
+        if ob is root:
+            continue
+        ob.parent = root
+        ob.matrix_parent_inverse = inv
+    bpy.context.view_layer.update()
+
+    # report where it actually landed
+    meshes = [ob for ob in objects if ob.type == "MESH"]
+    pts = [ob.matrix_world @ Vector(c) for ob in meshes for c in ob.bound_box]
+    print("Xenachord: %d keys, %d spine parts, %d feet  (%s)"
+          % (len(KEYS), len(part["Spine"].objects), len(part["Feet"].objects),
+             "sandbox meshes" if USE_BLEND_CATEGORIES else
+             "parametric — identical to the browser preview"))
+    if keys_from_sheet or spine_from_sheet or feet_from_sheet:
+        print("Xenachord: %d keys, %d spine parts and %d feet came from the sandbox."
+              % (keys_from_sheet, spine_from_sheet, feet_from_sheet))
+    if pts:
+        bx = (min(p.x for p in pts), max(p.x for p in pts))
+        by = (min(p.y for p in pts), max(p.y for p in pts))
+        bz = (min(p.z for p in pts), max(p.z for p in pts))
+        print("Xenachord bbox  X %9.4f .. %9.4f   Y %9.4f .. %9.4f   Z %9.4f .. %9.4f"
+              % (bx[0], bx[1], by[0], by[1], bz[0], bz[1]))
+        print("Xenachord centre %.4f, %.4f, %.4f   (origin mode: %s)"
+              % ((bx[0] + bx[1]) / 2.0, (by[0] + by[1]) / 2.0,
+                 (bz[0] + bz[1]) / 2.0, ORIGIN))
+
+
+if __name__ == "__main__":
+    build()`;
+  }
 
   /* ------------------------------------------------------------------ *
    *  PLAIN-TEXT SUMMARY (used in the UI status panel)                   *
@@ -587,7 +1089,8 @@ pyDict('Z_TOP', s => (s.kind === 'white' ? XM.Z.whiteTop : s.peakZ)),
   const api = {
     presetDesign, computeLayout, buildMeshes, toSTL, makeZip,
     pythonLog, summary, notesPerPeriod, layerCount,
-    whiteCount, widthAt, suggestScale
+    whiteCount, widthAt, suggestScale,
+    bounds, worldOffset, ORIGIN_MODES
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else (typeof window !== 'undefined' ? window : globalThis).XD = api;

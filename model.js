@@ -48,22 +48,40 @@
     depth: 9.84706,
     height: 7.10039,      // z 0 .. 7.10039
 
-    // Layer stack. A "one type" spine is one solid slab; a "two type" spine
-    // splits it 2 ways; a "three type" spine 3 ways.  Each key's rear tongue
-    // plugs into the layer belonging to its colour.
+    // Layer stack, PER HALF.  A "one type" spine is one solid slab; a "two
+    // type" spine splits it 2 ways; a "three type" spine 3 ways.  Each key's
+    // rear tongue plugs into the layer belonging to its colour.
+    //
+    // Halves A and B were modelled separately in the sandbox and their layer
+    // bands differ by up to 0.011 mm — read verbatim out of the collections
+    // "One / Two / Three type Spine - A" and "- B" so that a generated spine
+    // is an exact replica of the drafted one, not an idealisation of it.
     layers: {
-      one:   [{ name: 'all',   z0: 0.0,     z1: 7.10039 }],
-      two:   [{ name: 'lower', z0: 0.0,     z1: 6.07832 },
-              { name: 'upper', z0: 6.07826, z1: 7.07833 }],
-      three: [{ name: 'gray',  z0: 0.0,     z1: 5.08934 },
-              { name: 'black', z0: 5.09072, z1: 6.10034 },
-              { name: 'white', z0: 6.07824, z1: 7.10034 }]
+      one: {
+        A: [{ name: 'all',   z0:  0.0,     z1: 7.10039 }],
+        B: [{ name: 'all',   z0: -0.00006, z1: 7.08935 }]
+      },
+      two: {
+        A: [{ name: 'lower', z0:  0.0,     z1: 6.07832 },
+            { name: 'upper', z0:  6.07826, z1: 7.07833 }],
+        B: [{ name: 'lower', z0: -0.00006, z1: 6.08932 },
+            { name: 'upper', z0:  6.08928, z1: 7.08936 }]
+      },
+      three: {
+        A: [{ name: 'gray',  z0:  0.0,     z1: 5.08934 },
+            { name: 'black', z0:  5.09072, z1: 6.10034 },
+            { name: 'white', z0:  6.07824, z1: 7.10034 }],
+        B: [{ name: 'gray',  z0: -0.00006, z1: 5.07835 },
+            { name: 'black', z0:  5.07829, z1: 6.08932 },
+            { name: 'white', z0:  6.08926, z1: 7.11137 }]
+      }
     },
 
     // One AKM320 unit = spine half A + spine half B (32 feet between them).
-    halfA: { x0: 0.8493, x1: 183.4323 },   // length 182.583
-    halfB: { x0: 184.7236, x1: 373.2951 }, // length 188.5715
-    span: 373.2951 - 0.8493,               // A + B, end to end
+    // x/yBack/yFront are the measured faces of each half.
+    halfA: { x0: 0.84933,   x1: 183.43233, yBack: -9.84707, yFront: 0.00000 },
+    halfB: { x0: 184.72359, x1: 373.29513, yBack: -9.84695, yFront: 0.00005 },
+    span: 373.29513 - 0.84933,             // A + B, end to end
 
     // Screw holes, x measured from the design origin.  "big" holes go all the
     // way through; the others are counterbores stopping at z = 2.91114.
@@ -170,6 +188,14 @@
     grayTongue:  [4.08924, 5.09074],   // plugs into spine layer 1
     blackTongue: [5.08924, 6.08924],   // plugs into spine layer 2
     whiteTongue: [6.08924, 8.62804]    // plugs into spine layer 3
+  };
+
+  /* Part colours.  One table, used by the WebGL preview and written into the
+   * Blender log as materials, so the two renderings read the same.        */
+  const COLORS = {
+    white: [0.95, 0.95, 0.93], black: [0.16, 0.16, 0.19],
+    gray:  [0.55, 0.55, 0.58], spine: [0.30, 0.31, 0.36],
+    feet:  [0.24, 0.42, 0.60]
   };
 
   const DRAFT = 0.1018;      // side draft above z = Z.whiteTop (5.8 degrees)
@@ -332,17 +358,27 @@
   }
 
   /* Loft a ring of N points between two Y stations. Rings are given as
-   * [x,z] pairs in consistent winding.  capA / capB close the ends.     */
+   * [x,z] pairs in consistent winding.  capA / capB close the ends.
+   *
+   * Winding matters: pushBox emits outward-facing quads, so the lofts have
+   * to as well or the two halves of a key disagree about which side is the
+   * outside.  For a ring wound counter-clockwise in (x, z) seen from +y the
+   * quad below faces outward — and it stays outward when the caller lofts
+   * back-to-front (yA < yB) or hands in a clockwise ring, which is how the
+   * hollow undersides are cut.  That makes STL normals and Blender's shading
+   * right; the preview shades two-sided and never noticed.               */
   function loftRing(t, ringA, yA, ringB, yB, capA, capB) {
     const n = ringA.length;
+    const fwd = yA >= yB;
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n;
-      pushQuad(t,
-        [ringA[i][0], yA, ringA[i][1]], [ringB[i][0], yB, ringB[i][1]],
-        [ringB[j][0], yB, ringB[j][1]], [ringA[j][0], yA, ringA[j][1]]);
+      const ai = [ringA[i][0], yA, ringA[i][1]], aj = [ringA[j][0], yA, ringA[j][1]];
+      const bi = [ringB[i][0], yB, ringB[i][1]], bj = [ringB[j][0], yB, ringB[j][1]];
+      if (fwd) pushQuad(t, ai, aj, bj, bi);
+      else     pushQuad(t, ai, bi, bj, aj);
     }
-    if (capA) fanCap(t, ringA, yA, true);
-    if (capB) fanCap(t, ringB, yB, false);
+    if (capA) fanCap(t, ringA, yA, fwd);
+    if (capB) fanCap(t, ringB, yB, !fwd);
   }
   function fanCap(t, ring, y, flip) {
     for (let i = 1; i < ring.length - 1; i++) {
@@ -534,20 +570,52 @@
     });
   }
 
-  /** Build the one and only spine: half A + half B, `nLayers` deep */
-  function buildSpine(nLayers) {
-    const key = nLayers >= 3 ? 'three' : nLayers === 2 ? 'two' : 'one';
-    const layers = SPINE.layers[key];
-    const out = {};
-    for (const L of layers) out[L.name] = [];
+  const spineKindOf = n => (n >= 3 ? 'three' : n === 2 ? 'two' : 'one');
+
+  /** the halves of the one and only spine, in build order */
+  const spineHalves = () => [['A', SPINE.halfA], ['B', SPINE.halfB]];
+
+  /**
+   * The one and only spine, `nLayers` deep, as one part per (half, layer) —
+   * the same decomposition the drafting sandbox uses, so each generated part
+   * has a one-to-one counterpart in "<kind> type Spine - A / - B".
+   */
+  function spineParts(nLayers) {
+    const kind = spineKindOf(nLayers);
     const holes = unitScrewHoles(0);
-    for (const half of [SPINE.halfA, SPINE.halfB]) {
-      for (const L of layers) {
+    const parts = [];
+    for (const [hn, half] of spineHalves()) {
+      for (const L of SPINE.layers[kind][hn]) {
+        const tris = [];
         const active = holes.filter(h => L.z1 > h.zFloor);
-        rectWithHoles(half.x0, half.x1, SPINE.yBack, SPINE.yFront,
-          active, (a, b, c, d) => pushBox(out[L.name], a, b, c, d, L.z0, L.z1));
+        rectWithHoles(half.x0, half.x1, half.yBack, half.yFront, active,
+          (a, b, c, d) => pushBox(tris, a, b, c, d, L.z0, L.z1));
+        parts.push({
+          name: 'Spine_' + hn + '_' + L.name, half: hn, layer: L.name,
+          x0: half.x0, x1: half.x1, yBack: half.yBack, yFront: half.yFront,
+          z0: L.z0, z1: L.z1, tris
+        });
       }
     }
+    return parts;
+  }
+
+  /** the spine's design-frame z extent for a given layer count */
+  function spineZRange(nLayers) {
+    const kind = spineKindOf(nLayers);
+    let z0 = Infinity, z1 = -Infinity;
+    for (const [hn] of spineHalves()) {
+      const ls = SPINE.layers[kind][hn];
+      z0 = Math.min(z0, ls[0].z0);
+      z1 = Math.max(z1, ls[ls.length - 1].z1);
+    }
+    return [z0, z1];
+  }
+
+  /** Build the one and only spine: half A + half B, `nLayers` deep */
+  function buildSpine(nLayers) {
+    const out = {};
+    for (const p of spineParts(nLayers)) out[p.name] = p.tris;
     return out;
   }
 
@@ -562,15 +630,26 @@
     return out;
   }
 
-  function buildFeet() {
-    const t = [];
-    for (const cx of footCentres()) {
-      const y0 = FOOT.yCentre - FOOT.d / 2, y1 = FOOT.yCentre + FOOT.d / 2;
+  /** one part per sensor foot, named to match "Feet - A" / "Feet - B" */
+  function footParts() {
+    const y0 = FOOT.yCentre - FOOT.d / 2, y1 = FOOT.yCentre + FOOT.d / 2;
+    return footCentres().map((cx, i) => {
+      const tris = [];
       // a flat plane, exactly as in the .blend — given a hair of thickness
       // so it survives STL export
-      pushBox(t, cx - FOOT.w / 2, cx + FOOT.w / 2, y0, y1,
+      pushBox(tris, cx - FOOT.w / 2, cx + FOOT.w / 2, y0, y1,
               FOOT.z - 0.05, FOOT.z + 0.05);
-    }
+      return {
+        name: 'Foot_' + (i < FEET_PER_HALF ? 'A' : 'B') + '_' +
+              String(i % FEET_PER_HALF + 1).padStart(2, '0'),
+        index: i, half: i < FEET_PER_HALF ? 'A' : 'B', cx, tris
+      };
+    });
+  }
+
+  function buildFeet() {
+    const t = [];
+    for (const p of footParts()) t.push(...p.tris);
     return t;
   }
 
@@ -578,13 +657,14 @@
    *  EXPORT                                                              *
    * ==================================================================== */
   const api = {
-    WORLD, SPINE, FOOT, SIZE, Z, DRAFT, WALL, TONGUE_Y,
+    WORLD, SPINE, FOOT, SIZE, Z, COLORS, DRAFT, WALL, TONGUE_Y,
     NOTES, UNITS, FEET_PER_HALF,
     KEY_TYPES, TYPE_ORDER, LAYOUTS, SLOT_BIAS, SLOT_GROUP,
     WHITE_NAMES, SLOT_NAMES,
     whiteWidth, whitePitch, accWidth, slotDelta,
     pushTri, pushQuad, pushBox, loftRing, rectWithHoles,
     halfW, accTopAt, buildAccidental, buildWhite, buildSpine, buildFeet,
+    spineKindOf, spineHalves, spineParts, spineZRange, footParts,
     footCentres, unitScrewHoles,
     toWorld: (x, y, z) => [x + WORLD.x0, WORLD.y0 - y, z + WORLD.z0]
   };

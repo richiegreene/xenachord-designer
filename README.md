@@ -43,8 +43,8 @@ the cut lands.
 
 | file | what it is |
 |---|---|
-| `model.js` | Everything measured out of the .blend: the datum, the spine, the fixed foot relationship, the size law, the seven key types, the three layouts, and the parametric mesh builders. |
-| `core.js` | Layout engine (slot arithmetic, validity checks), mesh assembly, STL/ZIP writers, and the Blender Python log generator. Also loadable from node. |
+| `model.js` | Everything measured out of the .blend: the datum, the spine (per half), the fixed foot relationship, the size law, the seven key types, the part colours, the three layouts, and the parametric mesh builders. |
+| `core.js` | Layout engine (slot arithmetic, validity checks), mesh assembly, STL/ZIP writers, and the Blender Python log generator — which emits `model.js`'s mesh code as Python, so the Blender build and the preview are one model. Also loadable from node. |
 | `index.html` | The app: drag-and-drop palette, period editor, keyboard strip, WebGL preview, export. |
 
 The only layout controls are **size scale `s`** and **Start on** (rotation).
@@ -86,15 +86,21 @@ Half A of the real PCB is not perfectly even (steps alternate 11.20899 /
 11.39099 / 11.30018); half B is dead uniform at 11.30005. Both are stored
 verbatim in `model.js`, so foot X positions are reproduced to the micron.
 
-The spine is 9.84706 mm deep, 7.10039 mm tall, and splits into 1, 2 or 3
-stacked layers depending on how many key colours the design uses. Each key's
-rear tongue plugs into its own layer:
+The spine is 9.84706 mm deep, ~7.1 mm tall, and splits into 1, 2 or 3 stacked
+layers depending on how many key colours the design uses. Each key's rear
+tongue plugs into its own layer:
 
-| layer | z band | tongue |
-|---|---|---|
-| gray | 0 → 5.08934 | 4.08924 → 5.09074 |
-| black | 5.09072 → 6.10034 | 5.08924 → 6.08924 |
-| white | 6.07824 → 7.10034 | 6.08924 → 8.62804 |
+| layer | z band (half A) | z band (half B) | tongue |
+|---|---|---|---|
+| gray | 0 → 5.08934 | −0.00006 → 5.07835 | 4.08924 → 5.09074 |
+| black | 5.09072 → 6.10034 | 5.07829 → 6.08932 | 5.08924 → 6.08924 |
+| white | 6.07824 → 7.10034 | 6.08926 → 7.11137 | 6.08924 → 8.62804 |
+
+Halves A and B were drafted separately and their layer bands differ by up to
+0.011 mm. Both are stored verbatim (for all three spine types), so a generated
+spine is a replica of the drafted one rather than an idealisation of it. Each
+(half, layer) is built as its own object, matching the sandbox's own
+decomposition of `<kind> type Spine - A` / `- B`.
 
 ---
 
@@ -237,28 +243,80 @@ world X.
   clipboard. See below.
 * **Save design log (.py)** — the same thing as a file.
 * **STL** per colour layer, plus the spine and the feet, or all of it as a zip
-  (the zip includes the Python log).
+  (the zip includes the Python log). Face winding is consistent across every
+  primitive, so exported normals point outward — slicers and Blender both read
+  the solids the right way round.
+
+### Where it lands in Blender
+
+The **Blender world origin** dropdown in the Export panel decides where the
+generated keyboard sits. Default is **model centre at 0, 0, 0**: the bounding
+box of the whole instrument — 32 keys, both spine halves and all 32 feet — is
+centred on the world origin.
+
+| mode | X | Y | Z |
+|---|---|---|---|
+| **model centre** (default) | −186.65 … 186.65 | −47.46 … 47.46 | −10.77 … 10.77 |
+| spine datum | −186.65 … 186.65 | −85.07 … 9.85 | −5.92 … 15.63 |
+| drafting sandbox | −1403.76 … −1030.47 | −219.17 … −124.26 | 15.87 … 37.41 |
+
+(figures for the 19-EDO default; the span follows the size scale)
+
+*Model centre* is the one to use for new work. *Spine datum* centres X but keeps
+Y = 0 on the spine front face and Z = 0 on the spine bottom face, which is handy
+when you are measuring against the spine. *Drafting sandbox* reproduces the
+original world position, so the build lands exactly on top of the 15/17/19
+layouts inside `Cimbalo_Cromatico_Drafting_Sandbox_Leveling.blend`.
+
+Whichever mode, the builder creates an empty called **Xenachord Root** at
+(0, 0, 0) and parents every generated object to it, so the whole keyboard moves,
+rotates and scales from the origin as one. On finishing it prints the bounding
+box and centre it actually achieved, so you can check at a glance.
+
+The exported STLs are unaffected — they stay in design coordinates (x from the
+leftmost white key's left edge, z from the spine bottom face), which is what the
+print workflow expects.
 
 ### The Python log
 
 Paste it into Blender's Text Editor and press *Run Script*. Structure:
 
-1. A readable header — the datum, the fixed spine↔foot relationship.
+1. A readable header — the world placement it will build at (with the resulting
+   bounding box), the design-frame datum, and the fixed spine↔foot relationship.
 2. `DESIGN` — scale, notes per equave, derived white count, rotation, key count
    (always 32), AKM320 units (always 1), spine type, and all four derived widths.
 3. `TEMPLATE` — the seven-slot period, annotated with slot name, bias and group.
 4. `KEYS` — the 32 keys, left to right: name (prefixed `K00`…`K31` by foot
-   index), type, x centre, width, depth, world X, world Y (back face), world Z
-   (bottom face), and the X of the sensor foot it sits over.
+   index), type, x centre, width, depth, the left and right edges of the white
+   key's mid section after its neighbours have taken their clearance
+   (`None` on accidentals), world X, world Y (back face), world Z (bottom
+   face), and the X of the sensor foot it sits over.
 5. `SPINE` and `FEET` — halves A and B, layers, screw positions, the 32 foot X
    values. Two asserts guarantee `len(KEYS) == len(FEET) == 32`.
 6. Any warnings on the design, as comments.
-7. `build()` — if the current .blend has a **Key Type Categories** collection it
-   duplicates those real meshes and places them; otherwise it drops proxy boxes.
-   Output goes into a new collection, `Xenachord Generated`.
+7. `WORLD_X0 / WORLD_Y0 / WORLD_Z0 / ORIGIN` — the world placement, editable in
+   place if you want to nudge it.
+8. `build()` — a **line-for-line port of the mesh code in `model.js`**, the
+   same code the WebGL preview runs. There are no proxy boxes and no stand-ins.
+   Output goes into a new collection, `Xenachord Generated`, split into
+   `Keys - White` / `Keys - Black` / `Keys - Gray` / `Spine` / `Feet` and
+   parented to a `Xenachord Root` empty at the origin: one object per key
+   (named for its sensor foot), one per spine half and layer, one per foot.
+   Materials carry the preview's own colours.
 
-The duplicate-and-place path has been verified against the drafted 19 Layout:
-every axis of every key lands within **0.0004 mm** of the original. Duplicated
+**The Blender build and the browser preview are the same model.** Every number
+the builder computes with is written out at full double precision, so Python
+reads back the exact bits the browser used. Vertex for vertex, face for face,
+part for part, the two agree to **0.000000 mm** — verified across all three
+presets, all three origin modes, all seven rotations, fractional size scales,
+one- / two- / three-layer spines and per-slot overrides.
+
+`USE_BLEND_CATEGORIES = True` at the top of the builder swaps the parametric
+keys, spine and feet for the hand-modelled originals in the drafting sandbox
+(`Key Type Categories`, `<kind> type Spine - A/B`, `Feet - A/B`), lifted onto
+whatever origin the log was cut for. That is only meaningful inside the sandbox
+.blend, and the interior detailing then no longer matches the preview — the
+outer envelope, the layout and the datum are identical either way. Duplicated
 categories are scaled in X only, which matches the size law for the outer
 envelope; the 0.65 / 1.0 / 1.544 mm edge detailing stretches with it, so re-cut
 those by hand before printing.
@@ -284,11 +342,27 @@ The 17 residual is drift in the sheet itself — its white keys are spaced
 27.7081–27.7090 rather than a clean 27.708333, and that accumulates over 24
 keys. The app uses the exact value.
 
+**The 19 default, part by part, against the sheet.** Every generated object was
+checked axis by axis against its counterpart in the .blend, in the design
+frame:
+
+| against | objects | worst axis error |
+|---|---|---|
+| `19 Layout`, first 32 keys | 32 | 0.00040 mm |
+| `Three type Spine - A` / `- B` | 6 | 0.00016 mm |
+| `Feet - A` / `- B` | 32 | 0.00002 mm |
+
+The residual is the sheet's own storage precision, not the model's: the sandbox
+sits ~1400 mm from the world origin, where a float32 vertex coordinate steps in
+0.00012 mm — so 0.0004 mm is about three of those steps. Built on the origin,
+as the default `model centre` mode does, the generated model is the more exact
+of the two.
+
 The generated *meshes* are parametric reconstructions, not vertex copies: the
 outer envelope, top slope, nose ramp, side draft, wall thickness, tongue and
 foot datum are all exact, while the hand-modelled interior detailing of the
-originals is simplified. For vertex-exact geometry, use the Python log's
-duplicate-and-place path.
+originals is simplified. For the originals' own vertices, set
+`USE_BLEND_CATEGORIES = True` in the log.
 
 ---
 
