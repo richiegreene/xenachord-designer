@@ -1059,6 +1059,32 @@ def get_material(key):
     return m
 
 
+def get_spine_material(kind, layer_name):
+    """Colour a spine band the same way the drafting sandbox and the WebGL
+    preview do: by the key type it carries, not by a flat "spine" grey. A
+    three-type spine's gray/black/white bands take that colour's own
+    material; a one/two-type spine's "all"/"lower"/"upper" bands carry more
+    than one key colour, so they fall back to SPINE_LAYER_COLOURS' own entry
+    for that band (still not the flat spine grey)."""
+    rgb = SPINE_LAYER_COLOURS.get(kind, {}).get(layer_name, COLOURS.get("spine", (0.3, 0.3, 0.3)))
+    name = "Xenachord Spine %s %s" % (kind, layer_name)
+    m = bpy.data.materials.get(name)
+    if m is None:
+        m = bpy.data.materials.new(name)
+        if getattr(m, "node_tree", None) is None:
+            try:
+                m.use_nodes = True      # removed in Blender 6; nodes are implicit
+            except Exception:
+                pass
+        bsdf = m.node_tree.nodes.get("Principled BSDF") if m.node_tree else None
+        if bsdf is not None:
+            bsdf.inputs["Base Color"].default_value = (rgb[0], rgb[1], rgb[2], 1.0)
+            if "Roughness" in bsdf.inputs:
+                bsdf.inputs["Roughness"].default_value = 0.45
+    m.diffuse_color = (rgb[0], rgb[1], rgb[2], 1.0)
+    return m
+
+
 def make_mesh_object(name, tris, coll, mat):
     """tris is the flat triangle soup the browser hands to WebGL, in design
     coordinates.  design -> world flips Y, which mirrors handedness, so each
@@ -1184,12 +1210,20 @@ def build():
                            copy_sheet_collection("Feet - B", part["Feet"]))
 
     if not spine_from_sheet:
+        # colour each band by the key type it belongs to (see
+        # get_spine_material) rather than a single flat spine colour, so a
+        # generated spine matches the drafting sandbox and the WebGL preview
+        # band for band.
+        spine_kind = DESIGN["spine_type"].split()[0].lower()
+        spine_mats = {}
         for (hname, hx0, hx1, hy_back, hy_front, layers) in SPINE["halves"]:
             for li, (lname, lz0, lz1) in enumerate(layers):
                 tris = build_spine_slab(hname, hx0, hx1, hy_back, hy_front,
                                         lz0, lz1, li == 0)
+                if lname not in spine_mats:
+                    spine_mats[lname] = get_spine_material(spine_kind, lname)
                 make_mesh_object("Spine_%s_%s" % (hname, lname), tris,
-                                 part["Spine"], mats["spine"])
+                                 part["Spine"], spine_mats[lname])
 
     if not feet_from_sheet:
         for i, fx in enumerate(FEET):

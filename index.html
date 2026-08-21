@@ -21,9 +21,13 @@
   #gl{position:absolute;inset:0;width:100%;height:100%;display:block;
       cursor:grab;touch-action:none}
   #gl:active{cursor:grabbing}
-  .viewbar{position:absolute;top:10px;right:12px;display:flex;gap:5px;flex-wrap:wrap;
-    justify-content:flex-end;max-width:330px}
-  .viewbar button{background:rgba(30,31,37,.82);backdrop-filter:blur(4px)}
+  .navgizmo-wrap{position:absolute;top:10px;right:12px;display:flex;flex-direction:column;
+    align-items:center;gap:5px;user-select:none}
+  #navgizmo{width:88px;height:88px;cursor:grab;touch-action:none}
+  #navgizmo:active{cursor:grabbing}
+  .navgizmo-row{display:flex;gap:4px}
+  .navgizmo-mini{background:rgba(30,31,37,.82);backdrop-filter:blur(4px);
+    font-size:10px;padding:3px 7px}
   /* ---------- viewer overlay ---------- */
   #viewbar2{position:absolute;left:12px;bottom:12px;display:flex;align-items:center;
     gap:12px;background:rgba(30,31,37,.86);backdrop-filter:blur(4px);
@@ -208,16 +212,13 @@
   <div id="main">
     <div id="glwrap">
       <canvas id="gl"></canvas>
-      <div class="viewbar">
-        <button data-view="iso">iso</button>
-        <button data-view="top">top</button>
-        <button data-view="bottom">bottom</button>
-        <button data-view="front">front</button>
-        <button data-view="back">back</button>
-        <button data-view="left">left</button>
-        <button data-view="right">right</button>
-        <button data-view="under">under-iso</button>
-        <button id="v-fit">fit</button>
+      <div class="navgizmo-wrap">
+        <canvas id="navgizmo" width="108" height="108" title="Click an axis to view it &middot; drag to orbit"></canvas>
+        <div class="navgizmo-row">
+          <button data-view="iso" class="navgizmo-mini">iso</button>
+          <button data-view="under" class="navgizmo-mini">under</button>
+          <button id="v-fit" class="navgizmo-mini">fit</button>
+        </div>
       </div>
       <div id="camread"></div>
       <div id="viewbar2">
@@ -553,6 +554,18 @@ const partOf = k => isSpineKey(k) ? 'spine' : k;
 const colorOf = k => isSpineKey(k)
   ? XM.spineLayerColor(L ? L.spineKind : 'three', k.slice(6))
   : (COLORS[k] || [1,0,1]);
+/* for "separate combs": a spine band whose layer name IS a key colour
+   (the three-type spine's gray/black/white bands) travels with that
+   colour's keys, since it shares their coloration and is the slab their
+   tongues actually plug into.  A one/two-type spine's "all"/"lower"/
+   "upper" bands carry more than one key colour, so they have no single
+   comb to follow and stay with the base "spine" explode step.          */
+const explodeGroupOf = k => {
+  if (!isSpineKey(k)) return k;
+  const layerName = k.slice(6);
+  return (layerName === 'gray' || layerName === 'black' || layerName === 'white')
+    ? layerName : 'spine';
+};
 let explode = 0;
 let picked = null, pickBuf = null;
 
@@ -764,6 +777,100 @@ document.querySelectorAll('button[data-view]').forEach(b=>{
 });
 $('v-fit').onclick=fit;
 
+/* ---- 3D nav gizmo (Blender-style axis compass) ----------------------
+ * Six balls sit at the projections of the +/-X, +/-Y, +/-Z world axes,
+ * using the SAME camera basis (right/up/fwd) that draw() uses, so the
+ * gizmo always shows the viewport's actual current orientation. A ball
+ * on the near side of the sphere (pointing toward the camera) is drawn
+ * solid and labelled and is clickable; its opposite (far side) is drawn
+ * as a hollow ring, matching Blender's convention. Clicking a ball snaps
+ * cam.yaw/pitch to the same axis-aligned preset the old view buttons used
+ * (direction d = (sin(yaw)cos(pitch), cos(yaw)cos(pitch), sin(pitch)),
+ * i.e. pitch = asin(dz), yaw = atan2(dx,dy) — inverted here by construction
+ * rather than solved, since only the six cardinal directions are needed). */
+const GIZMO_AXES = [
+  {v:[ 1, 0, 0], label:'X', view:'right'},
+  {v:[-1, 0, 0], label:'X', view:'left'},
+  {v:[ 0, 1, 0], label:'Y', view:'front'},
+  {v:[ 0,-1, 0], label:'Y', view:'back'},
+  {v:[ 0, 0, 1], label:'Z', view:'top'},
+  {v:[ 0, 0,-1], label:'Z', view:'bottom'},
+];
+const GIZMO_COLOR = {X:'#e0554a', Y:'#8bd167', Z:'#5c9eff'};
+const navCanvas = document.getElementById('navgizmo');
+const navCtx = navCanvas ? navCanvas.getContext('2d') : null;
+let navDPR = 1, navPts = [];
+function layoutGizmo(){
+  if(!navCanvas) return;
+  navDPR = window.devicePixelRatio||1;
+  const size = navCanvas.clientWidth||88;
+  navCanvas.width = size*navDPR; navCanvas.height = size*navDPR;
+}
+function drawGizmo(){
+  if(!navCtx) return;
+  if(navCanvas.width !== Math.round((navCanvas.clientWidth||88)*navDPR)) layoutGizmo();
+  const W=navCanvas.width, H=navCanvas.height;
+  navCtx.setTransform(1,0,0,1,0,0);
+  navCtx.clearRect(0,0,W,H);
+  const cx=W/2, cy=H/2, R=W*0.31, BALL=W*0.10, BALL_FAR=W*0.075;
+  const B=camBasis();
+  const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+  navPts = GIZMO_AXES.map(a=>{
+    const sx=dot(a.v,B.right), sy=dot(a.v,B.up), sz=dot(a.v,B.fwd);
+    return {...a, x:cx+sx*R, y:cy-sy*R, near:sz<0};
+  });
+  // faint reference circle
+  navCtx.beginPath(); navCtx.arc(cx,cy,R+BALL,0,Math.PI*2);
+  navCtx.fillStyle='rgba(255,255,255,.03)'; navCtx.fill();
+  // spokes, far balls first, near balls last so near ones sit on top
+  const ordered=[...navPts].sort((a,b)=>(a.near?1:0)-(b.near?1:0));
+  for(const p of ordered){
+    navCtx.beginPath(); navCtx.moveTo(cx,cy); navCtx.lineTo(p.x,p.y);
+    navCtx.strokeStyle='rgba(255,255,255,.14)'; navCtx.lineWidth=1*navDPR; navCtx.stroke();
+  }
+  for(const p of ordered){
+    const col=GIZMO_COLOR[p.label];
+    const r=p.near?BALL:BALL_FAR;
+    navCtx.beginPath(); navCtx.arc(p.x,p.y,r,0,Math.PI*2);
+    if(p.near){
+      navCtx.fillStyle=col; navCtx.fill();
+      navCtx.fillStyle='rgba(0,0,0,.62)';
+      navCtx.font=`700 ${Math.round(W*0.105)}px -apple-system,"Segoe UI",Helvetica,Arial,sans-serif`;
+      navCtx.textAlign='center'; navCtx.textBaseline='middle';
+      navCtx.fillText(p.label, p.x, p.y+0.5*navDPR);
+    } else {
+      navCtx.fillStyle='rgba(30,31,37,.9)'; navCtx.fill();
+      navCtx.strokeStyle=col; navCtx.lineWidth=1.4*navDPR; navCtx.stroke();
+    }
+  }
+}
+function gizmoPick(clientX,clientY){
+  const rect=navCanvas.getBoundingClientRect();
+  const x=(clientX-rect.left)*(navCanvas.width/rect.width);
+  const y=(clientY-rect.top)*(navCanvas.height/rect.height);
+  let best=null, bestD=Infinity;
+  for(const p of navPts){
+    const d=Math.hypot(p.x-x,p.y-y);
+    if(d<bestD){bestD=d; best=p;}
+  }
+  const tol=navCanvas.width*0.16;
+  return bestD<=tol ? best : null;
+}
+if(navCanvas){
+  layoutGizmo();
+  navCanvas.addEventListener('click', e=>{
+    const p=gizmoPick(e.clientX,e.clientY);
+    if(!p) return;
+    const v=VIEWS[p.view];
+    cam.yaw=v.yaw; cam.pitch=v.pitch; draw();
+  });
+  navCanvas.addEventListener('pointermove', e=>{
+    const p=gizmoPick(e.clientX,e.clientY);
+    navCanvas.style.cursor = p ? 'pointer' : 'grab';
+  });
+  window.addEventListener('resize', ()=>{ layoutGizmo(); drawGizmo(); });
+}
+
 function drawPart(b, colour, ofs){
   gl.bindBuffer(gl.ARRAY_BUFFER,b.buf);
   gl.enableVertexAttribArray(locPos); gl.vertexAttribPointer(locPos,3,gl.FLOAT,false,24,0);
@@ -786,7 +893,7 @@ function draw(){
   gl.uniform3fv(locEye, B.eye);
   for(const [k,b] of Object.entries(buffers)){
     if(!visible[partOf(k)]) continue;
-    drawPart(b, colorOf(k), [0,0,(EXPLODE_ORDER[partOf(k)]||0)*explode]);
+    drawPart(b, colorOf(k), [0,0,(EXPLODE_ORDER[explodeGroupOf(k)]||0)*explode]);
   }
   // highlight pass: nudged toward the camera so it always wins the depth test
   if(picked && pickBuf && visible[picked.part]){
@@ -798,6 +905,7 @@ function draw(){
     `az ${(cam.yaw*180/Math.PI).toFixed(0).padStart(4)}°  ` +
     `el ${(cam.pitch*180/Math.PI).toFixed(0).padStart(4)}°  ` +
     `${cam.dist.toFixed(0)} mm` + (cam.pitch<0 ? '   · viewing from below' : '');
+  drawGizmo();
 }
 
 /* ---- orbit / pan / zoom : screen-space pan works from any angle ---- */

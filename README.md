@@ -354,7 +354,13 @@ their sensor feet.
 
 **Separate combs** — the slider lifts each comb apart along Z in assembly order
 (feet, spine, gray, black, white), so you can see the three-layer stack the way
-it comes apart.
+it comes apart. A three-type spine's gray/black/white bands share their
+colouring with the matching keys, so each band lifts together with its own
+comb rather than as one lump; a one/two-type spine's bands (`all`/`lower`/
+`upper`) carry more than one key colour and have no single comb to follow, so
+they stay at the base spine step. The generated Python log colours those same
+spine bands the same way — by the key type each band belongs to — instead of
+one flat spine grey.
 
 **Key → foot reach** — the status panel reports the widest distance from a key's
 centre to the centre of its sensor foot. Large values are expected, not errors:
