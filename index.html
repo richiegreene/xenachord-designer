@@ -399,7 +399,12 @@ function buildStrip(){
     d.style.left = X(h.x0)+'px'; d.style.width = ((h.x1-h.x0)*PX)+'px';
     d.style.top = Y(XM.SPINE.yBack)+'px';
     d.style.height = (XM.SPINE.depth*1.5)+'px';
-    d.title = `spine half ${nm} — ${(h.x1-h.x0).toFixed(3)} mm, 16 feet`;
+    // seen from above, so the strip takes the top band's drafted colour
+    const top = XM.SPINE.layers[L.spineKind].A.slice(-1)[0].name;
+    const c = XM.spineLayerColor(L.spineKind, top);
+    d.style.background = 'rgb('+c.map(v=>Math.round(v*255)).join(',')+')';
+    d.title = `spine half ${nm} — ${(h.x1-h.x0).toFixed(3)} mm, 16 feet · `+
+              `${L.spineKind} type Spine - ${nm}, ${top} layer on top`;
     inner.appendChild(d);
   }
   // the 32 feet
@@ -489,7 +494,7 @@ function rebuild(){
     : '<div class="okline">✓ geometry consistent with the drafting sandbox</div>';
 
   picked=null; $('inspect').classList.remove('on');
-  buildPeriod(); buildStrip(); showOrigin(); uploadMeshes();
+  buildPeriod(); buildStrip(); showOrigin(); uploadMeshes(); buildVisToggles();
   if (rebuild._w !== L.width) { rebuild._w = L.width; fit(); } else draw();
 }
 
@@ -540,6 +545,14 @@ const PART_LABEL = { white:'white', black:'black', gray:'gray', spine:'spine', f
    slider value.  Order is the assembly order of the spine layers.            */
 const EXPLODE_ORDER = { feet:-0.7, spine:0, gray:1, black:2, white:3 };
 const visible = { white:true, black:true, gray:true, spine:true, feet:true };
+/* spine bands are drawn one buffer per layer, keyed "spine:<layer>", so each
+   band can carry the colour its object has in the drafting sandbox.  They all
+   answer to the single "spine" toggle and explode step.                     */
+const isSpineKey = k => k.indexOf('spine:') === 0;
+const partOf = k => isSpineKey(k) ? 'spine' : k;
+const colorOf = k => isSpineKey(k)
+  ? XM.spineLayerColor(L ? L.spineKind : 'three', k.slice(6))
+  : (COLORS[k] || [1,0,1]);
 let explode = 0;
 let picked = null, pickBuf = null;
 
@@ -603,7 +616,13 @@ function uploadMeshes(){
   if(!gl) return;
   for(const k of Object.keys(buffers)) gl.deleteBuffer(buffers[k].buf);
   buffers={};
-  for(const k of Object.keys(meshes)) if(meshes[k].length) buffers[k]=meshToBuffer(meshes[k]);
+  for(const k of Object.keys(meshes)){
+    if(k==='spine'||k==='spineLayers') continue;      // spine goes in per layer
+    if(meshes[k].length) buffers[k]=meshToBuffer(meshes[k]);
+  }
+  const SL = meshes.spineLayers || {};
+  for(const lay of Object.keys(SL))
+    if(SL[lay].length) buffers['spine:'+lay]=meshToBuffer(SL[lay]);
   if(pickBuf){ gl.deleteBuffer(pickBuf.buf); pickBuf=null; }
 }
 
@@ -613,9 +632,19 @@ function buildVisToggles(){
   for(const k of ['white','black','gray','spine','feet']){
     const lab=document.createElement('label');
     lab.className='vis'+(visible[k]?' on':'');
-    const c=COLORS[k].map(v=>Math.round(v*255)).join(',');
-    lab.innerHTML=`<input type="checkbox" ${visible[k]?'checked':''}>`+
-      `<span class="dot" style="background:rgb(${c})"></span>${PART_LABEL[k]}`;
+    const rgb=c=>'rgb('+c.map(v=>Math.round(v*255)).join(',')+')';
+    let dots, label=PART_LABEL[k];
+    if(k==='spine' && L){
+      /* one swatch per band of the drafted spine this design uses */
+      const layers=XM.SPINE.layers[L.spineKind].A.map(l=>l.name);
+      dots=layers.map(n=>`<span class="dot" title="${L.spineKind} type spine, `+
+        `${n} layer" style="background:${rgb(XM.spineLayerColor(L.spineKind,n))}`+
+        `;margin-right:1px"></span>`).join('');
+      label=`spine (${L.spineKind})`;
+    } else {
+      dots=`<span class="dot" style="background:${rgb(COLORS[k])}"></span>`;
+    }
+    lab.innerHTML=`<input type="checkbox" ${visible[k]?'checked':''}>`+dots+label;
     lab.querySelector('input').onchange=e=>{
       visible[k]=e.target.checked; lab.classList.toggle('on',visible[k]); draw(); };
     g.appendChild(lab);
@@ -756,8 +785,8 @@ function draw(){
   gl.uniformMatrix4fv(locMVP,false,mvp);
   gl.uniform3fv(locEye, B.eye);
   for(const [k,b] of Object.entries(buffers)){
-    if(!visible[k]) continue;
-    drawPart(b, COLORS[k]||[1,0,1], [0,0,(EXPLODE_ORDER[k]||0)*explode]);
+    if(!visible[partOf(k)]) continue;
+    drawPart(b, colorOf(k), [0,0,(EXPLODE_ORDER[partOf(k)]||0)*explode]);
   }
   // highlight pass: nudged toward the camera so it always wins the depth test
   if(picked && pickBuf && visible[picked.part]){

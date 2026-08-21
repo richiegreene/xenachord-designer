@@ -314,9 +314,17 @@
       for (const m of sl.members)
         out[m.spec.layer].push(...XM.buildKey(m.cx, L.aW, m.type, null, null));
     }
-    const spine = XM.buildSpine(L.spineKind);
+    /* The spine is the drafted one for this design's colour count — the
+     * "<kind> type Spine - A / - B" pair.  Keep it whole for the STL, and
+     * also keyed by layer so the preview can paint each band with the
+     * colour that layer has in the drafting sandbox.                    */
+    const spine = XM.spineParts(L.spineKind);
     out.spine = [];
-    for (const k of Object.keys(spine)) out.spine.push(...spine[k]);
+    out.spineLayers = {};
+    for (const p of spine) {
+      out.spine.push(...p.tris);
+      (out.spineLayers[p.layer] = out.spineLayers[p.layer] || []).push(...p.tris);
+    }
     out.feet = XM.buildFeet();
     return out;
   }
@@ -658,7 +666,18 @@
   function pyColours() {
     const rows = Object.keys(XM.COLORS).map(k =>
       '    "' + k + '": (' + XM.COLORS[k].map(pn).join(', ') + '),');
-    return 'COLOURS = {\n' + rows.join('\n') + '\n}';
+    /* the spine bands are not one colour: each layer carries the material
+     * its object has in the drafting sandbox.  Linear base colours, i.e.
+     * exactly what Blender stores.                                       */
+    const S = XM.SPINE_LAYER_COLORS;
+    const srows = Object.keys(S).map(kind =>
+      '    "' + kind + '": {\n' + Object.keys(S[kind]).map(lay =>
+        '        "' + lay + '": (' + S[kind][lay].linear.map(pn).join(', ') +
+        '),   # ' + (S[kind][lay].material || 'no material — Blender default')
+      ).join('\n') + '\n    },');
+    return 'COLOURS = {\n' + rows.join('\n') + '\n}\n\n' +
+      '# base colour of every layer of "<kind> type Spine - A / - B"\n' +
+      'SPINE_LAYER_COLOURS = {\n' + srows.join('\n') + '\n}';
   }
 
   function builderSource(L, seen) {

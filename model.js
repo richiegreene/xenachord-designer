@@ -819,6 +819,54 @@
    * ------------------------------------------------------------------ */
   const SPINE_KIND_BY_LAYERS = { 1: 'one', 2: 'two', 3: 'three' };
 
+  /* ------------------------------------------------------------------ *
+   *  SPINE LAYER COLOURS — read out of the drafting sandbox              *
+   *                                                                     *
+   *  The six spine objects in                                            *
+   *  Cimbalo_Cromatico_Drafting_Sandbox_Leveling.blend carry these        *
+   *  materials (Principled base colour, linear):                         *
+   *                                                                     *
+   *   spine object                     material        base colour       *
+   *   One type Spine - A/B  (all)      Material.003    0, 0, 0           *
+   *   Two type Spine  lower            Material.003    0, 0, 0           *
+   *   Two type Spine  upper            (none)          0.8, 0.8, 0.8     *
+   *   Three type Spine gray            Material.002    0.1549 grey       *
+   *   Three type Spine black           Material.003    0, 0, 0           *
+   *   Three type Spine white           (none)          0.8, 0.8, 0.8     *
+   *                                                                     *
+   *  Stored in display (sRGB) space so the preview reads like Blender's   *
+   *  viewport; pure black is lifted to 0.07 so the slab stays visible     *
+   *  against the dark canvas.  `linear` keeps the verbatim value.         *
+   * ------------------------------------------------------------------ */
+  const SPINE_LAYER_COLORS = {
+    one:   { all:   { srgb: [0.07, 0.07, 0.08], linear: [0, 0, 0],
+                      material: 'Material.003' } },
+    two:   { lower: { srgb: [0.07, 0.07, 0.08], linear: [0, 0, 0],
+                      material: 'Material.003' },
+             upper: { srgb: [0.91, 0.91, 0.90], linear: [0.8, 0.8, 0.8],
+                      material: null } },
+    three: { gray:  { srgb: [0.43, 0.43, 0.44], linear: [0.1549, 0.1549, 0.1549],
+                      material: 'Material.002' },
+             black: { srgb: [0.07, 0.07, 0.08], linear: [0, 0, 0],
+                      material: 'Material.003' },
+             white: { srgb: [0.91, 0.91, 0.90], linear: [0.8, 0.8, 0.8],
+                      material: null } }
+  };
+
+  /** the drafted colour of one spine layer; `space` is 'srgb' (default)
+   *  or 'linear'.  Falls back to the flat spine grey if unknown.        */
+  function spineLayerColor(spine, layerName, space) {
+    const k = SPINE_LAYER_COLORS[spineKindOf(spine)];
+    const e = k && k[layerName];
+    return e ? e[space === 'linear' ? 'linear' : 'srgb'] : COLORS.spine;
+  }
+
+  /** the material the drafting sandbox gives that layer, or null */
+  function spineLayerMaterial(spine, layerName) {
+    const k = SPINE_LAYER_COLORS[spineKindOf(spine)];
+    return k && k[layerName] ? k[layerName].material : null;
+  }
+
   /** the drafted spine for a set (or array) of key colours */
   function spineKindForColours(used) {
     const s = (used instanceof Set) ? used : new Set(used || []);
@@ -942,6 +990,7 @@
     triangulateFace, keyExtent,
     buildSpine, buildFeet,
     spineKindOf, spineKindForColours, spineLayerCount,
+    SPINE_LAYER_COLORS, spineLayerColor, spineLayerMaterial,
     spineHalves, spineParts, spineZRange, footParts,
     footCentres, obroundRing, spineHoles, holeBoxPoint, HOLE_UNIT,
     pushHoleAnnulus, pushHoleWall, pushSpineSlab,
