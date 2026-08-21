@@ -365,8 +365,80 @@ one flat spine grey.
 **Key → foot reach** — the status panel reports the widest distance from a key's
 centre to the centre of its sensor foot. Large values are expected, not errors:
 the two halves of a split pair share one X and still have to reach two adjacent
-feet 11.3 mm apart. Closing that gap is the bridge edge loop, which is out of
-scope (see the last section).
+feet 11.3 mm apart. That gap is closed by the bridge edge loops.
+
+---
+
+## The bridge edge loops
+
+Both ends of the connection were already drafted.
+
+**The sensor foot is not a rectangle.** `Feet - A` and `Feet - B` draw all 32
+feet as one shape, and that shape is the "-| |-": two mirrored T's, each a
+full-width **crossbar** with a 1.0 mm **central stem** reaching out to the pad
+edge, with a 1.99978 mm window between the two bars. 16 vertices, 2 n-gon
+faces, flat at z = -1.01091. That outline is now stored verbatim in `model.js`
+as `FOOT_SHAPE` and is what `build_foot` builds - the generated feet used to
+come out as plain 10.4 x 9.0 boxes, which was wrong.
+
+**The key underside "-| |-".** Two 1.0 mm rails running along y at the key's
+left and right walls, at z 3.6608 under a white and 4.0893 under an accidental,
+segmented in y at exactly the foot's own boundaries - y 26.378 and y 29.379.
+The giveaway that the two were drawn to meet.
+
+### Print orientation is the constraint
+
+These keys print **face down** - the playing surface is the bed - so the build
+direction is design -z: the key's top prints first and the connector grows away
+from the bed. A layer is only printable if it sits on the layer above it in
+design z, give or take a 45 degree overhang.
+
+That rules out a thin web that jogs sideways from the key's rail to the foot.
+A split pair shares one x and still has to reach two feet 11.3 mm apart, so
+such a web is a near-horizontal cantilever: it would need support along its
+whole length, and the supports would sit between the keys, which is exactly
+where no tool reaches afterwards.
+
+So the connector is a **filled wedge**, widest at the foot and tapering back
+into the key. Read in print order, top of the stack downward:
+
+| stage | what it is |
+|---|---|
+| **anchor** | a section inside the key - the overlap of the pad with the key's own footprint over it, or `BRIDGE.bite` mm of the key's flank when the foot is entirely beside the key. Key material sits above it, so the first bridge layer is fully supported. |
+| **ramp** | the section opens out to the full pad at `BRIDGE.slope` mm of x per mm of z - 45 degrees, the steepest a printer bridges unsupported. It opens in y as well as x, so a connector is never deeper than its own key up at the anchor. |
+| **plinth** | the full pad section, straight down. |
+| **tip** | the last `BRIDGE.tip` mm steps *in* to the drafted foot "-| |-" itself, so the face that presses the sensor is the shape `Feet - A` / `Feet - B` actually draw. Stepping in never overhangs. |
+
+Nothing in that stack grows faster than 45 degrees going down, so the whole
+connector prints without a single support. The generated log measures that
+rather than assuming it and prints the numbers in its header: whether every
+ramp fitted at 45 degrees, the steepest angle any ramp had to take, the
+narrowest air between two connectors, and the least air a connector leaves
+above a sensor pad that is not its own.
+
+`BRIDGE.inset` shaves a little off each side in x so neighbouring connectors
+never touch; `BRIDGE.crown` keeps a ramp clear of the key's own top. Where a
+key is too short to hold a 45 degree ramp the ramp takes the steepest slope
+that does fit rather than running off the key, and the audit reports the angle.
+In the three presets that happens once, at 47.7 degrees in the 15-EDO layout.
+
+### Colour
+
+A connector prints **as part of its key, in its key's filament**, so it carries
+the key's colour rather than one of its own: its triangles go into that
+colour's mesh in the preview and in the per-colour STL, and the Blender log
+gives each `Bridge_nn` object its key's material. The `Bridges` collection
+exists to toggle them, not to say they are a separate part.
+
+### What is not yet verified
+
+Clearance between a connector and the *body* of a neighbouring key. The audit
+checks connector against connector, and connector against foreign sensor pads
+(4.4-6.0 mm of air in the presets, comfortably past the 2.0 mm of travel), but
+the two halves of a split pair share an x span and an overlapping y span and
+differ only in z, so a bounding-box test reads them as colliding when they are
+not, and a surface test needs the keys' real solids rather than their drafted
+faces. Treat the split-pair region as unchecked until that pass exists.
 
 **Click to inspect** — clicking a key highlights it and opens a readout with its
 type, centre X, width, depth, Z range, spine layer, slot name, slot bias and
@@ -563,8 +635,6 @@ capping each slab as one polygon with holes rather than as a pile of boxes.
 
 ## What this is not
 
-This is a drafting and layout tool, not a finished MIDI controller design. In
-particular the **bridge edge-loop that connects the sensor feet (Feet A / Feet
-B) to the keys is deliberately not generated** — the feet are drawn as the
-reference planes they are in the .blend, sitting at their fixed offset from the
-spine, and nothing reaches down to them.
+This is a drafting and layout tool, not a finished MIDI controller design. The **bridge edge loops are now generated** (see “The bridge edge loops” above),
+but they are a first pass: provably collision-free between keys, and not yet
+giving a full 2 mm of key travel over a neighbour’s sensor pad.

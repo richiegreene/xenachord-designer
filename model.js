@@ -175,6 +175,7 @@
     yCentre: 27.37759,    // in front of the spine front face
     z: -1.01091,          // below the spine bottom face
     perUnit: 32,          // 16 on half A + 16 on half B
+    t: 0.1,               // the pad is a plane in the .blend; this gives it a body
     // x of foot #0's centre, relative to the design origin
     x0: 9.79531,
     // Half A of the real PCB is not perfectly even; half B is.  These are the
@@ -955,13 +956,28 @@
 
   /** one part per sensor foot, named to match "Feet - A" / "Feet - B" */
   function footParts() {
-    const y0 = FOOT.yCentre - FOOT.d / 2, y1 = FOOT.yCentre + FOOT.d / 2;
+    const h = FOOT.t / 2;
     return footCentres().map((cx, i) => {
       const tris = [];
-      // a flat plane, exactly as in the .blend — given a hair of thickness
-      // so it survives STL export
-      pushBox(tris, cx - FOOT.w / 2, cx + FOOT.w / 2, y0, y1,
-              FOOT.z - 0.05, FOOT.z + 0.05);
+      /* the drafted "-| |-" outline, given FOOT.t of thickness so it is a
+       * solid the slicer and the bridge can both see.  Top and bottom caps
+       * are the drafted n-gons, ear-clipped; the walls are the loft. */
+      for (const ring of footOutline(cx)) {
+        const V = ring.map(p => [p[0], p[1], 0]);
+        const idx = ring.map((_, k) => k);
+        for (const tri of triangulateFace(V, idx)) {
+          const a = ring[tri[0]], b = ring[tri[1]], c = ring[tri[2]];
+          pushTri(tris, [a[0], a[1], FOOT.z + h], [b[0], b[1], FOOT.z + h],
+                        [c[0], c[1], FOOT.z + h]);
+          pushTri(tris, [c[0], c[1], FOOT.z - h], [b[0], b[1], FOOT.z - h],
+                        [a[0], a[1], FOOT.z - h]);
+        }
+        for (let k = 0; k < ring.length; k++) {
+          const a = ring[k], b = ring[(k + 1) % ring.length];
+          pushQuad(tris, [a[0], a[1], FOOT.z - h], [b[0], b[1], FOOT.z - h],
+                         [b[0], b[1], FOOT.z + h], [a[0], a[1], FOOT.z + h]);
+        }
+      }
       return {
         name: 'Foot_' + (i < FEET_PER_HALF ? 'A' : 'B') + '_' +
               String(i % FEET_PER_HALF + 1).padStart(2, '0'),
@@ -974,6 +990,388 @@
     const t = [];
     for (const p of footParts()) t.push(...p.tris);
     return t;
+  }
+
+
+  /* ==================================================================== *
+   *  BRIDGE EDGE LOOPS  —  key underside "-| |-"  ->  sensor foot "-| |-" *
+   *                                                                      *
+   *  KEYS[i] belongs to FEET[i], but the two are not over one another: a  *
+   *  split pair shares one x and still has to reach two feet 11.3 mm      *
+   *  apart.  The connector closes that gap.                              *
+   *                                                                      *
+   *  PRINT ORIENTATION IS THE CONSTRAINT.  These keys print face DOWN —   *
+   *  the playing surface is the bed — so the build direction is design    *
+   *  -z: the key's top prints first and the bridge grows away from the    *
+   *  bed.  A layer is only printable if it sits on the layer above it in  *
+   *  design z, give or take a 45 degree overhang.  So the bridge is not   *
+   *  a thin web that jogs sideways (that is a near-horizontal cantilever  *
+   *  and needs support everywhere); it is a FILLED wedge that is widest   *
+   *  at the foot and tapers back to the key at no more than 45 degrees.   *
+   *                                                                      *
+   *  Reading it in print order, top of the stack downward:                *
+   *                                                                      *
+   *    1  ANCHOR   a span inside the key — the overlap of the pad with    *
+   *                the key's own footprint over the pad, or, when the     *
+   *                foot is entirely beside the key, BRIDGE.bite mm of     *
+   *                the key's flank.  Whatever is above it is key, so the  *
+   *                first bridge layer is fully supported.                 *
+   *    2  RAMP     the span opens out from the anchor to the full 10.4 mm *
+   *                pad at exactly 45 degrees — one mm of x per mm of z,   *
+   *                the steepest a printer will bridge unsupported.        *
+   *    3  PLINTH   the full pad section, straight down.                   *
+   *    4  TIP      the last BRIDGE.tip mm steps IN to the drafted foot    *
+   *                "-| |-" itself, so the face that touches the sensor is *
+   *                the shape "Feet - A" / "Feet - B" actually draw.       *
+   *                Stepping in never overhangs.                          *
+   *                                                                      *
+   *  Nothing in that stack ever grows faster than 45 degrees going down,  *
+   *  so the whole connector prints without a single support.             *
+   * ==================================================================== */
+  /* ------------------------------------------------------------------ *
+   *  THE FOOT IS NOT A RECTANGLE                                        *
+   *                                                                     *
+   *  "Feet - A" / "Feet - B" draw all 32 feet as ONE shape, and it is    *
+   *  the "-| |-": two mirrored T's, each a full-width CROSSBAR with a    *
+   *  1.0 mm central STEM reaching out to the pad edge, with a 1.99978 mm *
+   *  window between the two bars.  16 vertices, 2 n-gon faces, flat at   *
+   *  z = FOOT.z.  Stored verbatim as (x from the pad's left edge, y from *
+   *  the pad's BACK edge) in design y, so y grows toward the player.     *
+   * ------------------------------------------------------------------ */
+  const FOOT_SHAPE = {
+    v: [[10.400028, 6.501869], [10.400028, 5.499901], [10.400028, 3.500008],
+        [10.400024, 2.500008], [0.000000, 2.500008], [0.000004, 3.500008],
+        [0.000004, 5.499901], [0.000004, 6.501869], [5.700024, 0.000000],
+        [4.700024, 0.000000], [5.700027, 9.000046], [4.700027, 9.000046],
+        [4.700027, 6.501869], [5.700027, 6.501869], [5.700024, 2.499992],
+        [4.700024, 2.499992]],
+    f: [[7, 6, 1, 0, 13, 10, 11, 12],      // bar + stem, toward the player
+        [5, 4, 15, 9, 8, 14, 3, 2]]        // bar + stem, toward the spine
+  };
+
+  /* the same "-| |-" as y bands, offset from the pad's back edge */
+  const FOOT_PATTERN = {
+    stemA: [6.501869, 9.000046],
+    barA:  [5.499901, 6.501869],
+    barB:  [2.499992, 3.500008],
+    stemB: [0.000000, 2.499992]
+  };
+
+  /** the drafted foot outline, in design coordinates, for the foot at cx */
+  function footOutline(cx) {
+    const x0 = cx - FOOT.w / 2, y0 = FOOT.yCentre - FOOT.d / 2;
+    const V = FOOT_SHAPE.v.map(p => [x0 + p[0], y0 + p[1]]);
+    return FOOT_SHAPE.f.map(ring => ring.map(i => V[i]));
+  }
+
+  const BRIDGE = {
+    travel: 2.0,     // AKM320 rubber-dome travel
+    margin: 0.5,     // air on top of the travel
+    tip:    1.0,     // height of the drafted "-| |-" contact tip
+    bite:   1.0,     // how far the anchor reaches into the key's flank
+    slope:  1.0,     // mm of x per mm of z on the ramp — 1.0 is 45 degrees
+    inset:  0.25,    // shaved off each side in x, so neighbours never touch
+    crown:  0.5      // never bring a ramp closer than this to the key's top
+  };
+
+  /**
+   * What the key offers directly over its sensor pad: the x span it covers
+   * there, the highest down-facing plane (the deck the plinth can sit under)
+   * and the top of the key (the ceiling on how high the ramp may reach).
+   */
+  /** Sutherland-Hodgman clip of a 3-D polygon against a y slab */
+  function clipToBand(P, y0, y1) {
+    const cut = (poly, keep, at) => {
+      const out = [];
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i], b = poly[(i + 1) % poly.length];
+        const ka = keep(a), kb = keep(b);
+        if (ka) out.push(a);
+        if (ka !== kb) {
+          const t = (at - a[1]) / (b[1] - a[1]);
+          out.push([a[0] + (b[0] - a[0]) * t, at, a[2] + (b[2] - a[2]) * t]);
+        }
+      }
+      return out;
+    };
+    let q = cut(P, p => p[1] >= y0 - 1e-9, y0);
+    if (q.length < 3) return null;
+    q = cut(q, p => p[1] <= y1 + 1e-9, y1);
+    return q.length >= 3 ? q : null;
+  }
+
+  /**
+   * What the key offers directly over its sensor pad: the x and y it covers
+   * there, the highest down-facing plane (the deck the connector can sit
+   * under) and the top of the key (the ceiling on how high the ramp goes).
+   */
+  function keyPadSection(cx, w, type, lb, rb) {
+    const padY0 = FOOT.yCentre - FOOT.d / 2, padY1 = padY0 + FOOT.d;
+    let x0 = Infinity, x1 = -Infinity, ky0 = Infinity, ky1 = -Infinity;
+    let zTop = -Infinity, zDeck = -Infinity;
+    for (const P of keyPolygons(cx, w, type, lb, rb)) {
+      const Q = clipToBand(P, padY0, padY1);
+      if (!Q) continue;
+      let lz = Infinity, hz = -Infinity;
+      for (const p of Q) {
+        if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0];
+        if (p[1] < ky0) ky0 = p[1]; if (p[1] > ky1) ky1 = p[1];
+        if (p[2] > zTop) zTop = p[2];
+        if (p[2] < lz) lz = p[2]; if (p[2] > hz) hz = p[2];
+      }
+      if (hz - lz > 1e-4) continue;
+      let nz = 0;
+      for (let i = 0; i < Q.length; i++) {
+        const a = Q[i], b = Q[(i + 1) % Q.length];
+        nz += (a[0] - b[0]) * (a[1] + b[1]);
+      }
+      if (nz < 0 && lz > zDeck) zDeck = lz;
+    }
+    if (!isFinite(zTop)) return null;
+    return { x0, x1, y0: ky0, y1: ky1, padY0, padY1,
+             zTop, zDeck: isFinite(zDeck) ? zDeck : zTop };
+  }
+
+  /**
+   * The lowest down-facing surface a key presents, per x, inside a y band.
+   * This is what a neighbour's connector could actually hit — a bounding
+   * box is useless here, because the two halves of a split pair share an x
+   * span and an overlapping y span and only differ in z.
+   */
+  function keyUnderProfile(cx, w, type, lb, rb, yb0, yb1, x0, step, n) {
+    const out = new Array(n).fill(Infinity);
+    for (const P of keyPolygons(cx, w, type, lb, rb)) {
+      const Q = clipToBand(P, yb0, yb1);
+      if (!Q) continue;
+      let lz = Infinity, hz = -Infinity, qx0 = Infinity, qx1 = -Infinity;
+      for (const p of Q) {
+        if (p[2] < lz) lz = p[2]; if (p[2] > hz) hz = p[2];
+        if (p[0] < qx0) qx0 = p[0]; if (p[0] > qx1) qx1 = p[0];
+      }
+      if (hz - lz > 1e-4) continue;
+      let nz = 0;
+      for (let i = 0; i < Q.length; i++) {
+        const a = Q[i], b = Q[(i + 1) % Q.length];
+        nz += (a[0] - b[0]) * (a[1] + b[1]);
+      }
+      if (nz >= 0) continue;                        // want down-facing only
+      const i0 = Math.max(0, Math.ceil((qx0 - x0) / step));
+      const i1 = Math.min(n - 1, Math.floor((qx1 - x0) / step));
+      for (let i = i0; i <= i1; i++) if (lz < out[i]) out[i] = lz;
+    }
+    return out;
+  }
+
+  /**
+   * The connector for one key, as a stack of horizontal sections.  Returns
+   *   { anchor:[x0,x1], zAnchor, zPlinth, pad:[x0,x1], ok, overhang }
+   * where ok is false if the key is not tall enough to hold a 45 degree
+   * ramp — which does not happen in any drafted layout, but is measured
+   * rather than assumed.
+   */
+  function bridgePlan(cx, w, type, lb, rb, footX) {
+    const K = keyPadSection(cx, w, type, lb, rb);
+    if (K == null) return null;
+    const i = BRIDGE.inset;
+    const pad = [footX - FOOT.w / 2 + i, footX + FOOT.w / 2 - i];
+    /* where the bridge grips the key */
+    const lo = Math.max(pad[0], K.x0), hi = Math.min(pad[1], K.x1);
+    let anchor, beside;
+    if (hi - lo > BRIDGE.bite) { anchor = [lo, hi]; beside = false; }
+    else if (footX > (K.x0 + K.x1) / 2)
+      { anchor = [K.x1 - BRIDGE.bite, K.x1]; beside = true; }
+    else
+      { anchor = [K.x0, K.x0 + BRIDGE.bite]; beside = true; }
+    /* the ramp has to open from `anchor` out to `pad`, at BRIDGE.slope */
+    /* the same in y: the connector is as deep as the pad down at the sensor
+     * and no deeper than the key's own footprint up at the anchor, so the
+     * two halves of a split pair — which share an x span but sit at
+     * different y — never reach into one another. */
+    const padY = [FOOT.yCentre - FOOT.d / 2, FOOT.yCentre + FOOT.d / 2];
+    const ay0 = Math.max(padY[0], K.y0), ay1 = Math.min(padY[1], K.y1);
+    const anchorY = (ay1 - ay0 > BRIDGE.bite) ? [ay0, ay1] : padY.slice();
+    const grow = Math.max(anchor[0] - pad[0], pad[1] - anchor[1],
+                          anchorY[0] - padY[0], padY[1] - anchorY[1], 0);
+    const zPlinth = FOOT.z + BRIDGE.tip;
+    /* 45 degrees if the key is tall enough to hold it; if it is not, the
+     * ramp takes the steepest slope that does fit rather than running off
+     * the top of the key, and the audit reports the angle it had to use. */
+    const room = Math.max(1e-6, K.zTop - BRIDGE.crown - zPlinth);
+    const slopeUsed = Math.max(BRIDGE.slope, grow / room);
+    const zAnchor = zPlinth + grow / slopeUsed;
+    /* if the key's underside sits above the ramp's top, carry the anchor
+     * section straight up to it so the two fuse over an area, not a line */
+    const zMerge = Math.max(zAnchor, Math.min(K.zDeck, K.zTop));
+    return {
+      pad, anchor, padY, anchorY, beside, grow, zPlinth, zAnchor, zMerge, slopeUsed,
+      zTop: K.zTop, zDeck: K.zDeck, keyX: [K.x0, K.x1],
+      ok: slopeUsed <= BRIDGE.slope + 1e-9,
+      headroom: K.zTop - BRIDGE.crown - zAnchor
+    };
+  }
+
+  /** extrude a closed plan outline between two z levels, capped both ends */
+  function extrudeOutline(t, ring, z0, z1) {
+    const V = ring.map(p => [p[0], p[1], 0]);
+    const idx = ring.map((_, k) => k);
+    for (const tri of triangulateFace(V, idx)) {
+      const a = ring[tri[0]], b = ring[tri[1]], c = ring[tri[2]];
+      pushTri(t, [a[0], a[1], z1], [b[0], b[1], z1], [c[0], c[1], z1]);
+      pushTri(t, [c[0], c[1], z0], [b[0], b[1], z0], [a[0], a[1], z0]);
+    }
+    for (let k = 0; k < ring.length; k++) {
+      const a = ring[k], b = ring[(k + 1) % ring.length];
+      pushQuad(t, [a[0], a[1], z0], [b[0], b[1], z0],
+                  [b[0], b[1], z1], [a[0], a[1], z1]);
+    }
+  }
+
+  /** loft a stack of equal-length edge loops into one closed solid */
+  function loftRings(t, rings) {
+    const m = rings[0].length;
+    for (let s = 0; s + 1 < rings.length; s++) {
+      const A = rings[s], B = rings[s + 1];
+      for (let k = 0; k < m; k++) {
+        const j = (k + 1) % m;
+        pushQuad(t, A[k], B[k], B[j], A[j]);
+      }
+    }
+    const top = rings[0], bot = rings[rings.length - 1];
+    for (let k = 1; k + 1 < m; k++) {
+      pushTri(t, top[0], top[k + 1], top[k]);
+      pushTri(t, bot[0], bot[k], bot[k + 1]);
+    }
+  }
+
+  /** the ring stack of the ramp + plinth, top (in the key) to bottom */
+  function bridgeRings(plan) {
+    const ring = (x, y, z) => [[x[0], y[0], z], [x[1], y[0], z],
+                               [x[1], y[1], z], [x[0], y[1], z]];
+    const out = [];
+    if (plan.zMerge > plan.zAnchor + 1e-6)
+      out.push(ring(plan.anchor, plan.anchorY, plan.zMerge));
+    out.push(ring(plan.anchor, plan.anchorY, plan.zAnchor));
+    out.push(ring(plan.pad, plan.padY, plan.zPlinth));
+    return out;
+  }
+
+  /** one key's bridge, as a triangle soup: the ramp/plinth plus the tip */
+  function buildBridge(cx, w, type, lb, rb, footX) {
+    const plan = bridgePlan(cx, w, type, lb, rb, footX);
+    if (plan == null) return [];
+    const t = [];
+    loftRings(t, bridgeRings(plan));
+    for (const ring of footOutline(footX)) {
+      const V = ring.map(p => [p[0], p[1], 0]);
+      const Q = clipToBand(V, plan.padY[0], plan.padY[1]);
+      if (Q) extrudeOutline(t, Q.map(p => [p[0], p[1]]), FOOT.z, plan.zPlinth);
+    }
+    return t;
+  }
+
+  /**
+   * What the connectors actually achieve, measured rather than assumed.
+   *   supportFree   every key's ramp fits inside its own height at 45 deg
+   *   minGap        narrowest air between two different keys' connectors
+   *   underForeign  least vertical air where a connector passes beneath a
+   *                 key that is not its own  (must beat travel + margin)
+   *   overForeign   least air above a sensor pad that is not its own
+   *                 (must beat travel)
+   */
+  function bridgeAudit(keys) {
+    const STEP = 0.1;
+    const plans = keys.map(k => ({
+      k, p: bridgePlan(k.cx, k.w, k.type, k.lb, k.rb, k.foot)
+    })).filter(o => o.p);
+
+    /* the section the connector occupies at height z */
+    const span = (p, z) => {
+      if (z >= p.zAnchor) return p.anchor;
+      const f = (p.zAnchor - z) / Math.max(1e-9, p.zAnchor - p.zPlinth);
+      return [p.anchor[0] + (p.pad[0] - p.anchor[0]) * f,
+              p.anchor[1] + (p.pad[1] - p.anchor[1]) * f];
+    };
+    /* sample each connector into a per-x [zmin, zmax] column profile */
+    for (const o of plans) {
+      const p = o.p;
+      const lo = Math.min(p.pad[0], p.anchor[0]), hi = Math.max(p.pad[1], p.anchor[1]);
+      const n = Math.max(2, Math.ceil((hi - lo) / STEP) + 1);
+      const zmin = new Array(n).fill(Infinity), zmax = new Array(n).fill(-Infinity);
+      for (let s = 0; s <= 200; s++) {
+        const z = p.zPlinth + (p.zMerge - p.zPlinth) * s / 200;
+        const sp = span(p, z);
+        const i0 = Math.max(0, Math.ceil((sp[0] - lo) / STEP));
+        const i1 = Math.min(n - 1, Math.floor((sp[1] - lo) / STEP));
+        for (let i = i0; i <= i1; i++) {
+          if (z < zmin[i]) zmin[i] = z;
+          if (z > zmax[i]) zmax[i] = z;
+        }
+      }
+      o.col = { lo, n, zmin, zmax };
+    }
+
+    let minGap = Infinity, underForeign = Infinity, overForeign = Infinity;
+    let worstRamp = Infinity, rampAt = null, worstSlope = 0, underAt = null;
+    for (const { k, p } of plans) {
+      if (p.headroom < worstRamp) { worstRamp = p.headroom; rampAt = k.index; }
+      if (p.slopeUsed > worstSlope) worstSlope = p.slopeUsed;
+    }
+    /* connector vs connector */
+    for (let a = 0; a < plans.length; a++)
+      for (let b = a + 1; b < plans.length; b++) {
+        const A = plans[a], B = plans[b];
+        const lo = Math.max(A.col.lo, B.col.lo);
+        const hi = Math.min(A.col.lo + (A.col.n - 1) * STEP,
+                            B.col.lo + (B.col.n - 1) * STEP);
+        if (hi < lo) {
+          minGap = Math.min(minGap, lo - hi);
+          continue;
+        }
+        for (let x = lo; x <= hi; x += STEP) {
+          const ia = Math.round((x - A.col.lo) / STEP), ib = Math.round((x - B.col.lo) / STEP);
+          if (!isFinite(A.col.zmax[ia]) || !isFinite(B.col.zmax[ib])) continue;
+          const g = A.col.zmin[ia] > B.col.zmin[ib]
+            ? A.col.zmin[ia] - B.col.zmax[ib]
+            : B.col.zmin[ib] - A.col.zmax[ia];
+          if (g < minGap) minGap = g;
+        }
+      }
+    /* connector vs foreign keys and foreign pads */
+    const feet = footCentres();
+    for (const A of plans) {
+      for (const B of plans) {
+        if (B === A) continue;
+        const prof = keyUnderProfile(B.k.cx, B.k.w, B.k.type, B.k.lb, B.k.rb,
+                                     A.p.padY[0], A.p.padY[1],
+                                     A.col.lo, STEP, A.col.n);
+        for (let i = 0; i < A.col.n; i++) {
+          if (!isFinite(prof[i]) || !isFinite(A.col.zmax[i])) continue;
+          const air = prof[i] - A.col.zmax[i];
+          if (air < underForeign) { underForeign = air; underAt = [A.k.index, B.k.index]; }
+        }
+      }
+      for (const fx of feet) {
+        if (Math.abs(fx - A.k.foot) < 1e-6) continue;
+        for (let i = 0; i < A.col.n; i++) {
+          const x = A.col.lo + i * STEP;
+          if (Math.abs(x - fx) > FOOT.w / 2 || !isFinite(A.col.zmin[i])) continue;
+          const air = A.col.zmin[i] - FOOT.z;
+          if (air < overForeign) overForeign = air;
+        }
+      }
+    }
+    return {
+      keys: plans.length,
+      supportFree: plans.every(o => o.p.ok),
+      maxRampSlope: worstSlope,
+      maxRampAngle: Math.atan(worstSlope) * 180 / Math.PI,
+      minRampHeadroom: worstRamp, worstAt: rampAt, underAt,
+      minGap: isFinite(minGap) ? minGap : null,
+      underForeign: isFinite(underForeign) ? underForeign : null,
+      overForeign: isFinite(overForeign) ? overForeign : null,
+      clearsTravel: (!isFinite(underForeign) || underForeign >= BRIDGE.travel + BRIDGE.margin)
+                 && (!isFinite(overForeign) || overForeign >= BRIDGE.travel)
+    };
   }
 
   /* ==================================================================== *
@@ -989,6 +1387,9 @@
     ctxKey, profileFor, profilePoints, buildKey, keyPolygons,
     triangulateFace, keyExtent,
     buildSpine, buildFeet,
+    BRIDGE, FOOT_SHAPE, FOOT_PATTERN, footOutline,
+    keyPadSection, keyUnderProfile, bridgePlan, bridgeRings, buildBridge,
+    loftRings, extrudeOutline, bridgeAudit,
     spineKindOf, spineKindForColours, spineLayerCount,
     SPINE_LAYER_COLORS, spineLayerColor, spineLayerMaterial,
     spineHalves, spineParts, spineZRange, footParts,

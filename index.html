@@ -488,7 +488,7 @@ function rebuild(){
     `${L.layers} layer${L.layers===1?'':'s'} ` +
     `<span title="One slab per key colour, each key's rear tongue plugging into the layer for its own colour. Gray always takes all three: its tongue is the bottom band and black's sits above it, so the two are stacked, not alternatives.">ⓘ</span><br>` +
     `widest key→foot reach <b>${L.footDrift.toFixed(2)} mm</b> (key ${L.footDriftAt}) ` +
-    `<span title="Split pairs share one X and still reach two feet 11.3 mm apart. Closing that gap is the bridge edge loop, which is out of scope.">ⓘ</span><br>` +
+    `<span title="Split pairs share one X and still reach two feet 11.3 mm apart. That gap is closed by the bridge edge loops, which drop from the key's underside rails to its own foot's crossbars and hold a travel + margin corridor clear of every neighbour.">ⓘ</span><br>` +
     Object.keys(c).map(k=>`${c[k]}× ${k}`).join(' · ');
   wn.innerHTML = L.warnings.length
     ? L.warnings.map(w=>`<div class="warning">${w}</div>`).join('')
@@ -631,6 +631,7 @@ function uploadMeshes(){
   buffers={};
   for(const k of Object.keys(meshes)){
     if(k==='spine'||k==='spineLayers') continue;      // spine goes in per layer
+    if(!Array.isArray(meshes[k])) continue;           // e.g. bridgeCorridor, a number
     if(meshes[k].length) buffers[k]=meshToBuffer(meshes[k]);
   }
   const SL = meshes.spineLayers || {};
