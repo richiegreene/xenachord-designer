@@ -309,24 +309,90 @@
       depth: 52.5688, noseZ: Z.whiteTop,
       peakY: 52.5688 - 4.5, peakZ: 15.62804,
       arm: { startY: 29.8188, startZ: 7.84134, endY: TONGUE_Y, endZ: 5.09074 },
-      css: 'gray', pairRole: 'front',
+      css: 'gray', pairRole: 'front', armSide: 'right',
       label: 'Split Gray Second',
-      blurb: 'Front (deep, low) half of a split pair — left-hand detailing.'
+      blurb: 'Front (deep, low) half of a split pair — its rear arm runs back ' +
+             'on the RIGHT, so the pair reads black → gray.'
     },
-    'Split Grey Second': {
-      id: 'split-grey-2', kind: 'acc', layer: 'gray', mirror: false,
+    'Split Gray First': {
+      id: 'split-gray-1', kind: 'acc', layer: 'gray', mirror: false,
       depth: 52.5688, noseZ: Z.whiteTop,
       peakY: 52.5688 - 4.5, peakZ: 15.62804,
       arm: { startY: 29.8188, startZ: 7.84134, endY: TONGUE_Y, endZ: 5.09074 },
-      css: 'gray', pairRole: 'front',
-      label: 'Split Grey Second',
-      blurb: 'Front (deep, low) half of a split pair — the sheet default.'
+      css: 'gray', pairRole: 'front', armSide: 'left',
+      label: 'Split Gray First',
+      blurb: 'Front (deep, low) half of a split pair — its rear arm runs back ' +
+             'on the LEFT, so the pair reads gray → black.  The sheet default.'
     }
   };
   const TYPE_ORDER = [
     'Full Sized Black', 'Full Sized Gray', 'Full Sized White',
     'Split Black First', 'Split Black Second',
-    'Split Gray Second', 'Split Grey Second'
+    'Split Gray Second', 'Split Gray First'
+  ];
+
+  /* Designs saved before the Gray First / Grey Second rename.  A stored
+   * design, a pasted template or an old Python log still names the front
+   * half "Split Grey Second"; it has always been the LEFT-armed one. */
+  const TYPE_ALIASES = { 'Split Grey Second': 'Split Gray First' };
+  const canonType = n => TYPE_ALIASES[n] || n;
+
+  /* ------------------------------------------------------------------ *
+   *  SPLIT PAIRS ARE ONE COMPONENT                                      *
+   *                                                                     *
+   *  A split slot is never half filled.  The rear (short, tall, black)  *
+   *  half and the front (deep, low, gray) half are cut from each other: *
+   *  the gray's thin rear arm runs back down ONE side of the slot and   *
+   *  the black stands in what is left, so a black without its gray is   *
+   *  a key with no neighbour to be split from, and a gray without its   *
+   *  black is a slot with a hole in it.  They are placed together and   *
+   *  removed together, and the palette offers them as one chip.         *
+   *                                                                     *
+   *  The two chips are the two HANDS of that arrangement, named for     *
+   *  what the rear of the slot reads left to right:                     *
+   *                                                                     *
+   *    Split: Gray→Black   gray arm on the left   (the 15/17/19 sheets) *
+   *    Split: Black→Gray   gray arm on the right  (the mirror)          *
+   * ------------------------------------------------------------------ */
+  const KEY_PAIRS = {
+    'Split: Gray→Black': {
+      id: 'pair-gray-black', members: ['Split Black Second', 'Split Gray First'],
+      label: 'Split: Gray→Black', hand: 'left',
+      blurb: 'Split Black Second (rear) + Split Gray First (front).  The ' +
+             'gray arm runs back on the LEFT.  Every split slot on the ' +
+             'drafted 15 / 17 / 19 sheets is this pair.'
+    },
+    'Split: Black→Gray': {
+      id: 'pair-black-gray', members: ['Split Black First', 'Split Gray Second'],
+      label: 'Split: Black→Gray', hand: 'right',
+      blurb: 'Split Black First (rear) + Split Gray Second (front).  The ' +
+             'gray arm runs back on the RIGHT — the mirror of the sheet pair.'
+    }
+  };
+  const PAIR_ORDER = ['Split: Gray→Black', 'Split: Black→Gray'];
+
+  /** the pair a member type belongs to, or null for a full-sized key */
+  function pairOfType(name) {
+    const n = canonType(name);
+    for (const k of PAIR_ORDER)
+      if (KEY_PAIRS[k].members.indexOf(n) >= 0) return k;
+    return null;
+  }
+
+  /** the pair a slot's contents amount to, or null if it is not a pair */
+  function pairOfSlot(names) {
+    if (!names || names.length !== 2) return null;
+    for (const k of PAIR_ORDER) {
+      const m = KEY_PAIRS[k].members;
+      if (names.every(n => m.indexOf(canonType(n)) >= 0)) return k;
+    }
+    return null;
+  }
+
+  /* what the palette can drop: the three full-sized keys, then the pairs */
+  const PALETTE_ORDER = [
+    'Full Sized Black', 'Full Sized Gray',
+    'Split: Gray→Black', 'Split: Black→Gray'
   ];
 
   /* ------------------------------------------------------------------ *
@@ -340,11 +406,11 @@
       label: '15-EDO  (Cimbalo Cromatico [15])',
       slots: [
         ['Full Sized Black'],
-        ['Split Black Second', 'Split Grey Second'],
-        ['Split Black Second', 'Split Grey Second'],
+        ['Split Black Second', 'Split Gray First'],
+        ['Split Black Second', 'Split Gray First'],
         null,
         ['Full Sized Black'],
-        ['Split Black Second', 'Split Grey Second'],
+        ['Split Black Second', 'Split Gray First'],
         null
       ],
       notes: 15,
@@ -356,12 +422,12 @@
     17: {
       label: '17-EDO  (Cimbalo Cromatico [17])',
       slots: [
-        ['Split Black Second', 'Split Grey Second'],
-        ['Split Black Second', 'Split Grey Second'],
-        ['Split Black Second', 'Split Grey Second'],
+        ['Split Black Second', 'Split Gray First'],
+        ['Split Black Second', 'Split Gray First'],
+        ['Split Black Second', 'Split Gray First'],
         null,
-        ['Split Black Second', 'Split Grey Second'],
-        ['Split Black Second', 'Split Grey Second'],
+        ['Split Black Second', 'Split Gray First'],
+        ['Split Black Second', 'Split Gray First'],
         null
       ],
       notes: 17,
@@ -371,12 +437,12 @@
     19: {
       label: '19-EDO  (Cimbalo Cromatico [19])',
       slots: [
-        ['Split Black Second', 'Split Grey Second'],
-        ['Split Black Second', 'Split Grey Second'],
-        ['Split Black Second', 'Split Grey Second'],
+        ['Split Black Second', 'Split Gray First'],
+        ['Split Black Second', 'Split Gray First'],
+        ['Split Black Second', 'Split Gray First'],
         ['Full Sized Gray'],
-        ['Split Black Second', 'Split Grey Second'],
-        ['Split Black Second', 'Split Grey Second'],
+        ['Split Black Second', 'Split Gray First'],
+        ['Split Black Second', 'Split Gray First'],
         ['Full Sized Gray']
       ],
       notes: 19,
@@ -2106,6 +2172,8 @@
     WORLD, SPINE, FOOT, SIZE, Z, COLORS, DRAFT, WALL, TONGUE_Y,
     NOTES, UNITS, FEET_PER_HALF,
     KEY_TYPES, TYPE_ORDER, LAYOUTS, SLOT_BIAS, SLOT_GROUP,
+    KEY_PAIRS, PAIR_ORDER, PALETTE_ORDER, TYPE_ALIASES,
+    canonType, pairOfType, pairOfSlot,
     WHITE_NAMES, SLOT_NAMES,
     whiteWidth, whitePitch, accWidth, slotDelta,
     pushTri, pushQuad, pushBox, rectWithHoles,

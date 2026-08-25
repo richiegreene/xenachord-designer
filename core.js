@@ -24,16 +24,76 @@
   /* ------------------------------------------------------------------ *
    *  LAYOUT                                                             *
    * ------------------------------------------------------------------ */
+  /* ------------------------------------------------------------------ *
+   *  A DESIGN IS 32 KEYS, NOT A REPEATING PERIOD                        *
+   *                                                                     *
+   *  There is no pattern to edit any more.  A design is the cleared     *
+   *  keyboard — 32 identical white keys, narrow enough that all 32 fit  *
+   *  inside the A + B spine — plus whatever the user has since dropped  *
+   *  into the gaps BETWEEN them, gap by gap, in `slots`.                *
+   *                                                                     *
+   *  Because the instrument is one AKM320 the note count never moves:   *
+   *  dropping a pair into a gap adds two notes, so two whites fall off  *
+   *  the right-hand end, and every remaining key widens to take up the  *
+   *  slack.  That is the whole interaction — insert, and the keyboard   *
+   *  re-proportions itself around what you inserted.                    *
+   *                                                                     *
+   *  `template` survives only as an all-null array so the layout walker *
+   *  below keeps one code path; nothing writes to it.                   *
+   * ------------------------------------------------------------------ */
+  const EMPTY_TEMPLATE = () => [null, null, null, null, null, null, null];
+
+  /** the cleared keyboard: 32 parallel whites, auto-sized to the spine */
+  function clearedDesign(rotation) {
+    return {
+      rotation: ((rotation | 0) % 7 + 7) % 7,
+      template: EMPTY_TEMPLATE(),
+      slots: {},
+      autoScale: true,
+      scale: null,
+      preset: null
+    };
+  }
+
+  /**
+   * A drafted sheet, STAMPED OUT.  The 15 / 17 / 19 layouts are written as
+   * a seven-slot period; here that period is expanded into the individual
+   * gaps it fills across the whole 32-note keyboard, so the result is an
+   * ordinary hand-editable design with no pattern behind it.
+   */
   function presetDesign(edo) {
     const L = XM.LAYOUTS[edo];
     if (!L) throw new Error('no drafted layout for ' + edo);
-    return {
-      scale: edo,
-      rotation: L.rotation || 0,
-      template: L.slots.map(s => (s ? s.slice() : null)),
-      overrides: {},
-      preset: String(edo)
-    };
+    const d = clearedDesign(L.rotation || 0);
+    /* walk the same way computeLayout does, so the expansion stops where
+     * the 32nd note does and no gap is written that the sheet never reaches */
+    const rot = d.rotation;
+    let placed = 0;
+    for (let i = 0; placed < XM.NOTES; i++) {
+      placed++;                                   // white i
+      if (placed >= XM.NOTES) break;
+      const names = L.slots[(i + rot) % 7];
+      if (!names || !names.length) continue;
+      const keep = names.slice(0, XM.NOTES - placed).map(XM.canonType);
+      if (!keep.length) break;
+      d.slots[i] = keep;
+      placed += keep.length;
+    }
+    d.preset = String(edo);
+    return d;
+  }
+
+  /**
+   * THE SIZE IS NOT A CHOICE.  Every horizontal dimension is linear in s,
+   * and the one thing s has to satisfy is that the 32 keys end exactly at
+   * the end of spine half B.  So s is solved for, not typed: whenever the
+   * design changes, the keys re-proportion themselves to the spine they
+   * are standing on.  A design may still pin `scale` and set
+   * `autoScale: false` to work deliberately off-spine.
+   */
+  function scaleOf(design) {
+    if (design.autoScale === false && design.scale) return design.scale;
+    return suggestScale(design, design.scale || 19);
   }
 
   /** how many notes one seven-white period holds */
@@ -53,14 +113,37 @@
    *  computeLayout below, because the 32-note limit can cut a slot off. */
   function templateColours(template, overrides) {
     const used = new Set(['white']);
-    const scan = s => { if (s) for (const n of s) used.add(XM.KEY_TYPES[n].layer); };
+    const scan = s => { if (s) for (const n of s) {
+      const spec = XM.KEY_TYPES[XM.canonType(n)];
+      if (spec) used.add(spec.layer);
+    } };
     (template || []).forEach(scan);
     Object.values(overrides || {}).forEach(scan);
     return used;
   }
 
+  /** the colours a whole design places — the same scan over its own slots */
+  function designColours(design) {
+    return templateColours(design.template, design.slots || design.overrides);
+  }
+
+  /**
+   * What sits in the gap after white `i`, canonical and de-aliased.
+   * `slots` is the live map; `overrides` and `template` are read as a
+   * fallback so a design saved before the rebuild still opens.
+   */
+  function slotAt(design, i, rot) {
+    const src = design.slots || design.overrides || {};
+    let names = Object.prototype.hasOwnProperty.call(src, i) ? src[i] : undefined;
+    if (names === undefined && design.template)
+      names = design.template[(i + rot) % 7];
+    if (!names) return null;
+    const out = names.map(XM.canonType).filter(n => XM.KEY_TYPES[n]);
+    return out.length ? out : null;
+  }
+
   function computeLayout(design) {
-    const s = design.scale;
+    const s = scaleOf(design);
     const wW = XM.whiteWidth(s), wP = XM.whitePitch(s);
     const aW = XM.accWidth(s), delta = XM.slotDelta(s);
     const warnings = [];
@@ -92,16 +175,14 @@
       if (placed >= NOTES) break;
 
       const p = (i + rot) % 7;
-      const names = Object.prototype.hasOwnProperty.call(design.overrides, i)
-        ? design.overrides[i]
-        : design.template[p];
+      const names = slotAt(design, i, rot);
       const wanted = names || [];
       if (!wanted.length) {
         slots.push({
           i, period: p, cx: whites[i].cx + wP / 2 + XM.SLOT_BIAS[p] * delta,
           w: aW, names: names ? names.slice() : null, members: [],
           group: XM.SLOT_GROUP[p], name: XM.SLOT_NAMES[p],
-          overridden: Object.prototype.hasOwnProperty.call(design.overrides, i)
+          placed: true
         });
         continue;
       }
@@ -122,7 +203,7 @@
         i, period: p, cx, w: aW, names: names ? names.slice() : null,
         members, group: XM.SLOT_GROUP[p], name: XM.SLOT_NAMES[p],
         truncated: members.length < wanted.length,
-        overridden: Object.prototype.hasOwnProperty.call(design.overrides, i)
+        placed: true
       });
     }
     // a trailing empty slot carries no notes and no geometry — drop it
@@ -155,13 +236,20 @@
       if (rears > 1) warnings.push(`Slot ${sl.i} (${sl.name}) has ${rears} rear keys — they would collide.`);
       if (fronts > 1) warnings.push(`Slot ${sl.i} (${sl.name}) has ${fronts} front keys — they would collide.`);
       if (sl.members.length === 2 && (rears !== 1 || fronts !== 1)) warnings.push(
-        `Slot ${sl.i} (${sl.name}) pairs two keys of the same depth — use one rear (Split Black) and one front (Split Grey/Gray).`);
+        `Slot ${sl.i} (${sl.name}) pairs two keys of the same depth — a split slot takes one rear (Split Black) and one front (Split Gray).`);
       if (sl.members.length > 1 && sl.members.some(m => !m.spec.pairRole)) warnings.push(
         `Slot ${sl.i} (${sl.name}) mixes a full-sized key with a split key.`);
     }
 
-    /* ---- sensors: exactly 32, one per key, no chaining ---- */
-    const notesEq = notesPerPeriod(design.template);
+    /* ---- sensors: exactly 32, one per key, no chaining ----
+     * NOTES PER EQUAVE is now MEASURED, not declared.  With the repeating
+     * period gone there is no pattern to count; an equave is simply the
+     * span of the first seven whites and the gaps among them, and the
+     * notes actually standing there are the answer.  For a design that
+     * happens to be periodic this is the old number exactly. */
+    const notesEq = XM.SIZE.whitesPerPeriod + slots
+      .filter(sl => sl.i < XM.SIZE.whitesPerPeriod)
+      .reduce((n, sl) => n + sl.members.length, 0);
     const total = whites.length + slots.reduce((n, sl) => n + sl.members.length, 0);
     const feet = XM.footCentres();
 
@@ -254,6 +342,7 @@
 
     const L = {
       design, whites, slots, notes, feet, warnings,
+      s, autoScale: design.autoScale !== false,
       nUnits: XM.UNITS, wW, wP, aW, delta, notesEq, total,
       layers, spineKind, colours, spineColours,
       width, overhang, footDrift, footDriftAt, cut
@@ -292,8 +381,7 @@
     for (let i = 0; placed < XM.NOTES; i++) {
       last = i; placed++;
       if (placed >= XM.NOTES) break;
-      const names = Object.prototype.hasOwnProperty.call(design.overrides, i)
-        ? design.overrides[i] : design.template[(i + rot) % 7];
+      const names = slotAt(design, i, rot);
       placed += Math.min((names || []).length, XM.NOTES - placed);
     }
     return last + 1;
@@ -1621,7 +1709,8 @@ if __name__ == "__main__":
   }
 
   const api = {
-    presetDesign, computeLayout, pairKeys, printMesh, buildMeshes, toSTL, makeZip,
+    presetDesign, clearedDesign, scaleOf, slotAt, designColours,
+    computeLayout, pairKeys, printMesh, buildMeshes, toSTL, makeZip,
     pythonLog, summary, notesPerPeriod, layerCount, templateColours,
     whiteCount, widthAt, suggestScale,
     bounds, worldOffset, ORIGIN_MODES

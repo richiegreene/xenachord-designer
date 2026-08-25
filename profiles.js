@@ -68,14 +68,14 @@
     'Full Sized Gray': { 'n|n': 1 },
     'Full Sized White': { '-1|0': 2, '-1|1': 3, '-1|n': 4, '0|-1': 5, '0|1': 6, '1|0': 7, '1|n': 8, 'n|-1': 9, 'n|n': 10 },
     'Split Black Second': { 'n|n': 11 },
-    'Split Grey Second': { 'n|n': 12 },
+    'Split Gray First': { 'n|n': 12 },
   };
 
   /* the two left-handed categories are the X-mirror of their partner —
      checked against the sheet's own meshes at 0.00000 mm */
   const MIRROR = {
     'Split Black First': 'Split Black Second',
-    'Split Gray Second': 'Split Grey Second',
+    'Split Gray Second': 'Split Gray First',
   };
 
   const api = { P, INDEX, MIRROR };

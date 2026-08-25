@@ -93,19 +93,21 @@
   .chip.dragging{opacity:.45;border-color:var(--accent)}
   .chip.w{--c:var(--kw)} .chip.b{--c:var(--kb)} .chip.g{--c:var(--kg)}
 
-  /* ---------- period template ---------- */
-  #period{display:flex;gap:2px;margin-top:6px;align-items:flex-end}
-  .pcol{flex:1;display:flex;flex-direction:column;gap:2px;align-items:stretch}
-  .pw{height:26px;border-radius:3px;background:var(--kw);color:#222;
-    font-size:10px;display:flex;align-items:center;justify-content:center}
-  .pslot{min-height:44px;border:1px dashed var(--line);border-radius:4px;
-    display:flex;flex-direction:column;gap:1px;padding:2px;justify-content:flex-end}
-  .pslot.over{border-color:var(--accent);background:#2a3a4c}
-  .pslot .m{height:12px;border-radius:2px;font-size:8px;color:#eee;
-    display:flex;align-items:center;justify-content:center;cursor:pointer}
-  .pslot .m.b{background:var(--kb)} .pslot .m.g{background:var(--kg);color:#111}
-  .pslot .m.w{background:var(--kw);color:#111}
-  .plabel{font-size:8.5px;color:var(--dim);text-align:center;height:12px}
+  /* ---------- a split pair chip: two swatches, one component ----------
+     The swbox holds both halves side by side at the handedness the pair
+     is named for, so the chip LOOKS like what lands in the gap.         */
+  .chip.pair .swbox{display:flex;align-items:flex-start}
+  .chip.pair .half{position:relative;flex:1 1 0;height:100%}
+  .chip.pair .half .swatch{position:absolute;left:1px;right:1px;top:0}
+  .chip.pair .half.gray .swatch{background:var(--kg)}
+  .chip.pair .half.black .swatch{background:var(--kb)}
+  .chip.pair b{color:#cfe6ff}
+
+  /* ---------- derived size readout ---------- */
+  #sizeread{font-size:10.5px;color:var(--dim);line-height:1.6;margin-top:8px;
+    border-top:1px solid var(--line);padding-top:7px}
+  #sizeread b{color:var(--text);font-weight:600}
+  #sizeread .auto{color:var(--accent)}
 
   /* ---------- keyboard strip ---------- */
   #strip{height:190px;border-top:1px solid var(--line);background:#101116;
@@ -142,41 +144,32 @@
     <h1>Xenachord Designer <small>· Cimbalo Cromatico</small></h1>
     <p class="sub">Spine, feet and every dimension are inferred from
       <code>Cimbalo_Cromatico_Drafting_Sandbox_Leveling.blend</code>.
-      Drag a Key Type Category into a slot to build a layout.</p>
+      Start from 32 plain whites and drag key types into the gaps between them.</p>
 
     <fieldset>
-      <legend>Layout</legend>
-      <label for="preset">Drafted default</label>
-      <select id="preset"></select>
+      <legend>Keyboard</legend>
       <div class="row">
-        <div><label for="scale">Size scale <i>s</i></label>
-          <input id="scale" type="number" min="4" max="40" step="0.25" value="19"></div>
-        <div><label for="rot">Start on</label>
+        <div><label for="preset">Load a drafted sheet</label>
+          <select id="preset"></select></div>
+        <div style="flex:0 0 88px"><label for="rot">Start on</label>
           <select id="rot"></select></div>
-        <div><label>&nbsp;</label>
-          <button id="fit-spine" style="width:100%;padding:5px 6px"
-            title="set s so the 32 keys end exactly at the A+B spine">fit to spine</button></div>
       </div>
+      <button class="primary wide" id="clear-all" style="width:100%;margin-top:9px"
+        title="32 identical white keys, narrowed so that all 32 fit inside spine half A + half B">
+        ↺ Clear All — 32 plain white keys</button>
       <p class="fixed-note"><b>32 keys, always.</b> One AKM320 — spine half A
-        and half B, 16 sensor feet each. The white-key count is derived from
-        the pattern, never chosen.</p>
-      <p class="hint">Widths follow the sheet's size law:
-        white = <i>s</i>×1.5416667, accidental = <i>s</i>×0.6916667,
-        slot bias δ = <i>s</i>/6, white gap 1.5 mm.</p>
+        and half B, 16 sensor feet each. Drop a key into a gap and whites come
+        off the right-hand end to pay for it; everything then re-widens so the
+        keyboard still ends exactly at the spine.</p>
+      <div id="sizeread"></div>
     </fieldset>
 
     <fieldset>
       <legend>Key Type Categories — drag these</legend>
       <div id="palette"></div>
-      <p class="hint">All seven chips are shown at one width. The real width is
-        taken from the layout when the key is dropped. Click a placed key to remove it.</p>
-    </fieldset>
-
-    <fieldset>
-      <legend>Repeating period (7 whites)</legend>
-      <div id="period"></div>
-      <p class="hint">Dropping here changes the pattern <b>everywhere</b>.
-        Dropping on the keyboard strip below overrides just that one slot.</p>
+      <p class="hint">Every chip is drawn at one width; the real width comes from
+        the keyboard when it lands. A <b>split pair</b> is one component — it
+        drops both halves, and clicking either half removes both.</p>
     </fieldset>
 
     <fieldset>
@@ -243,13 +236,35 @@
 const $ = id => document.getElementById(id);
 const LS = 'xenachord-designer-v2';
 
-let design = load() || XD.presetDesign(19);
+let design = load() || XD.clearedDesign(0);
 if (!design.origin) design.origin = 'centre';
 let L = null, meshes = null, dragType = null;
 
+/* A design saved before this rebuild carries `overrides` plus a live
+ * seven-slot `template`.  Flatten both into the gap map, keeping every key
+ * it had placed and de-aliasing the old "Split Grey Second" name.  Past
+ * this point nothing reads anything but `slots`.                        */
+function migrate(s){
+  if (!s || typeof s !== 'object') return null;
+  if (!s.slots){
+    const rot = ((s.rotation|0)%7+7)%7, out = {};
+    const src = s.overrides || {};
+    for (let i = 0; i < XM.NOTES; i++){
+      const names = Object.prototype.hasOwnProperty.call(src, i) ? src[i]
+                  : (s.template ? s.template[(i+rot)%7] : null);
+      if (names && names.length) out[i] = names.map(XM.canonType);
+    }
+    s.slots = out;
+  } else for (const k of Object.keys(s.slots))
+    if (s.slots[k]) s.slots[k] = s.slots[k].map(XM.canonType);
+  s.template = [null,null,null,null,null,null,null];
+  delete s.overrides;
+  if (s.autoScale === undefined) s.autoScale = true;
+  return s;
+}
+
 function load(){ try{
-  const s = JSON.parse(localStorage.getItem(LS));
-  if (s && s.template && s.template.length === 7) return s;
+  return migrate(JSON.parse(localStorage.getItem(LS)));
 }catch(e){} return null; }
 function save(){ try{ localStorage.setItem(LS, JSON.stringify(design)); }catch(e){} }
 
@@ -266,24 +281,39 @@ presetSel.onchange = () => {
   syncInputs(); rebuild();
 };
 $('rot').innerHTML = XM.WHITE_NAMES.map((n,i)=>`<option value="${i}">${n}</option>`).join('');
-$('scale').onchange = () => {
-  design.scale = Math.max(4, Math.min(40, +$('scale').value || 19));
-  design.preset=null; syncInputs(); rebuild();
-};
 $('rot').onchange = () => { design.rotation = +$('rot').value; design.preset=null; rebuild(); };
 $('origin').onchange = () => { design.origin = $('origin').value; save(); showOrigin(); if(picked) showInspect(picked); };
-$('fit-spine').onclick = () => {
-  design.scale = Math.round(XD.suggestScale(design, design.scale) * 100) / 100;
-  design.preset=null; syncInputs(); rebuild();
-  toast(`size scale set to ${design.scale} — 32 keys now end at the spine`);
+
+/* CLEAR ALL — the cleared keyboard is not "empty", it is the 32-white one:
+ * every key identical, narrowed until all 32 stand inside the spine. */
+$('clear-all').onclick = () => {
+  design = Object.assign(XD.clearedDesign(design.rotation),
+                         { origin: design.origin });
+  syncInputs(); rebuild();
+  toast(`cleared — 32 white keys, ${L ? L.wW.toFixed(2) : ''} mm each, spanning the spine`);
 };
 
 function syncInputs(){
-  $('scale').value = design.scale;
   $('rot').value = ((design.rotation|0)%7+7)%7;
   $('origin').value = design.origin || 'centre';
   presetSel.value = design.preset || '';
 }
+
+/* THE SIZE IS AN OUTCOME, NOT A SETTING.  s is solved for on every rebuild
+ * so the 32 keys end exactly at the end of spine half B; this reports what
+ * that solve produced instead of offering a number to type. */
+function showSize(){
+  if (!L) return;
+  const acc = L.total - L.whites.length;
+  $('sizeread').innerHTML =
+    `<b>${L.whites.length}</b> white · <b>${acc}</b> in the gaps · ` +
+    `<b>${L.total}</b> of 32 keys<br>` +
+    `white <b>${L.wW.toFixed(3)} mm</b> @ pitch ${L.wP.toFixed(3)} · ` +
+    `accidental <b>${L.aW.toFixed(3)} mm</b><br>` +
+    `<span class="auto">s = ${L.s.toFixed(3)}</span>, solved so the keyboard ` +
+    `ends at the spine (${L.width.toFixed(2)} of ${XM.SPINE.halfB.x1.toFixed(2)} mm)`;
+}
+
 /* where the generated keyboard lands in Blender, under the chosen origin */
 function originOf(){ return XD.worldOffset(L, design.origin || 'centre'); }
 function showOrigin(){
@@ -301,89 +331,89 @@ function showOrigin(){
 /* ===================== palette ===================== */
 const cssOf = t => XM.KEY_TYPES[t].css === 'white' ? 'w'
                : XM.KEY_TYPES[t].css === 'black' ? 'b' : 'g';
-function buildPalette(){
-  const p = $('palette'); p.innerHTML='';
-  for (const name of XM.TYPE_ORDER){
-    const s = XM.KEY_TYPES[name];
-    const el = document.createElement('div');
-    el.className = 'chip ' + cssOf(name);
-    const h = Math.round(30 * s.depth / 85.0688);
-    el.innerHTML = `<div class="swbox"><div class="swatch" style="height:${h}px"></div></div>` +
-      `<div class="txt"><b>${s.label}</b><span>` +
-      `${s.kind==='white' ? 'white row · ' :
-         (s.pairRole ? s.pairRole+' of a pair · ' : 'single · ')}` +
-      `depth ${s.depth.toFixed(2)} mm</span></div>`;
-    el.draggable = true; el.title = s.blurb;
-    el.addEventListener('dragstart', e=>{
-      dragType = name; el.classList.add('dragging');
-      e.dataTransfer.setData('text/plain', name);
-      e.dataTransfer.effectAllowed='copy';
-    });
-    el.addEventListener('dragend', ()=>{ dragType=null; el.classList.remove('dragging'); });
-    p.appendChild(el);
+const H_OF = d => Math.max(3, Math.round(30 * d / 85.0688));
+
+/* one draggable chip.  A `name` in KEY_PAIRS draws BOTH halves — the pair
+ * is a single component and the chip has to look like one.               */
+function chipFor(name){
+  const el = document.createElement('div');
+  const pair = XM.KEY_PAIRS[name];
+  el.draggable = true;
+  el.addEventListener('dragstart', e=>{
+    dragType = name; el.classList.add('dragging');
+    e.dataTransfer.setData('text/plain', name);
+    e.dataTransfer.effectAllowed='copy';
+  });
+  el.addEventListener('dragend', ()=>{ dragType=null; el.classList.remove('dragging'); });
+
+  if (pair){
+    const [rear, front] = pair.members;         // black, gray
+    const R = XM.KEY_TYPES[rear], F = XM.KEY_TYPES[front];
+    /* draw them in the order the chip is NAMED for: the gray arm's side
+     * first when it is on the left, the black first when it is not */
+    const halves = F.armSide === 'left'
+      ? [['gray', F], ['black', R]] : [['black', R], ['gray', F]];
+    el.className = 'chip pair';
+    el.title = pair.blurb;
+    el.innerHTML =
+      `<div class="swbox">` + halves.map(([c, s]) =>
+        `<div class="half ${c}"><div class="swatch" style="height:${H_OF(s.depth)}px"></div></div>`
+      ).join('') + `</div>` +
+      `<div class="txt"><b>${pair.label}</b><span>` +
+      `pair · ${R.label} + ${F.label}</span></div>`;
+    return el;
   }
+
+  const s = XM.KEY_TYPES[name];
+  el.className = 'chip ' + cssOf(name);
+  el.title = s.blurb;
+  el.innerHTML = `<div class="swbox"><div class="swatch" style="height:${H_OF(s.depth)}px"></div></div>` +
+    `<div class="txt"><b>${s.label}</b><span>` +
+    `${s.kind==='white' ? 'white row · ' : 'single · '}` +
+    `depth ${s.depth.toFixed(2)} mm</span></div>`;
+  return el;
 }
 
-/* place `name` into the slot list `cur` (null|array); returns the new list */
-function placeInto(cur, name){
-  const spec = XM.KEY_TYPES[name];
-  if (spec.kind === 'white') return cur;            // whites are the backbone
-  let list = cur ? cur.slice() : [];
-  if (!spec.pairRole) return [name];                // a full-sized key owns the slot
-  list = list.filter(n => XM.KEY_TYPES[n].pairRole &&
-                          XM.KEY_TYPES[n].pairRole !== spec.pairRole);
-  list.push(name);
-  list.sort((a,b)=> (XM.KEY_TYPES[a].pairRole==='rear'?0:1) -
-                    (XM.KEY_TYPES[b].pairRole==='rear'?0:1));
-  return list;
+function buildPalette(){
+  const p = $('palette'); p.innerHTML='';
+  for (const name of XM.PALETTE_ORDER) p.appendChild(chipFor(name));
 }
+
+/* What a drop of `name` puts in a gap.  A pair lands whole — rear first,
+ * so the strip stacks it the way the sheet draws it — and a full-sized key
+ * owns the gap outright.  Nothing ever half-fills a split slot. */
+function placeInto(cur, name){
+  const pair = XM.KEY_PAIRS[name];
+  if (pair) return pair.members.slice();
+  const spec = XM.KEY_TYPES[XM.canonType(name)];
+  if (!spec || spec.kind === 'white') return cur;   // whites are the backbone
+  return [XM.canonType(name)];
+}
+
+/* Removing half a pair removes the pair: the gray's rear arm and the black
+ * that stands beside it are cut from each other, so one without the other
+ * is not a key type the sheet has. */
 function removeFrom(cur, name){
   if (!cur) return null;
-  const l = cur.filter(n=>n!==name);
+  if (XM.pairOfSlot(cur) && XM.pairOfType(name)) return null;
+  const l = cur.filter(n => XM.canonType(n) !== XM.canonType(name));
   return l.length ? l : null;
 }
 
-/* ===================== period editor ===================== */
-function buildPeriod(){
-  const wrap = $('period'); wrap.innerHTML='';
-  const rot = ((design.rotation|0)%7+7)%7;
-  for (let i=0;i<7;i++){
-    const col = document.createElement('div'); col.className='pcol';
-    const w = document.createElement('div'); w.className='pw';
-    w.textContent = XM.WHITE_NAMES[i]; col.appendChild(w);
-    const sl = document.createElement('div'); sl.className='pslot';
-    sl.title = XM.SLOT_NAMES[i] + '  ·  ' + XM.SLOT_GROUP[i] + '-group, bias ' +
-      (XM.SLOT_BIAS[i]>0?'+δ':XM.SLOT_BIAS[i]<0?'−δ':'0');
-    const cur = design.template[i];
-    if (cur) for (const n of cur){
-      const m = document.createElement('div');
-      m.className = 'm ' + cssOf(n);
-      m.textContent = XM.KEY_TYPES[n].pairRole === 'rear' ? 'rear'
-                    : XM.KEY_TYPES[n].pairRole === 'front' ? 'front' : 'full';
-      m.title = n + ' — click to remove';
-      m.onclick = ()=>{ design.template[i]=removeFrom(design.template[i],n);
-                        design.preset=null; refresh(); };
-      sl.appendChild(m);
-    }
-    sl.addEventListener('dragover', e=>{ e.preventDefault(); sl.classList.add('over'); });
-    sl.addEventListener('dragleave', ()=>sl.classList.remove('over'));
-    sl.addEventListener('drop', e=>{
-      e.preventDefault(); sl.classList.remove('over');
-      const n = e.dataTransfer.getData('text/plain') || dragType;
-      if (!n || !XM.KEY_TYPES[n]) return;
-      design.template[i] = placeInto(design.template[i], n);
-      design.overrides = {};
-      design.preset=null; refresh();
-    });
-    col.appendChild(sl);
-    const lab = document.createElement('div'); lab.className='plabel';
-    lab.textContent = XM.SLOT_NAMES[i];
-    col.appendChild(lab);
-    wrap.appendChild(col);
-  }
+/* ===================== keyboard strip ===================== */
+/**
+ * Write one gap.  This is the ONLY way the keyboard changes: `names` is
+ * what stands in the gap after white `i`, or null for nothing.  The note
+ * count is fixed at 32, so adding keys here is what pushes whites off the
+ * right-hand end, and the size solve then re-widens whatever is left.
+ */
+function setSlot(i, names){
+  if (names && names.length) design.slots[i] = names;
+  else delete design.slots[i];
+  design.preset = null;
+  refresh();
 }
 
-/* ===================== keyboard strip ===================== */
 const PX = 2.0;  // px per mm
 function buildStrip(){
   const inner = $('stripInner'); inner.innerHTML='';
@@ -433,8 +463,9 @@ function buildStrip(){
     d.className = 'kb-slot' + (sl.members.length ? '' : ' empty');
     d.style.left = X(sl.cx-sl.w/2-1)+'px'; d.style.width=((sl.w+2)*PX)+'px';
     d.style.top = Y(0)+'px'; d.style.height = (54*1.5)+'px';
-    d.title = `slot ${sl.i} (${sl.name})  x ${sl.cx.toFixed(3)}` +
-              (sl.overridden ? '  [overridden]' : '');
+    const held = XM.pairOfSlot(sl.names);
+    d.title = `gap ${sl.i} (${sl.name})  x ${sl.cx.toFixed(3)}` +
+              (held ? '  ·  ' + held : '');
     const ordered = sl.members.slice().sort((a,b)=>b.spec.depth-a.spec.depth);
     for (const m of ordered){
       const k = document.createElement('div');
@@ -443,10 +474,9 @@ function buildStrip(){
       k.style.width = (m.w*PX)+'px';
       k.style.top = '0px';
       k.style.height = (m.spec.depth*1.5)+'px';
-      k.title = m.type + ' — click to remove';
-      k.onclick = ev => { ev.stopPropagation();
-        design.overrides[sl.i] = removeFrom(sl.names, m.type);
-        design.preset=null; refresh(); };
+      k.title = held ? `${held} (${m.type}) — click to remove the pair`
+                     : `${m.type} — click to remove`;
+      k.onclick = ev => { ev.stopPropagation(); setSlot(sl.i, removeFrom(sl.names, m.type)); };
       d.appendChild(k);
     }
     d.addEventListener('dragover', e=>{ e.preventDefault(); d.classList.add('over'); });
@@ -454,9 +484,8 @@ function buildStrip(){
     d.addEventListener('drop', e=>{
       e.preventDefault(); d.classList.remove('over');
       const n = e.dataTransfer.getData('text/plain') || dragType;
-      if (!n || !XM.KEY_TYPES[n]) return;
-      design.overrides[sl.i] = placeInto(sl.names, n);
-      design.preset=null; refresh();
+      if (!n || (!XM.KEY_TYPES[XM.canonType(n)] && !XM.KEY_PAIRS[n])) return;
+      setSlot(sl.i, placeInto(sl.names, n));
     });
     inner.appendChild(d);
   }
@@ -480,7 +509,8 @@ function rebuild(){
     `<b>${L.notesEq}</b> notes per equave · <b>${L.whites.length}</b> white · ` +
     `${(L.total/L.notesEq).toFixed(2)} equaves<br>` +
     `white ${L.wW.toFixed(4)} mm @ pitch ${L.wP.toFixed(5)} · ` +
-    `accidental ${L.aW.toFixed(4)} mm · δ ${L.delta.toFixed(5)}<br>` +
+    `accidental ${L.aW.toFixed(4)} mm · δ ${L.delta.toFixed(5)} · ` +
+    `s ${L.s.toFixed(3)}${L.autoScale ? ' (auto)' : ''}<br>` +
     `span <b>${L.width.toFixed(1)} mm</b> vs spine ${XM.SPINE.halfB.x1.toFixed(1)} mm ` +
     `(${L.overhang>0?'+':''}${L.overhang.toFixed(1)})<br>` +
     `<b>${L.spineColours.length}</b> key colour${L.spineColours.length===1?'':'s'} ` +
@@ -495,7 +525,7 @@ function rebuild(){
     : '<div class="okline">✓ geometry consistent with the drafting sandbox</div>';
 
   picked=null; $('inspect').classList.remove('on');
-  buildPeriod(); buildStrip(); showOrigin(); uploadMeshes(); buildVisToggles();
+  buildStrip(); showSize(); showOrigin(); uploadMeshes(); buildVisToggles();
   if (rebuild._w !== L.width) { rebuild._w = L.width; fit(); } else draw();
 }
 
@@ -506,7 +536,7 @@ function download(name, buf, mime){
   a.download = name; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
 }
-const baseName = () => `xenachord-${L.notesEq}edo-s${design.scale}`;
+const baseName = () => `xenachord-${L.notesEq}edo-s${L.s.toFixed(2)}`;
 document.querySelectorAll('button[data-part]').forEach(b=>{
   b.onclick = ()=>{ if(!meshes) return;
     const p=b.dataset.part;
