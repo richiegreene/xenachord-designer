@@ -103,6 +103,35 @@
   .chip.pair .half.black .swatch{background:var(--kb)}
   .chip.pair b{color:#cfe6ff}
 
+  /* ---------- key-width proportion bar ----------
+     Four segments drawn to scale against one another, with a grip on each
+     boundary.  The bar IS the ratio: segment width is that class's width as
+     a share of the four, which is the only thing the design decides — the
+     millimetres underneath come from the size solve.                     */
+  #wbar{position:relative;display:flex;height:36px;margin-top:6px;
+    border:1px solid var(--line);border-radius:6px;overflow:hidden;
+    background:var(--panel2);user-select:none;touch-action:none}
+  .wseg{position:relative;height:100%;min-width:0;overflow:hidden;
+    display:flex;align-items:center;justify-content:center;
+    font-size:9.5px;font-weight:600;white-space:nowrap}
+  .wseg.white{background:var(--kw);color:#31313a}
+  .wseg.black{background:var(--kb);color:#c9c9d4}
+  .wseg.gray {background:var(--kg);color:#1a1a20}
+  .wseg.split{color:#e8e8ef;
+    background:linear-gradient(90deg,var(--kg) 0 50%,var(--kb) 50% 100%)}
+  .wgrip{position:absolute;top:0;bottom:0;width:11px;margin-left:-5px;
+    cursor:col-resize;z-index:3}
+  .wgrip::before{content:"";position:absolute;left:5px;top:0;bottom:0;
+    width:1px;background:rgba(0,0,0,.55)}
+  .wgrip:hover::before,.wgrip.on::before{left:4px;width:3px;background:var(--accent)}
+  #wtable{display:grid;grid-template-columns:auto auto 1fr;gap:1px 9px;
+    font-size:10.5px;color:var(--dim);margin-top:8px;align-items:baseline}
+  #wtable .sw{width:9px;height:9px;border-radius:2px;align-self:center}
+  #wtable b{color:var(--text);font-weight:600}
+  #wtable .n{color:var(--dim);text-align:right}
+  #wreset{color:var(--accent);text-decoration:none}
+  #wreset:hover{text-decoration:underline}
+
   /* ---------- derived size readout ---------- */
   #sizeread{font-size:10.5px;color:var(--dim);line-height:1.6;margin-top:8px;
     border-top:1px solid var(--line);padding-top:7px}
@@ -113,12 +142,21 @@
   #strip{height:190px;border-top:1px solid var(--line);background:#101116;
     overflow-x:auto;overflow-y:hidden;position:relative}
   #stripInner{position:relative;height:170px;margin:10px 0}
+  /* THE STRIP IS A MEASUREMENT, NOT A PICTURE.  Every box is placed at a
+     millimetre position, so a border must not add to its width (border-box)
+     and must not push its children in — an absolutely-positioned child is
+     laid out from the PADDING box, so a bordered slot would offset the key
+     inside it by a pixel and the accidental would stop reading as centred
+     between its two whites.  The slot's outline draws without taking part
+     in layout, which is what keeps the strip honest.                     */
+  #stripInner, #stripInner *{box-sizing:border-box}
   .kb-white{position:absolute;background:var(--kw);border:1px solid #b9b9b4;
     border-radius:0 0 3px 3px;color:#444;font-size:9px;text-align:center}
   .kb-white .nm{position:absolute;bottom:2px;left:0;right:0}
-  .kb-slot{position:absolute;border-radius:3px;border:1px dashed transparent}
-  .kb-slot.empty{border-color:#3a3b45;background:rgba(255,255,255,.03)}
-  .kb-slot.over{border-color:var(--accent);background:#2a3a4c}
+  .kb-slot{position:absolute;border-radius:3px;
+    outline:1px dashed transparent;outline-offset:-1px}
+  .kb-slot.empty{outline-color:#3a3b45;background:rgba(255,255,255,.03)}
+  .kb-slot.over{outline-color:var(--accent);background:#2a3a4c}
   .kb-m{position:absolute;border-radius:2px;cursor:pointer;border:1px solid rgba(0,0,0,.5)}
   .kb-m.b{background:var(--kb)} .kb-m.g{background:var(--kg)}
   .kb-foot{position:absolute;background:#3d5f7d;border-radius:1px;opacity:.9}
@@ -151,8 +189,6 @@
       <div class="row">
         <div><label for="preset">Load a drafted sheet</label>
           <select id="preset"></select></div>
-        <div style="flex:0 0 88px"><label for="rot">Start on</label>
-          <select id="rot"></select></div>
       </div>
       <button class="primary wide" id="clear-all" style="width:100%;margin-top:9px"
         title="32 identical white keys, narrowed so that all 32 fit inside spine half A + half B">
@@ -170,6 +206,18 @@
       <p class="hint">Every chip is drawn at one width; the real width comes from
         the keyboard when it lands. A <b>split pair</b> is one component — it
         drops both halves, and clicking either half removes both.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Key widths — drag the dividers</legend>
+      <div id="wbar"></div>
+      <div id="wtable"></div>
+      <p class="hint">The bar is the four classes drawn to scale against one
+        another. Drag a divider to trade width between two of them; the size
+        solve then re-fits the whole keyboard, so widening one class narrows
+        the others rather than running off the spine. An accidental stops at
+        0.86× a white — past that the white has no rear left to cut away for
+        it. <a href="#" id="wreset">reset to the sheet's law</a></p>
     </fieldset>
 
     <fieldset>
@@ -280,21 +328,18 @@ presetSel.onchange = () => {
   design = XD.presetDesign(+presetSel.value);
   syncInputs(); rebuild();
 };
-$('rot').innerHTML = XM.WHITE_NAMES.map((n,i)=>`<option value="${i}">${n}</option>`).join('');
-$('rot').onchange = () => { design.rotation = +$('rot').value; design.preset=null; rebuild(); };
 $('origin').onchange = () => { design.origin = $('origin').value; save(); showOrigin(); if(picked) showInspect(picked); };
 
 /* CLEAR ALL — the cleared keyboard is not "empty", it is the 32-white one:
  * every key identical, narrowed until all 32 stand inside the spine. */
 $('clear-all').onclick = () => {
   design = Object.assign(XD.clearedDesign(design.rotation),
-                         { origin: design.origin });
+                         { origin: design.origin, widths: design.widths });
   syncInputs(); rebuild();
   toast(`cleared — 32 white keys, ${L ? L.wW.toFixed(2) : ''} mm each, spanning the spine`);
 };
 
 function syncInputs(){
-  $('rot').value = ((design.rotation|0)%7+7)%7;
   $('origin').value = design.origin || 'centre';
   presetSel.value = design.preset || '';
 }
@@ -308,10 +353,12 @@ function showSize(){
   $('sizeread').innerHTML =
     `<b>${L.whites.length}</b> white · <b>${acc}</b> in the gaps · ` +
     `<b>${L.total}</b> of 32 keys<br>` +
-    `white <b>${L.wW.toFixed(3)} mm</b> @ pitch ${L.wP.toFixed(3)} · ` +
-    `accidental <b>${L.aW.toFixed(3)} mm</b><br>` +
-    `<span class="auto">s = ${L.s.toFixed(3)}</span>, solved so the keyboard ` +
-    `ends at the spine (${L.width.toFixed(2)} of ${XM.SPINE.halfB.x1.toFixed(2)} mm)`;
+    `pitch ${L.wP.toFixed(3)} · ` +
+    `white <b>${L.classW.white.toFixed(3)} mm</b> · black ${L.classW.black.toFixed(3)}` +
+    ` · gray ${L.classW.gray.toFixed(3)} · split ${L.classW.split.toFixed(3)} mm<br>` +
+    `<span class="auto">s = ${L.s.toFixed(3)}</span>, solved so every key sits ` +
+    `inside the spine<br>keys reach x ${L.keyX0.toFixed(2)} … ${L.keyX1.toFixed(2)} · ` +
+    `spine ${XM.SPINE.halfA.x0.toFixed(2)} … ${XM.SPINE.halfB.x1.toFixed(2)} mm`;
 }
 
 /* where the generated keyboard lands in Blender, under the chosen origin */
@@ -378,6 +425,141 @@ function buildPalette(){
   const p = $('palette'); p.innerHTML='';
   for (const name of XM.PALETTE_ORDER) p.appendChild(chipFor(name));
 }
+
+/* ===================== key-width proportion bar =====================
+ *
+ * WIDTH IS A RATIO, NOT A MILLIMETRE.  The four classes — white, full
+ * black, full gray, and split (both pair types share a gap, so they share
+ * a width) — each carry their width as a share of the white's.  Those
+ * shares are the whole of the decision: the absolute size is still solved
+ * for so the 32 keys end at the spine, which is why widening one class
+ * narrows the others instead of running the keyboard off the end.
+ *
+ * The bar draws the four to scale against each other, so it reads as what
+ * it controls.  Dragging a divider moves width from one class to its
+ * neighbour and leaves the other two alone; the sum is held, so the bar
+ * stays full and the picture stays a proportion.
+ */
+const WCLS = () => XM.WIDTH_CLASSES;
+
+function ratiosNow(){ return XM.widthRatios(design); }
+
+function setRatios(r){
+  design.widths = {};
+  for (const c of WCLS()) design.widths[c] = +r[c].toFixed(6);
+  design.preset = null;
+}
+
+/** paint the bar and the table from `r`, without touching the model */
+function paintWidths(r){
+  const bar = $('wbar'); bar.innerHTML = '';
+  const cls = WCLS(), tot = cls.reduce((n,c)=>n+r[c],0);
+  let acc = 0;
+  for (const c of cls){
+    const d = document.createElement('div');
+    d.className = 'wseg ' + c;
+    d.style.flex = `0 0 ${(100*r[c]/tot).toFixed(4)}%`;
+    d.title = `${XM.CLASS_LABEL[c]} — ${r[c].toFixed(3)}× a white key`;
+    d.textContent = XM.CLASS_LABEL[c];
+    bar.appendChild(d);
+  }
+  for (let i = 0; i < cls.length - 1; i++){
+    acc += r[cls[i]];
+    const g = document.createElement('div');
+    g.className = 'wgrip'; g.dataset.i = i;
+    g.style.left = (100*acc/tot).toFixed(4) + '%';
+    g.title = `${XM.CLASS_LABEL[cls[i]]} ↔ ${XM.CLASS_LABEL[cls[i+1]]}`;
+    bar.appendChild(g);
+  }
+  /* a squeezed class still has to read as a class, and half a clipped word
+   * reads as a bug — so the label goes the moment it stops fitting, and the
+   * table underneath carries the name instead */
+  for (const d of bar.querySelectorAll('.wseg')){
+    const room = d.getBoundingClientRect().width;
+    if (room < 46) d.textContent = room < 14 ? '' : '·';
+  }
+  const t = $('wtable'); t.innerHTML = '';
+  const fill = { white:'var(--kw)', black:'var(--kb)', gray:'var(--kg)',
+                 split:'linear-gradient(90deg,var(--kg) 0 50%,var(--kb) 50% 100%)' };
+  for (const c of cls){
+    const sw = document.createElement('div');
+    sw.className = 'sw'; sw.style.background = fill[c];
+    const nm = document.createElement('div');
+    nm.innerHTML = `<b>${XM.CLASS_LABEL[c]}</b>`;
+    const v = document.createElement('div');
+    const mm = L && L.classW ? L.classW[c] : null;
+    v.innerHTML = `${r[c].toFixed(3)}× ` +
+      (mm != null ? `· <b>${mm.toFixed(2)} mm</b>` : '');
+    t.appendChild(sw); t.appendChild(nm); t.appendChild(v);
+  }
+}
+
+function buildWidths(){ paintWidths(ratiosNow()); }
+
+/* Dragging: convert pixels to ratio, hold the sum, respect the clamps.
+ *
+ * THE DRAG LIVES ON THE WINDOW, NOT ON THE BAR.  Each move repaints the
+ * bar, which destroys the grip the pointer is on, so pointer capture does
+ * not survive the first frame — and a pointerup released outside the bar
+ * would never be heard, leaving the bar following the mouse with no button
+ * held.  The listeners are therefore added to the window for the length of
+ * the drag and taken off again when it ends. */
+(function(){
+  let drag = null, pending = 0;
+  const bar = () => $('wbar');
+  const onMove = e => {
+    if (!drag) return;
+    const cls = WCLS(), a = cls[drag.i], b = cls[drag.i+1];
+    let dv = ((e.clientX - drag.x) / drag.w) * drag.tot;
+    const next = Object.assign({}, drag.r);
+    /* the two classes trade between themselves, so BOTH ends of the move
+     * are bounded — by the floor each may not go under, and by the ceiling
+     * an accidental may not pass beside the white it sits next to */
+    const lo = c => c === 'white' ? XM.whiteFloor(next) : XM.WIDTH_RATIO_MIN;
+    const hi = c => c === 'white' ? XM.WIDTH_RATIO_MAX : XM.accCeiling(next.white);
+    next[a] = drag.r[a] + dv; next[b] = drag.r[b] - dv;
+    const fix = (c, other) => {
+      const v = Math.min(hi(c), Math.max(lo(c), next[c]));
+      if (v === next[c]) return;
+      next[other] += next[c] - v; next[c] = v;
+    };
+    fix(a, b); fix(b, a);
+    /* moving the white moves the ceiling, so the others may need to follow */
+    if (a === 'white' || b === 'white')
+      for (const c of cls) if (c !== 'white')
+        next[c] = Math.min(next[c], XM.accCeiling(next.white));
+    setRatios(next); paintWidths(next);
+    /* the bar answers instantly; the model follows a few frames behind,
+     * because a full layout solve is far slower than a pointermove */
+    const now = Date.now();
+    if (now - pending > 220) { pending = now; rebuild(); }
+  };
+  const stop = () => {
+    if (!drag) return;
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', stop);
+    window.removeEventListener('pointercancel', stop);
+    drag = null; pending = 0;
+    refresh();
+  };
+  bar().addEventListener('pointerdown', e => {
+    const g = e.target.closest('.wgrip'); if (!g || drag) return;
+    e.preventDefault();
+    drag = { i:+g.dataset.i, x:e.clientX, r:ratiosNow(),
+             w:bar().getBoundingClientRect().width };
+    drag.tot = WCLS().reduce((n,c)=>n+drag.r[c],0);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+  });
+})();
+
+$('wreset').onclick = e => {
+  e.preventDefault();
+  delete design.widths; design.preset = null;
+  refresh();
+  toast('key widths back to the sheet’s law — every accidental 83/185 of a white');
+};
 
 /* What a drop of `name` puts in a gap.  A pair lands whole — rear first,
  * so the strip stacks it the way the sheet draws it — and a full-sized key
@@ -453,8 +635,8 @@ function buildStrip(){
     const d = document.createElement('div'); d.className='kb-white';
     d.style.left = X(w.x0)+'px'; d.style.width=(w.w*PX)+'px';
     d.style.top = Y(0)+'px'; d.style.height = (85.0688*1.5)+'px';
-    d.innerHTML = `<div class="nm">${w.name}${w.i%7===0?'<br>'+w.i:''}</div>`;
-    d.title = `white ${w.i} (${w.name})  x ${w.cx.toFixed(3)}  w ${w.w.toFixed(4)}`;
+    d.innerHTML = `<div class="nm">${w.noteIndex != null ? w.noteIndex : w.i}</div>`;
+    d.title = `white ${w.i} · key ${w.noteIndex}  x ${w.cx.toFixed(3)}  w ${w.w.toFixed(4)}`;
     inner.appendChild(d);
   }
   // slots
@@ -464,7 +646,7 @@ function buildStrip(){
     d.style.left = X(sl.cx-sl.w/2-1)+'px'; d.style.width=((sl.w+2)*PX)+'px';
     d.style.top = Y(0)+'px'; d.style.height = (54*1.5)+'px';
     const held = XM.pairOfSlot(sl.names);
-    d.title = `gap ${sl.i} (${sl.name})  x ${sl.cx.toFixed(3)}` +
+    d.title = `gap ${sl.i}  x ${sl.cx.toFixed(3)}` +
               (held ? '  ·  ' + held : '');
     const ordered = sl.members.slice().sort((a,b)=>b.spec.depth-a.spec.depth);
     for (const m of ordered){
@@ -506,13 +688,14 @@ function rebuild(){
   st.innerHTML =
     `<b>${L.total}</b> keys on <b>${L.feet.length}</b> sensor feet ` +
     `(16 on half A, 16 on half B)<br>` +
-    `<b>${L.notesEq}</b> notes per equave · <b>${L.whites.length}</b> white · ` +
-    `${(L.total/L.notesEq).toFixed(2)} equaves<br>` +
+    `<b>${L.whites.length}</b> white · <b>${L.total-L.whites.length}</b> in the gaps<br>` +
     `white ${L.wW.toFixed(4)} mm @ pitch ${L.wP.toFixed(5)} · ` +
-    `accidental ${L.aW.toFixed(4)} mm · δ ${L.delta.toFixed(5)} · ` +
+    `black ${L.classW.black.toFixed(3)} · gray ${L.classW.gray.toFixed(3)} · ` +
+    `split ${L.classW.split.toFixed(3)} mm · ` +
     `s ${L.s.toFixed(3)}${L.autoScale ? ' (auto)' : ''}<br>` +
-    `span <b>${L.width.toFixed(1)} mm</b> vs spine ${XM.SPINE.halfB.x1.toFixed(1)} mm ` +
-    `(${L.overhang>0?'+':''}${L.overhang.toFixed(1)})<br>` +
+    `keys reach x <b>${L.keyX0.toFixed(2)} … ${L.keyX1.toFixed(2)} mm</b> · ` +
+    `spine ${XM.SPINE.halfA.x0.toFixed(2)} … ${XM.SPINE.halfB.x1.toFixed(2)} mm` +
+    `${L.overhang>0.05?` <span style="color:var(--warn)">+${L.overhang.toFixed(2)} over</span>`:''}<br>` +
     `<b>${L.spineColours.length}</b> key colour${L.spineColours.length===1?'':'s'} ` +
     `(${L.spineColours.join(' + ')}) → <b>${L.spineKind}</b> type spine, ` +
     `${L.layers} layer${L.layers===1?'':'s'} ` +
@@ -525,7 +708,7 @@ function rebuild(){
     : '<div class="okline">✓ geometry consistent with the drafting sandbox</div>';
 
   picked=null; $('inspect').classList.remove('on');
-  buildStrip(); showSize(); showOrigin(); uploadMeshes(); buildVisToggles();
+  buildStrip(); showSize(); buildWidths(); showOrigin(); uploadMeshes(); buildVisToggles();
   if (rebuild._w !== L.width) { rebuild._w = L.width; fit(); } else draw();
 }
 
@@ -536,7 +719,7 @@ function download(name, buf, mime){
   a.download = name; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
 }
-const baseName = () => `xenachord-${L.notesEq}edo-s${L.s.toFixed(2)}`;
+const baseName = () => `xenachord-32key-s${L.s.toFixed(2)}`;
 document.querySelectorAll('button[data-part]').forEach(b=>{
   b.onclick = ()=>{ if(!meshes) return;
     const p=b.dataset.part;
@@ -1018,7 +1201,7 @@ function keyBoxes(){
     XM.keyExtent(w.cx, L.wW, w.type, w.ctxL, w.ctxR)));
   for(const sl of L.slots) for(const m of sl.members) out.push(Object.assign({
     part:m.spec.layer, kind:'acc', ref:m, slot:sl, type:m.type },
-    XM.keyExtent(m.cx, L.aW, m.type, null, null)));
+    XM.keyExtent(m.cx, m.w, m.type, null, null)));
   return out;
 }
 function rayBox(o,d,b,zo){
@@ -1053,7 +1236,7 @@ function pickAt(e){
     let tris=null;
     if(best.kind==='white') tris=XM.buildKey(best.ref.cx,L.wW,best.type,
       best.ref.ctxL,best.ref.ctxR);
-    else if(best.kind==='acc') tris=XM.buildKey(best.ref.cx,L.aW,best.type,null,null);
+    else if(best.kind==='acc') tris=XM.buildKey(best.ref.cx,best.ref.w||L.aW,best.type,null,null);
     else { tris=[]; XM.pushBox(tris,best.x0,best.x1,best.y0,best.y1,best.z0,best.z1); }
     if(tris.length) pickBuf=meshToBuffer(tris);
   }
@@ -1084,22 +1267,15 @@ function showInspect(b){
   } else {
     const r=b.ref, spec=XM.KEY_TYPES[b.type];
     title=b.type;
-    sub = b.kind==='white' ? `white ${r.i} · ${r.name}`
-                           : `slot ${b.slot.i} · ${b.slot.name}`;
+    sub = b.kind==='white' ? `white ${r.i} · key ${r.noteIndex}`
+                           : `gap ${b.slot.i} · key ${r.noteIndex}`;
     R('centre x', mm(r.cx,5));
     R('width', mm(r.w,5));
     R('depth (y)', mm(spec.depth,4));
     R('z range', `${mm(b.z0,5)} → ${mm(b.z1,5)}`);
     R('spine layer', spec.layer);
-    if(b.kind==='acc'){
-      R('slot bias', (XM.SLOT_BIAS[b.slot.period]>0?'+δ':XM.SLOT_BIAS[b.slot.period]<0?'−δ':'0')
-        + ` (${mm(XM.SLOT_BIAS[b.slot.period]*L.delta,4)})`);
-      R('slot group', XM.SLOT_GROUP[b.slot.period]);
-      if(spec.pairRole) R('pair role', spec.pairRole);
-      if(b.slot.overridden) R('', '<span style="color:var(--accent)">slot overridden</span>');
-    }
+    if(b.kind==='acc' && spec.pairRole) R('pair role', spec.pairRole);
     R('note #', r.noteIndex);
-    R('degree', r.degree + ' of ' + L.notesEq);
     if(r.foot!=null){
       R('sensor foot x', mm(r.foot,5));
       R('key − foot', mm(r.cx-r.foot,4));

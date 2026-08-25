@@ -93,7 +93,53 @@
    */
   function scaleOf(design) {
     if (design.autoScale === false && design.scale) return design.scale;
-    return suggestScale(design, design.scale || 19);
+    return fitScale(design);
+  }
+
+  /** the true x reach of every key as it will actually be built */
+  function keyboardExtent(whites, slots) {
+    let x0 = Infinity, x1 = -Infinity;
+    const eat = e => { if (e.x0 < x0) x0 = e.x0; if (e.x1 > x1) x1 = e.x1; };
+    for (const w of whites)
+      eat(XM.keyExtent(w.cx, w.w, w.type, w.ctxL, w.ctxR));
+    for (const sl of slots) for (const m of sl.members)
+      eat(XM.keyExtent(m.cx, m.w, m.type, null, null));
+    return isFinite(x0) ? { x0, x1 } : { x0: 0, x1: 0 };
+  }
+
+  /** slide the whole keyboard along x — keys only; the feet never move */
+  function shiftLayout(whites, slots, notes, dx) {
+    for (const w of whites) {
+      w.x0 += dx; w.x1 += dx; w.cx += dx;
+      if (w.shL != null) w.shL += dx;
+      if (w.shR != null) w.shR += dx;
+    }
+    for (const sl of slots) {
+      sl.cx += dx;
+      for (const m of sl.members) { m.cx += dx; m.x0 += dx; m.x1 += dx; }
+    }
+    for (const n of (notes || [])) n.cx += dx;
+  }
+
+  /**
+   * SOLVE THE SIZE AGAINST THE SPINE.
+   *
+   * Every x in the design is `alpha + beta * s`, so the keyboard's measured
+   * extent is affine in s and two probes pin it exactly.  The target is the
+   * spine's own length — half A's left edge to half B's right edge — so the
+   * keys come out flush with the spine at both ends instead of being sized
+   * on white pitch, which ignores both the last gap's accidental and the
+   * rear tails that reach outside their own pitch.
+   */
+  function fitScale(design) {
+    const target = XM.SPINE.halfB.x1 - XM.SPINE.halfA.x0;
+    const span = s => { const L = layoutSpan(design, s); return L.x1 - L.x0; };
+    const s1 = 12, s2 = 24;
+    const w1 = span(s1), w2 = span(s2);
+    const b = (w2 - w1) / (s2 - s1);
+    if (!isFinite(b) || Math.abs(b) < 1e-9) return design.scale || 19;
+    const a = w1 - b * s1;
+    return Math.max(1, (target - a) / b);
   }
 
   /** how many notes one seven-white period holds */
@@ -142,10 +188,22 @@
     return out.length ? out : null;
   }
 
-  function computeLayout(design) {
-    const s = scaleOf(design);
-    const wW = XM.whiteWidth(s), wP = XM.whitePitch(s);
-    const aW = XM.accWidth(s), delta = XM.slotDelta(s);
+  /** the keyboard's measured span at a given s — the probe fitScale uses */
+  function layoutSpan(design, s) {
+    const L = computeLayout(design, s);
+    return { x0: 0, x1: L.width };
+  }
+
+  function computeLayout(design, forceS) {
+    const s = forceS != null ? forceS : scaleOf(design);
+    /* WIDTH IS A PROPERTY OF THE CLASS.  Each of the four carries a ratio
+     * of the white's width; the white's own ratio scales the pitch with
+     * it, so widening one class narrows the others once the size solve
+     * refits the whole thing to the spine.                             */
+    const ratios = XM.widthRatios(design);
+    const cw = c => XM.classWidth(c, s, ratios);
+    const wW = cw('white'), wP = wW + XM.SIZE.whiteGap;
+    const aW = cw('split'), delta = XM.slotDelta(s);
     const warnings = [];
     const rot = ((design.rotation | 0) % 7 + 7) % 7;
 
@@ -169,7 +227,7 @@
       const x0 = i * wP;
       whites.push({
         i, x0, x1: x0 + wW, cx: x0 + wW / 2, w: wW,
-        period: wp, name: XM.WHITE_NAMES[wp], type: 'Full Sized White'
+        period: wp, type: 'Full Sized White'
       });
       placed++;
       if (placed >= NOTES) break;
@@ -179,29 +237,33 @@
       const wanted = names || [];
       if (!wanted.length) {
         slots.push({
-          i, period: p, cx: whites[i].cx + wP / 2 + XM.SLOT_BIAS[p] * delta,
+          i, period: p, cx: whites[i].cx + wP / 2,
           w: aW, names: names ? names.slice() : null, members: [],
-          group: XM.SLOT_GROUP[p], name: XM.SLOT_NAMES[p],
           placed: true
         });
         continue;
       }
 
-      const cx = whites[i].cx + wP / 2 + XM.SLOT_BIAS[p] * delta;
+      /* the plain midpoint between its two whites — no lean, see model.js */
+      const cx = whites[i].cx + wP / 2;
       const members = [];
       for (let k = 0; k < wanted.length && placed < NOTES; k++) {
         const spec = XM.KEY_TYPES[wanted[k]];
         if (!spec) throw new Error('unknown key type: ' + wanted[k]);
+        /* both halves of a split share the gap, so they share its width */
+        const mw = cw(spec.widthClass);
         members.push({
-          type: wanted[k], spec, cx, w: aW,
-          x0: cx - aW / 2, x1: cx + aW / 2, slot: i, ord: k
+          type: wanted[k], spec, cx, w: mw, cls: spec.widthClass,
+          x0: cx - mw / 2, x1: cx + mw / 2, slot: i, ord: k
         });
         placed++;
       }
       if (members.length < wanted.length) cut = { slot: i, kept: members.length, wanted: wanted.length };
+      /* a gap is as wide as the widest thing standing in it */
+      const slotW = members.reduce((m, k) => Math.max(m, k.w), 0) || aW;
       slots.push({
-        i, period: p, cx, w: aW, names: names ? names.slice() : null,
-        members, group: XM.SLOT_GROUP[p], name: XM.SLOT_NAMES[p],
+        i, period: p, cx, w: slotW, names: names ? names.slice() : null,
+        members,
         truncated: members.length < wanted.length,
         placed: true
       });
@@ -211,34 +273,37 @@
            !slots[slots.length - 1].members.length) slots.pop();
 
     /* ---- neighbour context + the clearance the accidentals cut out ----
-     * The drafted whites carry different internal ribbing depending on which
-     * slots sit either side of them and how those slots are biased, so the
-     * context is part of a white's identity, not decoration.              */
+     * A white's rear is derived from what actually stands beside it: the
+     * context is HALF the neighbouring gap's width as a ratio of this
+     * white's, or null for an empty gap.  With one accidental width that
+     * was the same number everywhere; now a white beside a wide split and
+     * a narrow black is cut back further on the split side.            */
+    const halfRatio = sl => (sl.w / 2) / wW;
     for (const w of whites) {
       const gl = slots[w.i - 1], gr = slots[w.i];
-      w.ctxL = (gl && gl.members.length) ? XM.SLOT_BIAS[gl.period] : null;
-      w.ctxR = (gr && gr.members.length) ? XM.SLOT_BIAS[gr.period] : null;
+      w.ctxL = (gl && gl.members.length) ? halfRatio(gl) : null;
+      w.ctxR = (gr && gr.members.length) ? halfRatio(gr) : null;
       w.profileExact = XM.profileFor(w.type, w.ctxL, w.ctxR).exact;
       w.shL = w.x0;
       w.shR = w.x1;
       if (gl && gl.members.length) w.shL = Math.max(w.shL, gl.cx + gl.w / 2 + 0.6);
       if (gr && gr.members.length) w.shR = Math.min(w.shR, gr.cx - gr.w / 2 - 0.6);
       if (w.shR - w.shL < 6) warnings.push(
-        `White ${w.i} (${w.name}): mid-section only ${(w.shR - w.shL).toFixed(2)} mm wide.`);
+        `White ${w.i}: mid-section only ${(w.shR - w.shL).toFixed(2)} mm wide.`);
     }
 
     /* ---- validity checks ---- */
     for (const sl of slots) {
       if (sl.members.length > 2) warnings.push(
-        `Slot ${sl.i} (${sl.name}) holds ${sl.members.length} keys — a split slot takes at most two.`);
+        `Gap ${sl.i} holds ${sl.members.length} keys — a split slot takes at most two.`);
       const rears = sl.members.filter(m => m.spec.pairRole === 'rear').length;
       const fronts = sl.members.filter(m => m.spec.pairRole === 'front').length;
-      if (rears > 1) warnings.push(`Slot ${sl.i} (${sl.name}) has ${rears} rear keys — they would collide.`);
-      if (fronts > 1) warnings.push(`Slot ${sl.i} (${sl.name}) has ${fronts} front keys — they would collide.`);
+      if (rears > 1) warnings.push(`Gap ${sl.i} has ${rears} rear keys — they would collide.`);
+      if (fronts > 1) warnings.push(`Gap ${sl.i} has ${fronts} front keys — they would collide.`);
       if (sl.members.length === 2 && (rears !== 1 || fronts !== 1)) warnings.push(
-        `Slot ${sl.i} (${sl.name}) pairs two keys of the same depth — a split slot takes one rear (Split Black) and one front (Split Gray).`);
+        `Gap ${sl.i} pairs two keys of the same depth — a split slot takes one rear (Split Black) and one front (Split Gray).`);
       if (sl.members.length > 1 && sl.members.some(m => !m.spec.pairRole)) warnings.push(
-        `Slot ${sl.i} (${sl.name}) mixes a full-sized key with a split key.`);
+        `Gap ${sl.i} mixes a full-sized key with a split key.`);
     }
 
     /* ---- sensors: exactly 32, one per key, no chaining ----
@@ -254,7 +319,7 @@
     const feet = XM.footCentres();
 
     if (cut) warnings.push(
-      `The 32-note limit lands inside slot ${cut.slot} (${XM.SLOT_NAMES[(cut.slot + rot) % 7]}): ` +
+      `The 32-note limit lands inside gap ${cut.slot}: ` +
       `${cut.kept} of ${cut.wanted} keys placed. Change the pattern or the rotation if you want a whole slot there.`);
 
     /* ---- one note per foot, left to right ---- */
@@ -286,7 +351,7 @@
       const key = n.type + '|' + n.cx + '|' + (n.kind === 'white' ? 'w' : 'a');
       if (!drafted.has(key)) {
         const r = n.ref, white = n.kind === 'white';
-        const w = white ? wW : aW;
+        const w = white ? wW : (r.w || aW);
         const lb = white ? r.ctxL : null, rb = white ? r.ctxR : null;
         /* the span the key presents AT THE SPINE, not its overall extent —
          * the two halves of a pair share an overall extent (each is drawn
@@ -315,12 +380,31 @@
       if (d > footDrift) { footDrift = d; footDriftAt = k; }
     });
 
-    const width = whites.length ? whites[whites.length - 1].x1 : 0;
-    const overhang = width - XM.SPINE.halfB.x1;
-    if (overhang > 0.5) warnings.push(
-      `The 32 keys span ${width.toFixed(1)} mm but the A+B spine ends at ` +
-      `${XM.SPINE.halfB.x1.toFixed(1)} mm — the last ${overhang.toFixed(1)} mm overhangs. ` +
-      `Lower the size scale s to about ${suggestScale(design, s).toFixed(2)}.`);
+    /* ------------------------------------------------------------------
+     * NO KEY MAY REACH PAST THE SPINE IT STANDS ON.
+     *
+     * The white PITCH is not the keyboard's extent.  A drafted key's rear
+     * weaves past its neighbours' slots and can reach several millimetres
+     * outside its own pitch, and the accidental in the last gap sits to
+     * the right of the last white — so a keyboard sized on pitch alone
+     * runs off the end of spine half B by up to 10 mm, and starts left of
+     * where half A begins.
+     *
+     * The extent is therefore MEASURED over every key, exactly as it will
+     * be built, and it is that extent the size solve fits and the offset
+     * seats.  x0Offset then slides the whole keyboard so its leftmost
+     * point lands on the front-left corner of the spine.
+     * ------------------------------------------------------------------ */
+    const ext = keyboardExtent(whites, slots);
+    const x0Offset = XM.SPINE.halfA.x0 - ext.x0;
+    if (Math.abs(x0Offset) > 1e-9) shiftLayout(whites, slots, notes, x0Offset);
+    ext.x0 += x0Offset; ext.x1 += x0Offset;
+
+    const width = ext.x1 - ext.x0;
+    const overhang = ext.x1 - XM.SPINE.halfB.x1;
+    if (overhang > 0.05) warnings.push(
+      `The 32 keys reach ${ext.x1.toFixed(2)} mm but spine half B ends at ` +
+      `${XM.SPINE.halfB.x1.toFixed(2)} mm — ${overhang.toFixed(2)} mm hangs off the end.`);
     /* NOTE: a large key-to-foot X offset is expected, not an error.  The two
      * halves of a split pair share one X and still have to reach two adjacent
      * feet 11.3 mm apart.  Nothing closes that gap at this stage — the loop
@@ -344,8 +428,10 @@
       design, whites, slots, notes, feet, warnings,
       s, autoScale: design.autoScale !== false,
       nUnits: XM.UNITS, wW, wP, aW, delta, notesEq, total,
+      ratios, classW: Object.fromEntries(XM.WIDTH_CLASSES.map(c => [c, cw(c)])),
       layers, spineKind, colours, spineColours,
-      width, overhang, footDrift, footDriftAt, cut
+      width, overhang, footDrift, footDriftAt, cut,
+      keyX0: ext.x0, keyX1: ext.x1, x0Offset
     };
 
     /* ---- foot pairing: the two loops have to describe a relationship the
@@ -417,7 +503,7 @@
       grow(e.x0, e.x1, e.y0, e.y1, e.z0, e.z1);
     }
     for (const sl of L.slots) for (const m of sl.members) {
-      const e = XM.keyExtent(m.cx, L.aW, m.type, null, null);
+      const e = XM.keyExtent(m.cx, m.w, m.type, null, null);
       grow(e.x0, e.x1, e.y0, e.y1, e.z0, e.z1);
     }
     for (const [hn, half] of XM.spineHalves()) {
@@ -490,7 +576,7 @@
       return {
         name: n.name, index: n.index, type: n.type,
         layer: XM.KEY_TYPES[n.type].layer,
-        cx: r.cx, w: white ? L.wW : L.aW,
+        cx: r.cx, w: white ? L.wW : (r.w || L.aW),
         lb: white ? r.ctxL : null, rb: white ? r.ctxR : null,
         foot: r.foot
       };
@@ -527,7 +613,7 @@
       out.white.push(...XM.buildKey(w.cx, L.wW, w.type, w.ctxL, w.ctxR, null));
     for (const sl of L.slots) {
       for (const m of sl.members)
-        out[m.spec.layer].push(...XM.buildKey(m.cx, L.aW, m.type, null, null, null));
+        out[m.spec.layer].push(...XM.buildKey(m.cx, m.w, m.type, null, null, null));
     }
     /* The spine is the drafted one for this design's colour count — the
      * "<kind> type Spine - A / - B" pair.  Keep it whole for the STL, and
@@ -726,6 +812,9 @@
     p('    "white_width":  ', f(L.wW), ',');
     p('    "white_pitch":  ', f(L.wP), ',');
     p('    "acc_width":    ', f(L.aW), ',');
+    for (const c of XM.WIDTH_CLASSES)
+      p('    "width_', c, '":  ', f(L.classW[c]), ',      # ratio ',
+        f(L.ratios[c], 5), ' of a white');
     p('    "slot_delta":   ', f(L.delta), ',');
     p('}');
     p('');
@@ -735,17 +824,17 @@
     p('WORLD_Z0 = ', pn(O.z0), '      # Z_world = z + WORLD_Z0');
     p('ORIGIN   = "', O.mode, '"        # ', ORIGIN_MODES[O.mode]);
     p('');
-    p('# --- repeating seven-slot template (one period = 7 white keys) ----------');
-    p('TEMPLATE = [');
-    for (let i = 0; i < 7; i++) {
-      const t = d.template[i];
-      const body = t ? '[' + t.map(n => '"' + n + '"').join(', ') + ']' : 'None';
-      p('    ', body, ',', ' '.repeat(Math.max(1, 46 - body.length)),
-        '# slot ', i, '  ', XM.SLOT_NAMES[i], '  bias ',
-        XM.SLOT_BIAS[i] > 0 ? '+' : XM.SLOT_BIAS[i] < 0 ? '-' : ' ',
-        XM.SLOT_BIAS[i] ? 'delta' : '0    ', '  (', XM.SLOT_GROUP[i], ')');
+    p('# --- what stands in each gap between the whites -------------------------');
+    p('# There is no repeating pattern behind this and no lean on any gap: each');
+    p('# one sits at the plain midpoint between its two whites, so every white');
+    p('# key is the same key and every waist is the same width.');
+    p('GAPS = {');
+    for (const k of Object.keys(L.design.slots || {}).sort((a, b) => a - b)) {
+      const t = (L.design.slots || {})[k];
+      if (!t || !t.length) continue;
+      p('    ', k, ': [', t.map(n => '"' + n + '"').join(', '), '],');
     }
-    p(']');
+    p('}');
     p('');
 
     /* --- key table ---------------------------------------------------- */
@@ -762,7 +851,7 @@
       const r = n.ref;
       const spec = XM.KEY_TYPES[n.type];
       const white = spec.kind === 'white';
-      const w = white ? L.wW : L.aW;
+      const w = white ? L.wW : (r.w || L.aW);
       const e = XM.keyExtent(r.cx, w, n.type, white ? r.ctxL : null, white ? r.ctxR : null);
       const nm = 'K' + String(n.index).padStart(2, '0') + '_' +
         (n.kind === 'white' ? 'W' + r.i + '_' + r.name

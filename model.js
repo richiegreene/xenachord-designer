@@ -214,12 +214,108 @@
   const accWidth   = s => s * SIZE.accPerUnit;
   const slotDelta  = s => s * SIZE.deltaPerUnit;
 
-  /* Seven accidental slots per seven-white period.  Slot i lives between
-   * white i and white i+1.  bias is in units of delta = s/6 mm.
-   * Pattern: a group of three, a single, a group of two, a single —
-   * exactly the classic piano arrangement.                             */
-  const SLOT_BIAS = [-1, 0, +1, 0, -1, +1, 0];
-  const SLOT_GROUP = ['three', 'three', 'three', 'single', 'two', 'two', 'single'];
+  /* ------------------------------------------------------------------ *
+   *  FOUR WIDTH CLASSES                                                 *
+   *                                                                     *
+   *  The sheet gives every accidental one width, whatever it is.  A     *
+   *  design may want otherwise — a full black narrower than a full      *
+   *  gray, a split pair wider than either — so width is a property of   *
+   *  the CLASS a key belongs to, and there are four:                    *
+   *                                                                     *
+   *      white   the backbone                                           *
+   *      black   Full Sized Black                                       *
+   *      gray    Full Sized Gray                                        *
+   *      split   both halves of either split pair, which share a gap    *
+   *              and therefore share a width                            *
+   *                                                                     *
+   *  A class carries a RATIO, not a millimetre: its width relative to   *
+   *  the white's.  Only the ratios are a design decision — the absolute *
+   *  size is still solved for so the 32 keys end at the spine, so       *
+   *  widening one class narrows the rest rather than running off the    *
+   *  end.  The defaults are the sheet's own law, where every accidental *
+   *  is 83/185 of a white.                                              *
+   * ------------------------------------------------------------------ */
+  const WIDTH_CLASSES = ['white', 'black', 'gray', 'split'];
+  const CLASS_LABEL = { white: 'White', black: 'Black Full',
+                        gray: 'Gray Full', split: 'Split' };
+  const ACC_RATIO = SIZE.accPerUnit / SIZE.whitePerUnit;      // 83/185
+  const WIDTH_RATIO_DEFAULT = Object.freeze({
+    white: 1, black: ACC_RATIO, gray: ACC_RATIO, split: ACC_RATIO
+  });
+  /* how narrow a class may be squeezed, and how wide it may be pushed,
+   * as a ratio of the white — a key thinner than its own two 1 mm walls
+   * is not a key, and one wider than the pitch cannot sit in a gap */
+  /* ------------------------------------------------------------------ *
+   *  HOW WIDE AN ACCIDENTAL IS ALLOWED TO BE                            *
+   *                                                                     *
+   *  A white makes room for the keys beside it by cutting its rear back *
+   *  by (classWidth/2 − whiteGap/2 + FIT.gap) on each side.  With both  *
+   *  gaps full, the rear keeps                                          *
+   *                                                                     *
+   *      1 − ratio + 1.2/width      of its own width,                   *
+   *                                                                     *
+   *  and it has to keep MIN_REAR of that, so ratio ≤ 0.86 + 1.2/width.  *
+   *  Dropping the size-dependent term leaves a bound that holds at any  *
+   *  scale.  Past it there is nothing left to cut: the accidental is    *
+   *  simply wider than the white it stands beside, and no rear inset    *
+   *  can clear it.  So this is a LIMIT, not a warning — the width bar   *
+   *  stops there rather than drawing a design that cannot be built.     *
+   * ------------------------------------------------------------------ */
+  const WIDTH_RATIO_MIN = 0.10;     // a key thinner than its own two walls
+  const WIDTH_RATIO_MAX = 2.0;      // the white's own ceiling
+  const ACC_RATIO_MAX   = 0.86;     // an accidental's, relative to the white
+
+  /** the ratios a design is asking for, defaulted and made buildable */
+  function widthRatios(design) {
+    const r = {}, src = (design && design.widths) || {};
+    for (const c of WIDTH_CLASSES) {
+      const v = +src[c];
+      r[c] = isFinite(v) && v > 0
+        ? Math.min(WIDTH_RATIO_MAX, Math.max(WIDTH_RATIO_MIN, v))
+        : WIDTH_RATIO_DEFAULT[c];
+    }
+    /* an accidental is measured against the white, so the white carries the
+     * ceiling with it — widen the white and the others may follow */
+    const cap = r.white * ACC_RATIO_MAX;
+    for (const c of WIDTH_CLASSES) if (c !== 'white') r[c] = Math.min(r[c], cap);
+    return r;
+  }
+
+  /** the widest an accidental class may go, beside a white of ratio `w` */
+  const accCeiling = w => w * ACC_RATIO_MAX;
+  /** the narrowest the white may go, given the accidentals beside it */
+  const whiteFloor = r => Math.max(WIDTH_RATIO_MIN,
+    Math.max(r.black, r.gray, r.split) / ACC_RATIO_MAX);
+
+  /** the width one class takes at size `s` */
+  const classWidth = (cls, s, r) =>
+    s * SIZE.whitePerUnit * ((r || WIDTH_RATIO_DEFAULT)[cls] || ACC_RATIO);
+
+  /** which of the four a key type belongs to */
+  const classOfType = n => {
+    const spec = KEY_TYPES[canonType(n)];
+    return spec ? spec.widthClass : 'split';
+  };
+
+  /* ------------------------------------------------------------------ *
+   *  THERE IS NO SLOT BIAS ANY MORE                                     *
+   *                                                                     *
+   *  The sheets lean each accidental slot -delta, 0 or +delta in the     *
+   *  pattern three-single-two-single: the classic piano arrangement,    *
+   *  and a NOTE-NAME idea, since which slot leans which way is decided  *
+   *  by a seven-name diatonic spelling this instrument has not defined. *
+   *                                                                     *
+   *  It also made the keyboard uneven to play.  A white's waist is the  *
+   *  gap between the accidentals either side of it, and with the lean   *
+   *  that came out as wP - aW - 1.2 + (biasR - biasL)*delta — two       *
+   *  different widths depending on which way its neighbours happened to *
+   *  lean.  Running a scale across the whites met one width, then       *
+   *  another, then back.                                                *
+   *                                                                     *
+   *  Every gap now sits at the plain midpoint between its two whites,   *
+   *  so every waist is wP - aW - 1.2 and every white is the same key.   *
+   *  delta survives only as a figure in the size law.                   *
+   * ------------------------------------------------------------------ */
 
   /* ------------------------------------------------------------------ *
    * 6.  KEY TYPE CATEGORIES                                             *
@@ -267,13 +363,13 @@
    */
   const KEY_TYPES = {
     'Full Sized White': {
-      id: 'full-white', kind: 'white', layer: 'white',
+      id: 'full-white', kind: 'white', layer: 'white', widthClass: 'white',
       depth: 85.0688, css: 'white',
       label: 'Full Sized White',
       blurb: 'Natural. Full depth, plays at z 8.628.'
     },
     'Full Sized Gray': {
-      id: 'full-gray', kind: 'acc', layer: 'gray', mirror: false,
+      id: 'full-gray', kind: 'acc', layer: 'gray', mirror: false, widthClass: 'gray',
       depth: 42.5688, noseZ: Z.whiteTop,
       peakY: 42.5688 - 5.4866, peakZ: 15.24484,
       css: 'gray',
@@ -281,7 +377,7 @@
       blurb: 'Single mid-height accidental. 19-EDO uses it for E#/Fb and B#/Cb.'
     },
     'Full Sized Black': {
-      id: 'full-black', kind: 'acc', layer: 'black', mirror: false,
+      id: 'full-black', kind: 'acc', layer: 'black', mirror: false, widthClass: 'black',
       depth: 52.5688, noseZ: Z.whiteTop,
       peakY: 52.5688 - 4.5, peakZ: 15.62804,
       css: 'black',
@@ -289,7 +385,7 @@
       blurb: 'Single full-depth accidental. 15-EDO uses it in the outer slots.'
     },
     'Split Black First': {
-      id: 'split-black-1', kind: 'acc', layer: 'black', mirror: true,
+      id: 'split-black-1', kind: 'acc', layer: 'black', mirror: true, widthClass: 'split',
       depth: 27.8188, noseZ: Z.whiteTop,
       peakY: 27.8188 - 0.2303, peakZ: 14.94844,
       css: 'black', pairRole: 'rear',
@@ -297,7 +393,7 @@
       blurb: 'Rear (short, tall) half of a split pair — left-hand detailing.'
     },
     'Split Black Second': {
-      id: 'split-black-2', kind: 'acc', layer: 'black', mirror: false,
+      id: 'split-black-2', kind: 'acc', layer: 'black', mirror: false, widthClass: 'split',
       depth: 27.8188, noseZ: Z.whiteTop,
       peakY: 27.8188 - 0.2303, peakZ: 14.94844,
       css: 'black', pairRole: 'rear',
@@ -305,7 +401,7 @@
       blurb: 'Rear (short, tall) half of a split pair — the sheet default.'
     },
     'Split Gray Second': {
-      id: 'split-gray-2', kind: 'acc', layer: 'gray', mirror: true,
+      id: 'split-gray-2', kind: 'acc', layer: 'gray', mirror: true, widthClass: 'split',
       depth: 52.5688, noseZ: Z.whiteTop,
       peakY: 52.5688 - 4.5, peakZ: 15.62804,
       arm: { startY: 29.8188, startZ: 7.84134, endY: TONGUE_Y, endZ: 5.09074 },
@@ -315,7 +411,7 @@
              'on the RIGHT, so the pair reads black → gray.'
     },
     'Split Gray First': {
-      id: 'split-gray-1', kind: 'acc', layer: 'gray', mirror: false,
+      id: 'split-gray-1', kind: 'acc', layer: 'gray', mirror: false, widthClass: 'split',
       depth: 52.5688, noseZ: Z.whiteTop,
       peakY: 52.5688 - 4.5, peakZ: 15.62804,
       arm: { startY: 29.8188, startZ: 7.84134, endY: TONGUE_Y, endZ: 5.09074 },
@@ -451,13 +547,12 @@
     }
   };
 
-  /* The sheets start on F, so slot 3 (B-C) and slot 6 (E-F) are the two
-   * diatonic semitone gaps — which is why they carry the single keys.   */
-  const WHITE_NAMES = ['F', 'G', 'A', 'B', 'C', 'D', 'E'];
-  const SLOT_NAMES = [
-    'F♯/G♭', 'G♯/A♭', 'A♯/B♭',
-    'B♯/C♭', 'C♯/D♭', 'D♯/E♭', 'E♯/F♭'
-  ];
+  /* NOTE NAMES ARE NOT THIS APP'S TO GIVE.  The keyboard used to label its
+   * whites F G A B C D E and its gaps F♯/G♭ and so on, which reads a
+   * twelve-note diatonic spelling onto an instrument that is not one and
+   * has no such spelling defined yet.  Keys are identified by their index
+   * along the keyboard — the same number as the sensor foot they stand on
+   * — and nothing else.                                                 */
 
   /* ==================================================================== *
    *  MESH PRIMITIVES                                                     *
@@ -535,13 +630,280 @@
   const ctxKey = (lb, rb) =>
     (lb == null ? 'n' : lb) + '|' + (rb == null ? 'n' : rb);
 
-  /** the drafted profile for a key type in a given neighbour context */
+  /* ==================================================================== *
+   *  THE WHITE KEY'S REAR IS DERIVED, NOT DRAFTED                        *
+   *                                                                      *
+   *  A white key is full width at the front, where you play it, and       *
+   *  narrowed at the rear so the accidentals standing in the gaps either  *
+   *  side have somewhere to be.  The sheets draw one such narrowing per   *
+   *  neighbour case, and each one is drawn around a slot leaning +/- delta*
+   *  away in the classic three-then-two piano arrangement.  That lean is  *
+   *  a NOTE-NAME idea: it belongs to a seven-name diatonic spelling this  *
+   *  instrument has not defined.  Without it every gap sits at the plain  *
+   *  midpoint between its whites — and then none of the drafted rears     *
+   *  fits, because every one of them was drawn around a lean.             *
+   *                                                                      *
+   *  So the rear is COMPUTED from where the accidentals actually are:     *
+   *                                                                      *
+   *      inset = accidentalWidth/2  -  whiteGap/2  +  FIT.gap             *
+   *                                                                      *
+   *  on each side that has an accidental, and NOTHING on a side that does *
+   *  not — that side runs flush to the key's own edge.  A white with no   *
+   *  accidental either side is therefore a plain rectangle in plan, which *
+   *  is what a keyboard of 32 whites is made of.                          *
+   *                                                                      *
+   *  EVERY WHITE IS THE SAME SHAPE.  Same inset, same waist, same rear —  *
+   *  so a scale run across the whites meets one width, not two.           *
+   *                                                                      *
+   *  IT COSTS NOTHING PER SIZE.  Accidental width and white width are     *
+   *  both linear in s, so their ratio is fixed; the inset is therefore    *
+   *  `alpha + beta * width` like every other drafted coordinate, and the  *
+   *  four derived profiles are built once and hold at every scale.        *
+   *                                                                      *
+   *  THE TOPOLOGY THE SHEETS LEFT OUT.  The drafted white steps in on its *
+   *  LEFT only — its rear runs flush to its right edge, shingled under    *
+   *  the next key.  A rear that insets on BOTH sides needs a step on the  *
+   *  right too, and the captured mesh has none: its right-hand outer and  *
+   *  inner walls each run as ONE face from the rear all the way to the    *
+   *  front.  twoSidedWhiteBase splits exactly those two faces at the step *
+   *  planes, gives every right-hand vertex a rear twin and a front twin,  *
+   *  and adds the two step faces — the mirror of what the left already    *
+   *  has.  With no inset applied it reproduces the drafted key's volume   *
+   *  to 0.002 mm3, which is how we know the split is geometry-neutral.    *
+   * ==================================================================== */
+  const STEP_Y_OUTER = 54.0688;      // where the outer wall steps out
+  const STEP_Y_INNER = 55.0688;      // where the 1 mm inner wall follows
+  const W_ROLE = {                   // the drafted betas, by what they are
+    L_OUT: 0.337838, L_IN: 0.381081, C_L: 0.647297, C_R: 0.690541,
+    R_IN:  0.956757, R_OUT: 1.0
+  };
+  const stepYOf = b => (b === W_ROLE.R_OUT ? STEP_Y_OUTER : STEP_Y_INNER);
+
+  /**
+   * Split the two right-hand walls at the step planes so the rear can move
+   * independently of the front.  Returns the profile as editable arrays
+   * plus `rearSet` — every vertex index that belongs to the rear — and the
+   * corners of the two step faces that have to be added.
+   */
+  function twoSidedWhiteBase(p) {
+    const V = [];
+    for (let i = 0; i < p.nv; i++) {
+      const j = i * 4;
+      V.push({ a: p.v[j], b: +p.v[j + 1].toFixed(6),
+               y: +p.v[j + 2].toFixed(4), z: +p.v[j + 3].toFixed(4) });
+    }
+    const F = [];
+    for (let i = 0; i < p.f.length;) { const n = p.f[i]; F.push(p.f.slice(i + 1, i + 1 + n)); i += n + 1; }
+
+    const rearOf = new Map(), frontOf = new Map(), rearSet = new Set();
+    const add = v => (V.push(v), V.length - 1);
+    const n0 = V.length;
+    for (let i = 0; i < n0; i++) {
+      if (V[i].b !== W_ROLE.R_OUT && V[i].b !== W_ROLE.R_IN) continue;
+      rearOf.set(i, i); rearSet.add(i);            // the original is the rear
+      frontOf.set(i, add(Object.assign({}, V[i]))); // and it gains a front twin
+    }
+    const side = i => !rearOf.has(i) ? i
+      : (V[i].y <= stepYOf(V[i].b) + 1e-6 ? rearOf.get(i) : frontOf.get(i));
+    const cross = (i, j, at) => {
+      const A = V[i], B = V[j], t = (at - A.y) / (B.y - A.y);
+      return { a: A.a, b: A.b, y: at, z: +(A.z + (B.z - A.z) * t).toFixed(4) };
+    };
+
+    const out = [], steps = [];
+    for (const f of F) {
+      const bs = new Set(f.map(v => V[v].b));
+      const ys = f.map(v => V[v].y);
+      const b = V[f[0]].b;
+      const isWall = bs.size === 1 && (bs.has(W_ROLE.R_OUT) || bs.has(W_ROLE.R_IN));
+      const at = stepYOf(b);
+      const crosses = Math.min.apply(null, ys) < at - 1e-6 &&
+                      Math.max.apply(null, ys) > at + 1e-6;
+
+      if (isWall && crosses) {                     // one wall becomes two
+        const rear = [], front = [];
+        for (let n = 0; n < f.length; n++) {
+          const i = f[n], j = f[(n + 1) % f.length];
+          const yi = V[i].y, yj = V[j].y;
+          if (Math.abs(yi - at) < 1e-6) {           // ON the plane: both loops
+            rear.push(rearOf.get(i)); front.push(frontOf.get(i));
+          } else (yi < at ? rear : front).push(yi < at ? rearOf.get(i) : frontOf.get(i));
+          if ((yi < at - 1e-6 && yj > at + 1e-6) || (yi > at + 1e-6 && yj < at - 1e-6)) {
+            const c = cross(i, j, at);
+            const r = add(Object.assign({}, c)), fr = add(Object.assign({}, c));
+            rearSet.add(r);
+            if (yi < at) { rear.push(r); front.push(fr); }
+            else { front.push(fr); rear.push(r); }
+          }
+        }
+        out.push(rear); out.push(front);
+        steps.push({ beta: b, rear: rear.slice(-2),
+                     front: [front[0], front[front.length - 1]] });
+        continue;
+      }
+
+      /* every other face keeps one loop; where it walks along a right-hand
+       * wall from the rear to the front it gains the step's corner, so the
+       * face still closes once the rear moves in */
+      const ring = [];
+      for (let n = 0; n < f.length; n++) {
+        const i = f[n], j = f[(n + 1) % f.length];
+        ring.push(side(i));
+        if (!rearOf.has(i) || !rearOf.has(j) || V[i].b !== V[j].b) continue;
+        const a2 = stepYOf(V[i].b), yi = V[i].y, yj = V[j].y;
+        if (Math.abs(yi - a2) < 1e-6 && yj > a2 + 1e-6) { ring.push(frontOf.get(i)); continue; }
+        if (Math.abs(yj - a2) < 1e-6 && yi > a2 + 1e-6) { ring.push(frontOf.get(j)); continue; }
+        if ((yi < a2 - 1e-6 && yj > a2 + 1e-6) || (yi > a2 + 1e-6 && yj < a2 - 1e-6)) {
+          const c = cross(i, j, a2);
+          const r = add(Object.assign({}, c)), fr = add(Object.assign({}, c));
+          rearSet.add(r);
+          if (yi < a2) ring.push(r, fr); else ring.push(fr, r);
+        }
+      }
+      out.push(ring);
+    }
+    return { V, F: out, w0: p.w0, widths: p.widths, rearSet, steps };
+  }
+
+  /**
+   * One derived white: the base with its rear placed against whatever
+   * stands beside it.  `left` / `right` say whether that gap holds an
+   * accidental; where it does not, that side runs flush to the key edge.
+   *
+   * The rear's six x roles come out as [inset, inset+wall, centre-wall/2,
+   * centre+wall/2, width-inset-wall, width-inset] — the 1 mm walls keep
+   * their millimetre and the centre rib stays on the centreline, because
+   * the rear is symmetric by construction.
+   */
+  const MIN_REAR = 0.14;    // the least of its own width a rear may keep
+
+  function deriveWhiteProfile(base, halfL, halfR) {
+    /* `halfL` / `halfR` are HALF the neighbouring class's width as a ratio
+     * of this white's, or 0 for a gap with nothing in it.  A class can be
+     * widened until the two insets would meet in the middle; past that the
+     * pair is scaled back together, so a rear never inverts and the two
+     * sides stay in proportion to the keys that caused them.            */
+    let bL = Math.max(0, halfL || 0), bR = Math.max(0, halfR || 0);
+    const room = 1 - MIN_REAR;
+    if (bL + bR > room) { const k = room / (bL + bR); bL *= k; bR *= k; }
+    const back = SIZE.whiteGap / 2 - FIT.gap;       // what the gap already gives
+    const inset = b => b > 0 ? { a: -back, b } : { a: 0, b: 0 };
+    const iL = inset(bL), iR = inset(bR);
+    const put = {};
+    put[W_ROLE.L_OUT] = { a: iL.a,        b: iL.b };
+    put[W_ROLE.L_IN]  = { a: iL.a + WALL, b: iL.b };
+    put[W_ROLE.C_L]   = { a: -WALL / 2,   b: 0.5 };
+    put[W_ROLE.C_R]   = { a: +WALL / 2,   b: 0.5 };
+    const rOut = { a: -iR.a,        b: 1 - iR.b };
+    const rIn  = { a: -iR.a - WALL, b: 1 - iR.b };
+    /* A SHELL WALL IS A MILLIMETRE, NOT A FRACTION.  The capture stored the
+     * front's two inner faces as pure beta — 0.043243 and 0.956757 of the
+     * drafted width — so they thinned and fattened with the key instead of
+     * staying the 1 mm they are.  Restated here as alpha, which also makes
+     * them share coordinates with the rear's walls wherever the two meet. */
+    const fIn  = { a: WALL,  b: 0 };
+    const fInR = { a: -WALL, b: 1 };
+
+    const V = base.V.map(v => Object.assign({}, v));
+    for (let i = 0; i < V.length; i++) {
+      const v = V[i], q = put[v.b];
+      if (q) { v.a = q.a; v.b = q.b; continue; }
+      if (!base.rearSet.has(i)) {                   // a front face
+        if (Math.abs(v.b - 0.043243) < 1e-6) { v.a = fIn.a;  v.b = fIn.b; }
+        else if (Math.abs(v.b - W_ROLE.R_IN) < 1e-6) { v.a = fInR.a; v.b = fInR.b; }
+        continue;
+      }
+      if (Math.abs(v.b - W_ROLE.R_OUT) < 1e-9) { v.a = rOut.a; v.b = rOut.b; }
+      else if (Math.abs(v.b - W_ROLE.R_IN) < 1e-6) { v.a = rIn.a; v.b = rIn.b; }
+    }
+    /* the two right-hand step faces, wound to match the left's: the outer
+     * step faces back toward the spine, the inner one forward */
+    const F = base.F.map(f => f.slice());
+    for (const st of base.steps)
+      F.push(st.beta === W_ROLE.R_OUT
+        ? [st.rear[1], st.rear[0], st.front[0], st.front[1]]
+        : [st.front[0], st.front[1], st.rear[1], st.rear[0]]);
+
+    /* WELD.  Where a side takes no inset its rear twin lands exactly on its
+     * front twin, and the wall the split opened closes again into a
+     * zero-width sliver.  Welding on (alpha, beta, y, z) — which is
+     * size-independent, so two vertices welded here are coincident at every
+     * scale — removes the sliver and the faces that collapsed with it, and
+     * the mesh comes back out as tidy as the sheet's own.               */
+    const canon = new Map(), keep = [], remap = new Array(V.length);
+    for (let i = 0; i < V.length; i++) {
+      const k = V[i].a.toFixed(6) + ',' + V[i].b.toFixed(6) + ',' +
+                V[i].y.toFixed(4) + ',' + V[i].z.toFixed(4);
+      if (!canon.has(k)) { canon.set(k, keep.length); keep.push(V[i]); }
+      remap[i] = canon.get(k);
+    }
+    const faces = [];
+    for (const r of F) {
+      const q = [];
+      for (const i of r) { const c = remap[i]; if (q[q.length - 1] !== c) q.push(c); }
+      while (q.length > 1 && q[0] === q[q.length - 1]) q.pop();
+      if (new Set(q).size >= 3) faces.push(q);
+    }
+    const v = [], f = [];
+    for (const q of keep) v.push(q.a, q.b, q.y, q.z);
+    for (const r of faces) { f.push(r.length); for (const i of r) f.push(i); }
+    return { w0: base.w0, widths: base.widths, nv: keep.length, nf: faces.length,
+             v, f, derived: true };
+  }
+
+  /**
+   * The base as captured, unsplit: the drafted topology, which already
+   * steps on the LEFT and runs flush on the right.  A white that needs no
+   * RIGHT inset needs no right step either, so it is derived on this — one
+   * fewer seam, and the mesh comes out as tidy as the sheet's own.
+   */
+  function plainWhiteBase(p) {
+    const V = [];
+    for (let i = 0; i < p.nv; i++) {
+      const j = i * 4;
+      V.push({ a: p.v[j], b: +p.v[j + 1].toFixed(6),
+               y: +p.v[j + 2].toFixed(4), z: +p.v[j + 3].toFixed(4) });
+    }
+    const F = [];
+    for (let i = 0; i < p.f.length;) { const n = p.f[i]; F.push(p.f.slice(i + 1, i + 1 + n)); i += n + 1; }
+    return { V, F, w0: p.w0, widths: p.widths, rearSet: new Set(), steps: [] };
+  }
+
+  let WHITE_BASE = null, WHITE_BASE_2 = null;
+  const DERIVED_WHITE = {};
+  /**
+   * The white for a given pair of neighbours.  `halfL` / `halfR` are half
+   * the neighbouring class's width as a ratio of this white's — 0 for an
+   * empty gap — so a design that gives its blacks and its splits different
+   * widths gets a different white beside each.  Everything is still a pure
+   * ratio, so one profile per pair of ratios holds at every size; they are
+   * built on demand and cached by that pair.
+   */
+  function whiteProfile(halfL, halfR) {
+    const q = v => (Math.round((v || 0) * 1e5) / 1e5).toFixed(5);
+    const k = q(halfL) + '|' + q(halfR);
+    if (!DERIVED_WHITE[k]) {
+      const src = KP.P[KP.INDEX['Full Sized White']['n|n']];
+      const base = halfR > 0
+        ? (WHITE_BASE_2 || (WHITE_BASE_2 = twoSidedWhiteBase(src)))
+        : (WHITE_BASE   || (WHITE_BASE   = plainWhiteBase(src)));
+      DERIVED_WHITE[k] = deriveWhiteProfile(base, halfL, halfR);
+    }
+    return DERIVED_WHITE[k];
+  }
+
+  /** the profile for a key type in a given neighbour context */
+
   function profileFor(type, lb, rb) {
     let mirror = false, t = type;
     if (KP.MIRROR[t]) { mirror = true; t = KP.MIRROR[t]; }
     const table = KP.INDEX[t];
     if (!table) throw new Error('no drafted profile for key type: ' + type);
     const want = ctxKey(lb, rb);
+    /* a white is never picked from the sheet any more — it is derived from
+     * what actually stands beside it.  See whiteProfile above.          */
+    if (t === 'Full Sized White')
+      return { p: whiteProfile(lb, rb), mirror, exact: true };
     if (table[want] != null) return { p: KP.P[table[want]], mirror, exact: true };
     /* The sheets draw nine of the sixteen possible neighbour contexts.  For
      * one they never drew, borrow the drafted white whose context is
@@ -785,9 +1147,20 @@
     const q = profileFor(type, lb, rb);
     const V = profilePoints(q.p, q.mirror, w, cx - w / 2);
     const f = q.p.f, t = [];
+    /* DEGENERATE TRIANGLES ARE DROPPED, NOT EMITTED.  A drafted face can
+     * collapse to a line once a profile is rectified — the plain white's
+     * step wall does exactly that, because a rectangle has no step — and a
+     * zero-area triangle is not a surface: it contributes a directed edge
+     * twice and breaks the watertight test that a printable part has to
+     * pass.  Dropping it leaves the two faces that met at the wall meeting
+     * each other, which is what a rectified key actually is.            */
     const emit = tris => {
       for (const tri of tris) {
         const a = V[tri[0]], b = V[tri[1]], c = V[tri[2]];
+        const ux = b[0]-a[0], uy = b[1]-a[1], uz = b[2]-a[2];
+        const vx = c[0]-a[0], vy = c[1]-a[1], vz = c[2]-a[2];
+        const nx = uy*vz-uz*vy, ny = uz*vx-ux*vz, nz = ux*vy-uy*vx;
+        if (nx*nx + ny*ny + nz*nz < 1e-18) continue;      // zero area
         t.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
       }
     };
@@ -1134,8 +1507,12 @@
   // exact same swatches the keys and the sensor presses render in, so a
   // spine band and the key/press sitting on it read as one material.
   const SPINE_LAYER_COLORS = {
-    one:   { all:   { srgb: COLORS.black, linear: [0.0220, 0.0220, 0.0301],
-                      material: 'Material.003' } },
+    /* A ONE-TYPE SPINE CARRIES ONE COLOUR OF KEY, AND THAT COLOUR IS
+     * WHITE.  spineKindForColours only ever returns 'one' when the design
+     * places no gray and no black — a keyboard of plain whites — so its
+     * single slab prints in the white filament with them, not in black. */
+    one:   { all:   { srgb: COLORS.white, linear: [0.8900, 0.8900, 0.8481],
+                      material: null } },
     two:   { lower: { srgb: COLORS.black, linear: [0.0220, 0.0220, 0.0301],
                       material: 'Material.003' },
              upper: { srgb: COLORS.white, linear: [0.8900, 0.8900, 0.8481],
@@ -2171,11 +2548,14 @@
   const api = {
     WORLD, SPINE, FOOT, SIZE, Z, COLORS, DRAFT, WALL, TONGUE_Y,
     NOTES, UNITS, FEET_PER_HALF,
-    KEY_TYPES, TYPE_ORDER, LAYOUTS, SLOT_BIAS, SLOT_GROUP,
+    KEY_TYPES, TYPE_ORDER, LAYOUTS,
+    whiteProfile, twoSidedWhiteBase, deriveWhiteProfile,
     KEY_PAIRS, PAIR_ORDER, PALETTE_ORDER, TYPE_ALIASES,
     canonType, pairOfType, pairOfSlot,
-    WHITE_NAMES, SLOT_NAMES,
     whiteWidth, whitePitch, accWidth, slotDelta,
+    WIDTH_CLASSES, CLASS_LABEL, WIDTH_RATIO_DEFAULT, ACC_RATIO,
+    WIDTH_RATIO_MIN, WIDTH_RATIO_MAX, ACC_RATIO_MAX, accCeiling, whiteFloor,
+    widthRatios, classWidth, classOfType,
     pushTri, pushQuad, pushBox, rectWithHoles,
     ctxKey, profileFor, profilePoints, buildKey, keyPolygons,
     triangulateFace, triangulateFaceWithHoles, pointInPoly2, faceHoldsSeat,
