@@ -1758,6 +1758,91 @@
    * short profile; the Second half of a split pair gets its own.  Each
    * ring comes back in its pad ring's order — see mapRingToPair.
    */
+  /* ------------------------------------------------------------------ *
+   *  X COMPENSATION CLEARANCE                                           *
+   *                                                                     *
+   *  The raised key foot is drafted at the width of the KEY's belly, and *
+   *  the sensor foot is drafted at the width of the AKM320 PAD.  Those   *
+   *  are two different widths, so on most keys the raised loop overhangs *
+   *  the pad loop at one end or both — and a press lofted between them   *
+   *  then leans out over its neighbour's slot instead of standing over   *
+   *  its own sensor.                                                     *
+   *                                                                      *
+   *  THE RULE.  Neither end of the raised key foot may sit outside the   *
+   *  sensor foot in x.  Where the raised loop's X-MOST vertices are      *
+   *  greater in x than the sensor foot's, they are forced to equal the   *
+   *  sensor foot's; where its X-LEAST vertices are lesser, likewise.     *
+   *  Verbatim, as drafted by hand in "X compensation clearance.blend".   *
+   *                                                                      *
+   *  ONLY THE EXTREMES MOVE.  The two crossbar ends are the only         *
+   *  vertices touched: the 1 mm stem keeps its width AND its x, so the   *
+   *  press is never re-centred and the dome window never shifts.  The    *
+   *  bar is pulled in around a stem that stays where the key put it.     *
+   *                                                                      *
+   *  THE STEM IS RESCUED, NOT SEVERED.  On the 15 and 17 sheets a key    *
+   *  can sit far enough off its foot that the clamped bar no longer      *
+   *  reaches the stem at all.  The stem is then slid — rigidly, both     *
+   *  edges together, by the LEAST distance — back inside the clamped     *
+   *  bar, so it keeps its 1 mm width and the dome window keeps its own.  *
+   *  Nothing on the 19 sheet needs this, which is why the hand-drafted   *
+   *  file shows no example of it.                                        *
+   *                                                                      *
+   *  WHEN IT IS NOT APPLIED.  A raised loop can miss its pad entirely —  *
+   *  the last Split Black Second of the 19 sheet reaches a foot 11.3 mm  *
+   *  away and clears the pad completely.  With less than a stem's width  *
+   *  of overlap there is nothing to stand a bar on, so the clamp is      *
+   *  skipped and the drafted loop stands: a zero-width or inverted bar   *
+   *  is worse than an overhang.  That key is a LAYOUT problem, not a     *
+   *  clearance one, and pairAudit still reports the overhang.           *
+   * ------------------------------------------------------------------ */
+  const PAIR_X_EPS = 1e-6;
+  /* the least shoulder a clamped crossbar keeps either side of its stem —
+   * without it a rescued stem can land exactly on the bar end and collapse
+   * the loop into a degenerate, unprintable face */
+  const PAIR_X_SHOULDER = 0.2;
+
+  /**
+   * Clamp the x extremes of a raised "-| |-" (both bars together, so the
+   * pair keeps one common bar span) into the sensor pad's own x span.
+   * Mutates the rings in place and returns the span it settled on, or null
+   * when the clamp was skipped — see the guard above.
+   */
+  function clampPairToPadX(rings, pad) {
+    let p0 = Infinity, p1 = -Infinity;
+    for (const r of pad) for (const q of r) {
+      if (q[0] < p0) p0 = q[0]; if (q[0] > p1) p1 = q[0];
+    }
+    let r0 = Infinity, r1 = -Infinity;
+    for (const r of rings) for (const q of r) {
+      if (q[0] < r0) r0 = q[0]; if (q[0] > r1) r1 = q[0];
+    }
+    const a0 = Math.max(r0, p0), a1 = Math.min(r1, p1);
+    /* a bar has to be wide enough to carry its stem with a shoulder either
+     * side; anything less is a degenerate loop, not a press */
+    if (a1 - a0 < PAIR.stem + 2 * PAIR_X_SHOULDER) return null;
+    /* the stem is every interior x of the ring — it does not move unless
+     * the clamped bar would leave it behind, and then only as far as it
+     * must, rigidly, so the 1 mm stays 1 mm */
+    let s0 = Infinity, s1 = -Infinity;
+    for (const r of rings) for (const q of r) {
+      if (q[0] - r0 > PAIR_X_EPS && r1 - q[0] > PAIR_X_EPS) {
+        if (q[0] < s0) s0 = q[0]; if (q[0] > s1) s1 = q[0];
+      }
+    }
+    let shift = 0;
+    if (isFinite(s0)) {
+      const b0 = a0 + PAIR_X_SHOULDER, b1 = a1 - PAIR_X_SHOULDER;
+      if (s0 < b0) shift = b0 - s0;
+      else if (s1 > b1) shift = b1 - s1;
+    }
+    for (const r of rings) for (const q of r) {
+      if (Math.abs(q[0] - r0) < PAIR_X_EPS) q[0] = a0;
+      else if (Math.abs(q[0] - r1) < PAIR_X_EPS) q[0] = a1;
+      else q[0] += shift;
+    }
+    return { x0: a0, x1: a1, stemShift: shift };
+  }
+
   function pairFaces(cx, w, type, lb, rb, footX, sib) {
     const land = pairLand(cx, w, type, lb, rb, sib);
     if (land == null) return null;
@@ -1769,11 +1854,15 @@
     const pad = footOutline(footX);
     /* pad ring 0 reaches toward the player, ring 1 toward the spine — the
      * front half of the drafted profile and the back half respectively */
+    const rings = [
+      mapRingToPair(pad[0], x0, x1, sc, s1, P[3], P[4], P[5]),
+      mapRingToPair(pad[1], x0, x1, sc, s1, P[2], P[1], P[0])
+    ];
+    /* X compensation clearance — the raised loop never overhangs the pad */
+    const clamp = clampPairToPadX(rings, pad);
     return [
-      { z: land.z, seated: land.seated,
-        ring: mapRingToPair(pad[0], x0, x1, sc, s1, P[3], P[4], P[5]) },
-      { z: land.z, seated: land.seated,
-        ring: mapRingToPair(pad[1], x0, x1, sc, s1, P[2], P[1], P[0]) }
+      { z: land.z, seated: land.seated, clamp, ring: rings[0] },
+      { z: land.z, seated: land.seated, clamp, ring: rings[1] }
     ];
   }
 
@@ -1973,9 +2062,30 @@
           if (air < overForeign) overForeign = air;
         }
 
+    /* X COMPENSATION CLEARANCE, measured.  After clampPairToPadX every
+     * raised loop should sit inside its own pad in x.  What is left over
+     * is a key that misses its foot so badly the clamp had to stand down —
+     * a layout fault, and it is named here rather than left silent. */
+    let xOver = 0; const xOverAt = [];
+    for (const k of keys) {
+      const faces = pairFaces(k.cx, k.w, k.type, k.lb, k.rb, k.foot, k.sib);
+      if (!faces) continue;
+      let p0 = Infinity, p1 = -Infinity, r0 = Infinity, r1 = -Infinity;
+      for (const r of footOutline(k.foot)) for (const q of r) {
+        if (q[0] < p0) p0 = q[0]; if (q[0] > p1) p1 = q[0];
+      }
+      for (const f of faces) for (const q of f.ring) {
+        if (q[0] < r0) r0 = q[0]; if (q[0] > r1) r1 = q[0];
+      }
+      const d = Math.max(p0 - r0, r1 - p1, 0);
+      if (d > 1e-4) { xOverAt.push(k.index); if (d > xOver) xOver = d; }
+    }
+
     const unseated = plans.find(o => !o.p.seated);
     return {
       keys: plans.length,
+      xClear: xOverAt.length === 0,
+      xOverhang: xOver, xOverhangAt: xOverAt,
       watertight: leaky == null && inverted == null,
       leakyAt: leaky, invertedAt: inverted,
       pressVolume: volume,

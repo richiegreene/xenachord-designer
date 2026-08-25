@@ -789,6 +789,14 @@
     p('#               shape the First half gets because its key ends sooner.');
     p('#               A split pair divides its slot with ', pn(XM.PAIR.split),
       ' mm of air.');
+    p('#   X CLEAR     the raised loop never overhangs its own sensor pad in x.');
+    p('#               Where the key\'s belly is wider than the pad, or offset');
+    p('#               from it, the crossbar ENDS are pulled back to the pad\'s');
+    p('#               own x extremes; the stem keeps its width and its place,');
+    p('#               and only slides when the clamped bar would leave it');
+    p('#               behind.  Drafted by hand in "X compensation clearance');
+    p('#               .blend" and generalised here — so a press stands over');
+    p('#               its own sensor instead of leaning into the next slot.');
     p('#   PRESS       the two loops closed into a solid: one prism per bar,');
     p('#               a single quad band from the pad ring to the pair ring');
     p('#               vertex for vertex, capped at BOTH ends.  Watertight,');
@@ -800,6 +808,9 @@
     p('# MEASURED, not assumed — this design, as built:');
     p('#   every pair face lies in a real deck     ', audit.seated ? 'YES' :
       'NO  (key ' + audit.unseatedAt + ')');
+    p('#   every raised loop inside its own pad    ', audit.xClear ? 'YES' :
+      'NO  (' + f(audit.xOverhang, 3) + ' mm over, keys ' +
+      audit.xOverhangAt.join(', ') + ' — those keys sit off their feet)');
     p('#   least air from a pad to its pair face   ', f(audit.minRise, 3),
       ' mm  (key ', audit.riseAt, ')');
     p('#   narrowest air between two pair faces    ', f(audit.minGap, 3), ' mm');
