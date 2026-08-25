@@ -235,8 +235,8 @@
       `Lower the size scale s to about ${suggestScale(design, s).toFixed(2)}.`);
     /* NOTE: a large key-to-foot X offset is expected, not an error.  The two
      * halves of a split pair share one X and still have to reach two adjacent
-     * feet 11.3 mm apart.  Nothing closes that gap at this stage — the loop
-     * pair states it.  The figure is reported as a statistic. */
+     * feet 11.3 mm apart; closing that gap is the bridge edge-loop, which is
+     * deliberately out of scope.  The figure is reported as a statistic. */
 
     /* ---- which of the six drafted spines this design needs ----
      * One slab per key colour actually PLACED — not per colour the template
@@ -259,28 +259,21 @@
       width, overhang, footDrift, footDriftAt, cut
     };
 
-    /* ---- foot pairing: the two loops have to describe a relationship the
-     * instrument can actually hold.  Measured, not assumed — see pairAudit.
-     * Nothing is built between them at this stage, so there is no ramp and
-     * no overhang to warn about; what matters is that every pair face
-     * found a real deck, that the dome still has its travel, and that no
-     * two pair faces collide. */
-    const pAudit = XM.pairAudit(pairKeys(L));
-    L.pairAudit = pAudit;
-    L.bridgeAudit = pAudit;      // old name, same object — see model.js shims
-    if (!pAudit.seated) warnings.push(
-      `The pair face for key ${pAudit.unseatedAt} found no flat underside on its key to lie in — ` +
-      `it falls back to the bounding box of the key's section over the pad, which is not a real surface.`);
-    if (pAudit.minGap != null && pAudit.minGap <= 0) warnings.push(
-      `Two pair faces overlap by ${(-pAudit.minGap).toFixed(2)} mm` +
-      (pAudit.gapAt ? ` (keys ${pAudit.gapAt[0]} and ${pAudit.gapAt[1]})` : '') +
-      ` — they share a plane and must not both be drawn as they are.`);
-    if (!pAudit.watertight) warnings.push(
-      `The sensor press for key ${pAudit.leakyAt != null ? pAudit.leakyAt : pAudit.invertedAt} ` +
-      `did not close into a solid — it cannot be sliced as drawn.`);
-    if (!pAudit.clearsTravel) warnings.push(
-      `A pair face sits ${(pAudit.minRise != null ? pAudit.minRise : pAudit.overForeign).toFixed(2)} mm ` +
-      `above a sensor pad — under the ${XM.PAIR.travel + XM.PAIR.margin} mm the dome needs to travel and settle.`);
+    /* ---- bridges: never silently intersect, never silently lose the
+     * dome's travel clearance.  Measured, not assumed — see bridgeAudit. */
+    const bAudit = XM.bridgeAudit(bridgeKeys(L));
+    L.bridgeAudit = bAudit;
+    if (!bAudit.supportFree) warnings.push(
+      `A bridge connector needs a steeper ramp than ${XM.BRIDGE.slope === 1 ? '45°' : (Math.atan(XM.BRIDGE.slope) * 180 / Math.PI).toFixed(0) + '°'} ` +
+      `to reach key ${bAudit.worstAt} (key-to-foot offset ${footDrift.toFixed(1)} mm) — it will print with an overhang and needs support material.`);
+    if (bAudit.minGap != null && bAudit.minGap <= 0) warnings.push(
+      `Two bridge connectors overlap by ${(-bAudit.minGap).toFixed(2)} mm — they intersect and must not print as drawn.`);
+    if (bAudit.underForeign != null && bAudit.underForeign < 0) warnings.push(
+      `A bridge connector (key ${bAudit.underAt[0]}) collides with key ${bAudit.underAt[1]}'s own body by ` +
+      `${(-bAudit.underForeign).toFixed(2)} mm while reaching its foot.`);
+    else if (!bAudit.clearsTravel) warnings.push(
+      `A bridge connector comes within ${bAudit.underForeign != null ? bAudit.underForeign.toFixed(2) : bAudit.overForeign.toFixed(2)} mm ` +
+      `of a foreign key or sensor — under the ${XM.BRIDGE.travel + XM.BRIDGE.margin} mm the dome needs to travel and settle without fouling it.`);
 
     return L;
   }
@@ -388,16 +381,16 @@
   /** where each key meets the spine, so its own band can boss forward */
   function keySpans(L) {
     const out = [];
-    for (const k of pairKeys(L)) {
+    for (const k of bridgeKeys(L)) {
       const s = XM.keyBackSpan(k.cx, k.w, k.type, k.lb, k.rb);
       if (s) out.push({ layer: k.layer, x0: s.x0, x1: s.x1, index: k.index });
     }
     return out;
   }
 
-  /** the 32 keys in note order, each carrying the foot it is paired with */
-  function pairKeys(L) {
-    const out = L.notes.map(n => {
+  /** the 32 keys in note order, each carrying the foot it has to reach */
+  function bridgeKeys(L) {
+    return L.notes.map(n => {
       const r = n.ref, white = n.kind === 'white';
       return {
         name: n.name, index: n.index, type: n.type,
@@ -407,39 +400,15 @@
         foot: r.foot
       };
     }).filter(k => k.foot != null);
-
-    /* SPLIT PAIRS.  Two keys on one slot share an x centre, and the deeper
-     * one's belly is drawn across the whole slot — so neither can be told
-     * where it ends by its own geometry alone.  Hand each the OTHER's land
-     * (the shallower one, whose belly really is just its half) so it can
-     * take the rest of the slot.  See pairLand in model.js. */
-    const byX = new Map();
-    for (const k of out) {
-      const key = Math.round(k.cx * 1e4);
-      (byX.get(key) || byX.set(key, []).get(key)).push(k);
-    }
-    for (const group of byX.values()) {
-      if (group.length < 2) continue;
-      const lands = group.map(k =>
-        XM.pairLand(k.cx, k.w, k.type, k.lb, k.rb, null));
-      const width = lands.map(l => (l ? l.x1 - l.x0 : Infinity));
-      const narrow = width.indexOf(Math.min.apply(null, width));
-      group.forEach((k, i) => { if (i !== narrow) k.sib = lands[narrow]; });
-    }
-    return out;
   }
 
   function buildMeshes(L) {
     const out = { white: [], black: [], gray: [] };
-    /* Keys are drawn whole.  Nothing is cut into their undersides any more:
-     * the pair face is a floating loop lying in the deck plane, not a weld,
-     * so the key's own triangulation is left exactly as drafted. */
-    const bkeys = pairKeys(L);
     for (const w of L.whites)
-      out.white.push(...XM.buildKey(w.cx, L.wW, w.type, w.ctxL, w.ctxR, null));
+      out.white.push(...XM.buildKey(w.cx, L.wW, w.type, w.ctxL, w.ctxR));
     for (const sl of L.slots) {
       for (const m of sl.members)
-        out[m.spec.layer].push(...XM.buildKey(m.cx, L.aW, m.type, null, null, null));
+        out[m.spec.layer].push(...XM.buildKey(m.cx, L.aW, m.type, null, null));
     }
     /* The spine is the drafted one for this design's colour count — the
      * "<kind> type Spine - A / - B" pair.  Keep it whole for the STL, and
@@ -452,20 +421,19 @@
       out.spine.push(...p.tris);
       (out.spineLayers[p.layer] = out.spineLayers[p.layer] || []).push(...p.tris);
     }
-    /* A foot is its pad face plus the pairing face of the key it belongs
-     * to — the two loops the press is built between. */
-    out.feet = XM.buildFeet(bkeys);
+    out.feet = XM.buildFeet();
 
-    /* THE SENSOR PRESS.  Each key's loop pair, closed into a watertight
-     * solid.  It prints as part of its key, in its key's filament, so its
-     * triangles go into that colour's mesh — the preview, the per-colour
-     * STL and the Blender material all follow from that one decision. */
-    out.press = [];
-    out.pressParts = XM.pressParts(bkeys);
-    for (const p of out.pressParts) {
-      out.press.push(...p.tris);
-      out[p.layer].push(...p.tris);
-    }
+    /* One filled connector per key: anchored inside the key, opening out at
+     * 45 degrees to the full pad section, and stepping in to the drafted
+     * "-| |-" for the face that touches the sensor.  Nothing in the stack
+     * grows faster than 45 degrees going down, so it prints face-down with
+     * no supports.                                                        */
+    /* A connector prints as part of its key, in its key's filament, so it
+     * goes into that colour's mesh — the preview, the per-colour STL and
+     * the Blender material all follow from that one decision.            */
+    const bkeys = bridgeKeys(L);
+    for (const k of bkeys)
+      out[k.layer].push(...XM.buildBridge(k.cx, k.w, k.type, k.lb, k.rb, k.foot, bkeys, k));
     return out;
   }
 
@@ -752,78 +720,74 @@
     p('assert len(FEET) == 32, "one AKM320: 16 feet on half A, 16 on half B"');
     p('');
 
-    /* --- foot loop pairs ---------------------------------------------- */
-    const bkeys = pairKeys(L);
-    const audit = XM.pairAudit(bkeys);
-    p('# --- FOOT LOOP PAIRS ----------------------------------------------------');
-    p('# A foot is TWO FLOATING FACES and nothing else.  There is no connector,');
-    p('# no plinth, no ramp and no weld into the key: the pair of loops states');
-    p('# the relationship between a key and ITS OWN sensor foot (KEYS[i] ->');
-    p('# FEET[i]), and stating it is all this stage does.');
+    /* --- bridge edge loops -------------------------------------------- */
+    const bkeys = bridgeKeys(L);
+    const audit = XM.bridgeAudit(bkeys);
+    p('# --- BRIDGE EDGE LOOPS --------------------------------------------------');
+    p('# TWO filled connectors per key, from the key down to ITS OWN sensor foot');
+    p('# (KEYS[i] -> FEET[i]) — one per bar of the drafted "-| |-", so the window');
+    p('# between the bars, where the sensor\'s dome sits, stays open at every');
+    p('# height, not just at the tip.  These keys print FACE DOWN — the playing');
+    p('# surface is the bed — so the build direction is design -z and each');
+    p('# connector has to be printable growing away from the key.  Read in print');
+    p('# order, top of the stack downward:');
     p('#');
-    p('#   PAD FACE    the drafted "-| |-" exactly as "Feet - A" / "Feet - B"');
-    p('#               draw it, flat at z = ', pn(XM.FOOT.z),
-      '.  Two n-gons, 16 vertices,');
-    p('#               the window between the bars left open for the dome.');
-    p('#   PAIR FACE   the face popped off the key\'s own underside deck, in');
-    p('#               the "Raised Feet (Pair)" collection: the SAME "-| |-",');
-    p('#               with its CROSSBAR spanning the full width of that key\'s');
-    p('#               deck, a ', pn(XM.PAIR.stem),
-      ' mm stem centred on it, and the 2 mm dome');
-    p('#               window between the bars.  The y values are drafted, not');
-    p('#               fitted — three profiles cover all 32 keys (see');
-    p('#               PAIR_SHAPE in model.js): the full 14.0 mm reach, the');
-    p('#               Second half of a split pair, and the 10.25 mm short');
-    p('#               shape the First half gets because its key ends sooner.');
-    p('#               A split pair divides its slot with ', pn(XM.PAIR.split),
-      ' mm of air.');
-    p('#   PRESS       the two loops closed into a solid: one prism per bar,');
-    p('#               a single quad band from the pad ring to the pair ring');
-    p('#               vertex for vertex, capped at BOTH ends.  Watertight,');
-    p('#               and the window between the bars is never filled, so');
-    p('#               the dome keeps its clearance the whole way up.  A');
-    p('#               press prints as part of its key, in its key\'s');
-    p('#               filament, so it carries the key\'s colour.');
+    p('#   ANCHOR   a section inside the key: the overlap of that bar\'s own y');
+    p('#            band with the key\'s footprint over it, or ', pn(XM.BRIDGE.bite),
+      ' mm of the key\'s');
+    p('#            flank when the foot is entirely beside the key.  Key material');
+    p('#            sits above it, so the first bridge layer is fully supported.');
+    p('#   RAMP     opens out to the full ', f(XM.FOOT.w, 3),
+      ' mm pad width at ', pn(XM.BRIDGE.slope), ' mm of x per');
+    p('#            mm of z — 45 degrees, the steepest a printer bridges unsupported.');
+    p('#   PLINTH   that one bar\'s own section, straight down.');
+    p('#   TIP      the last ', pn(XM.BRIDGE.tip),
+      ' mm steps IN to that bar\'s drafted "-| |-" ring');
+    p('#            itself, so the face that presses the sensor is the shape');
+    p('#            "Feet - A" / "Feet - B" actually draw.  Stepping in never');
+    p('#            overhangs.');
     p('#');
     p('# MEASURED, not assumed — this design, as built:');
-    p('#   every pair face lies in a real deck     ', audit.seated ? 'YES' :
-      'NO  (key ' + audit.unseatedAt + ')');
-    p('#   least air from a pad to its pair face   ', f(audit.minRise, 3),
-      ' mm  (key ', audit.riseAt, ')');
-    p('#   narrowest air between two pair faces    ', f(audit.minGap, 3), ' mm');
-    p('#   every press closes into a solid         ',
-      audit.watertight ? 'YES' :
-      'NO  (key ' + (audit.leakyAt != null ? audit.leakyAt : audit.invertedAt) + ')');
-    p('#   filament the 32 presses add             ', f(audit.pressVolume, 1), ' mm3');
-    p('#   least air over a foreign sensor pad     ',
-      audit.overForeign == null ? 'n/a' : f(audit.overForeign, 3), ' mm',
+    p('#   support-free at 45 deg                ', audit.supportFree ? 'YES' : 'NO');
+    p('#   tightest ramp headroom                ', f(audit.minRampHeadroom, 3),
+      ' mm  (key ', audit.worstAt, ')');
+    p('#   narrowest air between two connectors  ', f(audit.minGap, 3), ' mm');
+    p('#   least air under a foreign key         ',
+      audit.underForeign == null ? 'n/a' : f(audit.underForeign, 3), ' mm',
       audit.clearsTravel ? '   (clears travel + margin)'
                          : '   *** BELOW travel + margin ***');
-    p('PAIR = {');
-    p('    "travel": ', pn(XM.PAIR.travel), ',   # AKM320 rubber-dome travel');
-    p('    "margin": ', pn(XM.PAIR.margin), ',   # air on top of the travel');
-    p('    "stem":   ', pn(XM.PAIR.stem), ',   # width of the "-| |-" stem, drafted');
-    p('    "split":  ', pn(XM.PAIR.split), ',   # air between the halves of a split pair');
+    p('BRIDGE = {');
+    p('    "travel": ', pn(XM.BRIDGE.travel), ',   # AKM320 rubber-dome travel');
+    p('    "margin": ', pn(XM.BRIDGE.margin), ',   # air on top of the travel');
+    p('    "tip":    ', pn(XM.BRIDGE.tip), ',   # height of the "-| |-" contact tip');
+    p('    "bite":   ', pn(XM.BRIDGE.bite), ',   # flank grip when the foot is beside the key');
+    p('    "slope":  ', pn(XM.BRIDGE.slope), ',   # mm of x per mm of z on the ramp');
+    p('    "inset":  ', pn(XM.BRIDGE.inset), ',   # shaved off each side so neighbours never touch');
     p('}');
     p('');
-    p('# (name, key colour, foot_x, [(z, ring), (z, ring)])');
-    p('# One entry per key.  `ring` is that bar\'s pair face, index-matched to');
-    p('# FOOT_SHAPE_F / foot_outline(), and `z` is the key deck plane it lies');
-    p('# in.  The colour is the key\'s: a pair face belongs to its key, even');
-    p('# though it is drawn with the foot.');
-    p('PAIRS = [');
+    p('# (name, key colour, [island, island], foot_x, [z_plinth, z_plinth])');
+    p('# island = [section, ...] top-first, section = 4 (x, y, z), one per bar');
+    p('# of the "-| |-" (index-matched to FOOT_SHAPE_F / foot_outline()).  The');
+    p('# colour is the key\'s, not a colour of its own: a connector is printed as');
+    p('# part of its key, in its key\'s filament.');
+    p('BRIDGES = [');
     for (const k of bkeys) {
-      const faces = XM.pairFaces(k.cx, k.w, k.type, k.lb, k.rb, k.foot, k.sib);
-      if (!faces) continue;
-      p('    ("Pair_', String(k.index).padStart(2, '0'), '", "', k.layer, '", ',
-        pn(k.foot), ', [');
-      for (const fc of faces)
-        p('        (', pn(fc.z), ', [',
-          fc.ring.map(v => '(' + pn(v[0]) + ', ' + pn(v[1]) + ')').join(', '), ']),');
-      p('    ]),');
+      const plan = XM.bridgePlan(k.cx, k.w, k.type, k.lb, k.rb, k.foot, bkeys, k);
+      if (!plan) continue;
+      const nm = 'Bridge_' + String(k.index).padStart(2, '0');
+      p('    ("', nm, '", "', k.layer, '", [',
+        plan.beside ? '   # gripping the key\'s flank' : '');
+      for (const isl of plan.islands) {
+        p('        [');
+        for (const ring of XM.islandRings(isl))
+          p('            [', ring.map(v => '(' + v.map(c => pn(c)).join(', ') + ')').join(', '), '],');
+        p('        ],');
+      }
+      p('    ], ', pn(k.foot), ', [',
+        plan.islands.map(isl => pn(isl.zPlinth)).join(', '), ']),');
     }
     p(']');
-    p('assert len(PAIRS) == 32, "one loop pair per key"');
+    p('assert len(BRIDGES) == 32, "one bridge per key"');
     p('');
     if (L.warnings.length) {
       p('# --- warnings on this design -------------------------------------------');
@@ -944,6 +908,7 @@ SHEET_X0, SHEET_Y0, SHEET_Z0 = ${pn(XM.WORLD.x0)}, ${pn(XM.WORLD.y0)}, ${pn(XM.W
 
 FOOT_W, FOOT_D   = ${pn(XM.FOOT.w)}, ${pn(XM.FOOT.d)}
 FOOT_YC, FOOT_Z  = ${pn(XM.FOOT.yCentre)}, ${pn(XM.FOOT.z)}
+FOOT_T           = ${pn(XM.FOOT.t)}
 FIT_ENGAGE       = ${pn(XM.FIT.engage)}   # overlap that makes a comb one solid
 FIT_GAP          = ${pn(XM.FIT.gap)}   # clearance between different colours
 
@@ -1258,6 +1223,21 @@ def build_spine_slab(half, x0, x1, y_back, y_front, z0, z1, bottom):
     return t
 
 
+def loft_rings(t, rings):
+    """Loft a stack of equal-length edge loops into one closed solid — this
+    is the bridge edge loop itself, walls plus the two caps."""
+    m = len(rings[0])
+    for s in range(len(rings) - 1):
+        a, b = rings[s], rings[s + 1]
+        for i in range(m):
+            j = (i + 1) % m
+            push_quad(t, a[i], b[i], b[j], a[j])
+    top, bot = rings[0], rings[-1]
+    for i in range(1, m - 1):
+        push_tri(t, top[0], top[i + 1], top[i])
+        push_tri(t, bot[0], bot[i], bot[i + 1])
+
+
 def foot_outline(cx):
     """the drafted "-| |-", in design coordinates, for the foot at cx"""
     x0 = cx - FOOT_W / 2.0
@@ -1266,61 +1246,38 @@ def foot_outline(cx):
     return [[V[i] for i in ring] for ring in FOOT_SHAPE_F]
 
 
-def push_flat_face(t, ring, z):
-    """one flat n-gon, triangulated in place, winding preserved"""
+def extrude_outline(t, ring, z0, z1):
     V = [(p[0], p[1], 0.0) for p in ring]
     for tri in triangulate_face(V, list(range(len(ring)))):
         a, b, c = ring[tri[0]], ring[tri[1]], ring[tri[2]]
-        push_tri(t, (a[0], a[1], z), (b[0], b[1], z), (c[0], c[1], z))
+        push_tri(t, (a[0], a[1], z1), (b[0], b[1], z1), (c[0], c[1], z1))
+        push_tri(t, (c[0], c[1], z0), (b[0], b[1], z0), (a[0], a[1], z0))
+    for k in range(len(ring)):
+        a, b = ring[k], ring[(k + 1) % len(ring)]
+        push_quad(t, (a[0], a[1], z0), (b[0], b[1], z0),
+                     (b[0], b[1], z1), (a[0], a[1], z1))
 
 
-def poly_area2(ring):
-    """twice the signed area of a 2-D ring — positive when it winds CCW"""
-    a = 0.0
-    for i in range(len(ring)):
-        p, q = ring[i], ring[(i + 1) % len(ring)]
-        a += p[0] * q[1] - q[0] * p[1]
-    return a
-
-
-def push_prism(t, bot, top, z0, z1):
-    """A closed prism between two equal-length rings.  Both are normalised
-    to CCW together so vertex i still bridges to vertex i, and the caps are
-    wound to close the walls rather than by convention."""
-    B, T = list(bot), list(top)
-    if poly_area2(B) < 0.0:
-        B.reverse(); T.reverse()
-    m = len(B)
-    for k in range(m):
-        j = (k + 1) % m
-        push_quad(t, (B[k][0], B[k][1], z0), (B[j][0], B[j][1], z0),
-                     (T[j][0], T[j][1], z1), (T[k][0], T[k][1], z1))
-    V = [(p[0], p[1], 0.0) for p in B]
-    for tri in triangulate_face(V, list(range(m))):
-        i, j, k = tri
-        push_tri(t, (B[i][0], B[i][1], z0), (B[k][0], B[k][1], z0),
-                    (B[j][0], B[j][1], z0))
-        push_tri(t, (T[i][0], T[i][1], z1), (T[j][0], T[j][1], z1),
-                    (T[k][0], T[k][1], z1))
-
-
-def build_press(foot_x, rings):
-    """one key's sensor press: two closed prisms, one per bar of the "-| |-",
-    from the drafted pad up to the key's own deck plane"""
+def build_foot(cx):
     t = []
-    for pad, (z, ring) in zip(foot_outline(foot_x), rings):
-        push_prism(t, pad, ring, FOOT_Z, z)
+    h = FOOT_T / 2.0
+    for ring in foot_outline(cx):
+        extrude_outline(t, ring, FOOT_Z - h, FOOT_Z + h)
     return t
 
 
-def build_foot(cx, pair=None):
-    """A foot is its pad face plus, when the key it belongs to is known, that
-    key's pair face — two floating loops in one object, nothing between."""
+def build_bridge(islands, foot_x, z_plinths):
+    """two independent connectors, one per bar of the "-| |-": each a loft
+    through its own ramp/plinth sections, then its own drafted tip that
+    actually touches the sensor.  The window between the bars is left open
+    for the sensor's dome at every height, not only at the tip."""
     t = []
-    for ring in foot_outline(cx):
-        push_flat_face(t, ring, FOOT_Z)
-    for z, ring in (pair or []):
-        push_flat_face(t, ring, z)
+    outlines = foot_outline(foot_x)
+    for island, ring, z_plinth in zip(islands, outlines, z_plinths):
+        loft_rings(t, [[tuple(p) for p in r] for r in island])
+        # rest ON the pad, not inside it; overlap the plinth so the two
+        # fuse into one solid rather than meeting on a coplanar face
+        extrude_outline(t, ring, FOOT_Z + FOOT_T / 2.0, z_plinth + BRIDGE["tip"])
     return t
 
 
@@ -1482,7 +1439,7 @@ def build():
     root_coll = new_collection(TARGET_COLLECTION, scene)
     part = {}
     for nm in ("Keys - White", "Keys - Black", "Keys - Gray", "Spine", "Feet",
-               "Sensor Press"):
+               "Bridges"):
         part[nm] = new_collection(nm, root_coll)
     root = make_root(root_coll)
     mats = dict((k, get_material(k)) for k in COLOURS)
@@ -1543,17 +1500,14 @@ def build():
                                  part["Spine"], spine_mats[lname])
 
     if not feet_from_sheet:
-        pair_of = dict((round(fx, 4), rings) for _, _, fx, rings in PAIRS)
         for i, fx in enumerate(FEET):
             make_mesh_object("Foot_%s_%02d" % ("A" if i < 16 else "B", i % 16 + 1),
-                             build_foot(fx, pair_of.get(round(fx, 4))),
-                             part["Feet"], mats["feet"])
+                             build_foot(fx), part["Feet"], mats["feet"])
 
-    for name, colour, foot_x, rings in PAIRS:
-        # a press carries its KEY's material — same filament, same part
-        make_mesh_object(name.replace("Pair_", "Press_"),
-                         build_press(foot_x, rings),
-                         part["Sensor Press"], mats[colour])
+    for name, colour, islands, foot_x, z_plinths in BRIDGES:
+        # a connector carries its KEY's material — same filament, same part
+        make_mesh_object(name, build_bridge(islands, foot_x, z_plinths),
+                         part["Bridges"], mats[colour])
 
     # parent everything to the root empty at (0, 0, 0), in place
     bpy.context.view_layer.update()
@@ -1598,7 +1552,7 @@ if __name__ == "__main__":
   }
 
   const api = {
-    presetDesign, computeLayout, pairKeys, buildMeshes, toSTL, makeZip,
+    presetDesign, computeLayout, buildMeshes, toSTL, makeZip,
     pythonLog, summary, notesPerPeriod, layerCount, templateColours,
     whiteCount, widthAt, suggestScale,
     bounds, worldOffset, ORIGIN_MODES

@@ -365,88 +365,178 @@ one flat spine grey.
 **Key → foot reach** — the status panel reports the widest distance from a key's
 centre to the centre of its sensor foot. Large values are expected, not errors:
 the two halves of a split pair share one X and still have to reach two adjacent
-feet 11.3 mm apart. That gap is closed by the bridge edge loops.
+feet 11.3 mm apart. Nothing closes that gap at this stage — the loop pair
+states it.
 
 ---
 
-## The bridge edge loops
+## The foot loop pairs
 
-Both ends of the connection were already drafted.
+Both ends of the connection were already drafted, and at this stage that is all
+the design states: **a pair of floating faces, with nothing between them.**
 
-**The sensor foot is not a rectangle.** `Feet - A` and `Feet - B` draw all 32
-feet as one shape, and that shape is the "-| |-": two mirrored T's, each a
-full-width **crossbar** with a 1.0 mm **central stem** reaching out to the pad
-edge, with a 1.99978 mm window between the two bars. 16 vertices, 2 n-gon
-faces, flat at z = -1.01091. That outline is now stored verbatim in `model.js`
-as `FOOT_SHAPE` and is what `build_foot` builds - the generated feet used to
-come out as plain 10.4 x 9.0 boxes, which was wrong.
+A foot is no longer a solid. It is one flat face — the drafted `-| |-` exactly
+as `Feet - A` / `Feet - B` draw it, two n-gons and sixteen vertices, lying at
+`FOOT.z` with no thickness, no walls and no caps. The window between the two
+bars, where the sensor's rubber dome sits, is open because the drafted shape
+leaves it open.
 
-**The key underside "-| |-".** Two 1.0 mm rails running along y at the key's
-left and right walls, at z 3.6608 under a white and 4.0893 under an accidental,
-segmented in y at exactly the foot's own boundaries - y 26.378 and y 29.379.
-The giveaway that the two were drawn to meet.
+Each foot then carries a second floating face: the **pair face**, the `-| |-`
+popped off its key's own underside deck, lying in that deck's plane. There is no connector, no plinth, no ramp, no tip
+and no weld into the key. The key is drawn whole; nothing is cut into its
+belly. Two loops describe the relationship between a key and its sensor, and
+describing it is the whole of this stage.
 
-### Print orientation is the constraint
+### Where the pair face comes from
 
-These keys print **face down** - the playing surface is the bed - so the build
-direction is design -z: the key's top prints first and the connector grows away
-from the bed. A layer is only printable if it sits on the layer above it in
-design z, give or take a 45 degree overhang.
+It is **not derived from the key by fitting** — it is the face popped off the
+key's own underside deck, drafted in the `Raised Feet (Pair)` collection and
+read back out the way every other constant in `model.js` was.
 
-That rules out a thin web that jogs sideways from the key's rail to the foot.
-A split pair shares one x and still has to reach two feet 11.3 mm apart, so
-such a web is a near-horizontal cantilever: it would need support along its
-whole length, and the supports would sit between the keys, which is exactly
-where no tool reaches afterwards.
+Every one of the 32 is the same `-| |-`: a **crossbar spanning the full width
+of that key's deck**, a 1 mm **stem** centred on it reaching out of each bar,
+and the 2 mm dome window between them. Only two things vary, and neither is
+fitted:
 
-So the connector is a **filled wedge**, widest at the foot and tapering back
-into the key. Read in print order, top of the stack downward:
-
-| stage | what it is |
+| | where it comes from |
 |---|---|
-| **anchor** | a section inside the key - the overlap of the pad with the key's own footprint over it, or `BRIDGE.bite` mm of the key's flank when the foot is entirely beside the key. Key material sits above it, so the first bridge layer is fully supported. |
-| **ramp** | the section opens out to the full pad at `BRIDGE.slope` mm of x per mm of z - 45 degrees, the steepest a printer bridges unsupported. It opens in y as well as x, so a connector is never deeper than its own key up at the anchor. |
-| **plinth** | the full pad section, straight down. |
-| **tip** | the last `BRIDGE.tip` mm steps *in* to the drafted foot "-| |-" itself, so the face that presses the sensor is the shape `Feet - A` / `Feet - B` actually draw. Stepping in never overhangs. |
+| **x** | the key's own deck span, verbatim. The bar is as wide as the key is, whatever the layout or the size number. |
+| **y** | one of three drafted profiles in `PAIR_SHAPE`, chosen by the key. |
 
-Nothing in that stack grows faster than 45 degrees going down, so the whole
-connector prints without a single support. The generated log measures that
-rather than assuming it and prints the numbers in its header: whether every
-ramp fitted at 45 degrees, the steepest angle any ramp had to take, the
-narrowest air between two connectors, and the least air a connector leaves
-above a sensor pad that is not its own.
+The three profiles are the whole of it:
 
-`BRIDGE.inset` shaves a little off each side in x so neighbouring connectors
-never touch; `BRIDGE.crown` keeps a ramp clear of the key's own top. Where a
-key is too short to hold a 45 degree ramp the ramp takes the steepest slope
-that does fit rather than running off the key, and the audit reports the angle.
-In the three presets that happens once, at 47.7 degrees in the 15-EDO layout.
+- **`full`** — the standard 14.0 mm reach: 5 mm stem, 1 mm bar, 2 mm window,
+  1 mm bar, 5 mm stem. Every white key, and every full-width accidental.
+- **`split`** — the Second half of a split pair: the same 14.0 mm reach drawn
+  with slightly heavier bars and a 1.902 mm window.
+- **`short`** — the First half of a split pair, 10.25 mm: its key ends at
+  y 27.8189, so the front stem is 1.25 mm instead of 5 mm.
+
+### Split pairs
+
+The one thing a key's own geometry cannot say is where a split pair divides.
+Both halves share a slot, and the deeper half's belly loop is drawn across the
+whole of it, so seating both from their own bellies would put them on top of
+one another. The shallower half's belly really is just its half, so it is taken
+as drawn and the deeper half gets the rest of the slot, less `PAIR.split`
+(0.99387 mm) of air. That is the only inference anywhere in the pairing, and it
+reproduces the drafted faces to 0.006 mm.
+
+Rebuilt from these rules, all 32 pair faces match the drafted collection: same
+bounds, same stems, same deck plane, and the largest area error anywhere is
+0.04 mm² out of about 50 — drafting noise, not a difference in shape.
+
+---
+
+## The sensor press
+
+The loop pair states the relationship; the **press** is that relationship
+closed into a part. One prism per bar of the `-| |-`: the drafted pad ring at
+the bottom, its pair ring in the key's deck plane at the top, a single quad
+band between them vertex for vertex, and both ends capped.
+
+Each pair ring is built by mapping the pad ring onto the pair's coordinates
+**by role** rather than drawn independently — every x is one of the four the
+shape uses (bar end, stem edge, stem edge, bar end) and every y is one of three
+(bar inner edge, bar outer edge, stem tip). So the pair ring comes out as the
+same eight points in the same order and the same winding as the pad ring it
+belongs to, and the loft has nothing to match up: vertex *i* bridges to vertex
+*i*. Nothing is stepped and nothing is squared off, so the 1 mm stem and the
+2 mm dome window survive the whole climb.
+
+**Two prisms, not one.** The window between the bars is where the rubber dome
+sits. Lofting the pair as a single ring would close it; lofting each bar on its
+own leaves it open at every height — which is why the pad is drafted as two
+n-gons rather than one to begin with.
+
+**Watertight, and checked as such.** `isWatertight` requires every *directed*
+edge to appear exactly once and its opposite exactly once; a bare undirected
+edge count would pass a cap wound the wrong way, and this does not. `meshVolume`
+then confirms the normals face out rather than in. All 32 presses close in all
+three presets, none inverted, and they add about 4390 mm³ of filament in the
+19-EDO layout. The face that presses the sensor is the drafted pad ring itself,
+not an approximation of it.
 
 ### Colour
 
-A connector prints **as part of its key, in its key's filament**, so it carries
-the key's colour rather than one of its own: its triangles go into that
-colour's mesh in the preview and in the per-colour STL, and the Blender log
-gives each `Bridge_nn` object its key's material. The `Bridges` collection
-exists to toggle them, not to say they are a separate part.
+A press prints **as part of its key, in its key's filament**, so it carries the
+key's colour rather than one of its own: its triangles go into that colour's
+mesh in the preview and in the per-colour STL, and the Blender log gives each
+`Press_nn` object its key's material in the `Sensor Press` collection. The two
+loops themselves stay with the foot, in the `Foot_x_nn` object inside `Feet`.
 
-### What is not yet verified
+### Which foot a key drives
 
-Clearance between a connector and the *body* of a neighbouring key. The audit
-checks connector against connector, and connector against foreign sensor pads
-(4.4-6.0 mm of air in the presets, comfortably past the 2.0 mm of travel), but
-the two halves of a split pair share an x span and an overlapping y span and
-differ only in z, so a bounding-box test reads them as colliding when they are
-not, and a surface test needs the keys' real solids rather than their drafted
-faces. Treat the split-pair region as unchecked until that pass exists.
+`KEYS[i]` belongs to `FEET[i]`, and for a split pair that pairing used to be
+decided by nothing at all. Both halves share the slot's x centre, and the old
+comparator returned the same value for both of them — an inconsistent sort, so
+the pair came out one way in one layout and the other way in another. In 19-EDO
+it came out **crossed**: the gray half sits to the LEFT of the black half in the
+drafted slot, yet the black half was taking the left-hand foot, so the two
+connectors had to pass through one another (1012 mm³ of shared solid in one
+pair alone).
 
-**Click to inspect** — clicking a key highlights it and opens a readout with its
-type, centre X, width, depth, Z range, spine layer, slot name, slot bias and
-group, pair role, note index, degree, the X of the sensor foot under it, the
-**key − foot** offset, and the full world coordinates. Clicking a sensor foot
-reports its pad size, its spine half and index on that half, its step from the
-previous foot (which is where the uneven half-A spacing shows up), and its
-world X.
+The tie-break is now the key's **drafted span at the spine**, not its slot
+centre and not its pair role. Each half is drawn at its own x inside the slot,
+and which one is on the left flips with the pair's handedness — "First" is the
+mirror of "Second" — so reading the geometry gets it right for either variant
+without assuming one. Where a layout uses *Split Black First*, black stands to
+the left and takes the leftmost of the pair's two feet; where it uses *Split
+Black Second*, gray does.
+
+### Three objects, and what it takes
+
+The instrument comes off the bed as **three objects, one per filament**, each a
+single closed solid. `FIT` in `model.js` carries the two numbers that makes
+that possible.
+
+**`FIT.gap` — clearance between colours.** The drafted spine bands overlap each
+other. Half A draws black topping out at 6.10034 and white starting at 6.07824;
+half B is worse, 284.8 mm³ of solid shared between gray and black. Invisible on
+the sheet, fatal to a print. Bands are now pushed apart to leave `FIT.gap`, and
+each band's front face is recessed by the same amount so that a key of another
+colour never lies coincident with it — coplanar faces are exactly what leaves a
+boolean union non-manifold.
+
+**`FIT.engage` — overlap within a colour.** A key has to genuinely share solid
+with the spine band of its own colour, not merely touch it. Each band grows a
+**boss** of `FIT.engage` forward, over the x span of every key of its colour and
+across only the z its tongue occupies. A connector likewise pushes `FIT.engage`
+past its key's underside rather than stopping on it, and its `"-| |-"` tip
+overlaps its own plinth. Each band also carries a **coupler** across the 1.3 mm
+gap the two AKM320 halves are drafted apart, so a comb is one object and not
+two.
+
+Unioned in Blender, the 19-EDO preset now gives **white: 1 shell** (from 26
+input objects, 77 before these changes), **black: 2**, **gray: 4**.
+
+### What is still open
+
+Measured in Blender with exact booleans, against the 19-EDO preset:
+
+| was | now |
+|---|---|
+| 48 cross-colour interferences, ~1200 mm³ | 6 interferences, 18.9 mm³ |
+
+Everything that remains is one thing: **an accidental's connector clips the
+neighbouring white key it passes under.** That is not a routing mistake — the
+accidental's sensor foot genuinely sits under the white key's body, so a
+connector has to pass through the white key's envelope. It needs a relief
+pocket cut in the neighbouring key, sized `travel + margin`, which means the
+app has to emit the pocket and the Blender log has to subtract it. Until then
+those six pairs share solid.
+
+Two smaller items behind it:
+
+* Three gray connectors and one black do not fuse into their comb, leaving 34-
+  and 130-face loose shells after the union.
+* The spine slab is not watertight on its own — 608 boundary edges per part.
+  `rectWithHoles` subdivides recursively, so neighbouring sub-rectangles meet
+  at T-junctions, and the obround annulus does not close against them.
+  Capping each slab as one polygon-with-holes is the fix; tiling the
+  sub-rectangle caps was tried and is worse. A union of the comb closes it (the
+  black comb comes out with no open edges at all), so this bites the raw spine
+  STL rather than the printed comb.
 
 ---
 
@@ -635,6 +725,12 @@ capping each slab as one polygon with holes rather than as a pile of boxes.
 
 ## What this is not
 
-This is a drafting and layout tool, not a finished MIDI controller design. The **bridge edge loops are now generated** (see “The bridge edge loops” above),
-but they are a first pass: provably collision-free between keys, and not yet
-giving a full 2 mm of key travel over a neighbour’s sensor pad.
+This is a drafting and layout tool that is now most of the way to a printable
+design, but it is not there yet. The foot loop pairs are generated and state
+the key-to-sensor relationship exactly, and each one closes into a watertight
+sensor press; the three combs separate cleanly by
+filament and union into one, two and four shells; and cross-colour interference
+is down from about 1200 mm³ to 18.9 mm³. What is left is listed under “What is
+still open” above, and the head of that list — turning each loop pair into
+something that actually carries the key's travel down to its foot — has to be
+solved before anything goes on a bed.

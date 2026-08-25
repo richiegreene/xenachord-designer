@@ -175,7 +175,7 @@
     yCentre: 27.37759,    // in front of the spine front face
     z: -1.01091,          // below the spine bottom face
     perUnit: 32,          // 16 on half A + 16 on half B
-    t: 0.0,               // the pad IS a plane — no body, no walls, no caps
+    t: 0.1,               // the pad is a plane in the .blend; this gives it a body
     // x of foot #0's centre, relative to the design origin
     x0: 9.79531,
     // Half A of the real PCB is not perfectly even; half B is.  These are the
@@ -616,166 +616,25 @@
     return out;
   }
 
-  /* ------------------------------------------------------------------ *
-   *  CUTTING A LOOP INTO A DRAFTED FACE                                 *
-   *                                                                     *
-   *  Kept for the seats argument, which nothing passes any more: a pair *
-   *  face is a floating loop lying in the deck plane, not a weld, so    *
-   *  loop, so the two share solid along that loop.  Two coplanar faces   *
-   *  pressed together are exactly what a boolean union gets wrong, and   *
-   *  what used to leave connectors behind as loose parts.               *
-   * ------------------------------------------------------------------ */
-  /** XY signed area (twice) of an index ring — sign is the winding */
-  function ringArea2(V, idx) {
-    let s = 0;
-    for (let i = 0; i < idx.length; i++) {
-      const a = V[idx[i]], b = V[idx[(i + 1) % idx.length]];
-      s += (a[0] - b[0]) * (a[1] + b[1]);
-    }
-    return s;
-  }
-
-  /** do ab and cd properly cross?  touching at a shared endpoint does not */
-  function segCross(a, b, c, d) {
-    const s1 = tri2(a, b, c), s2 = tri2(a, b, d);
-    const s3 = tri2(c, d, a), s4 = tri2(c, d, b);
-    return ((s1 > TRI_EPS && s2 < -TRI_EPS) || (s1 < -TRI_EPS && s2 > TRI_EPS)) &&
-           ((s3 > TRI_EPS && s4 < -TRI_EPS) || (s3 < -TRI_EPS && s4 > TRI_EPS));
-  }
-
-  /** is p inside the XY polygon `poly` (array of 3-D points)? */
-  function pointInPoly2(p, poly) {
-    let inside = false;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const a = poly[i], b = poly[j];
-      if ((a[1] > p[1]) !== (b[1] > p[1]) &&
-          p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0])
-        inside = !inside;
-    }
-    return inside;
-  }
-
-  /**
-   * Triangulate one face with loops cut out of it.  Each hole is folded
-   * into the outer loop along the shortest cut edge that crosses nothing,
-   * leaving one simple ring for the existing ear-clipper — the same fan
-   * the drafted example's deck is built from.  `V` is extended in place
-   * with the hole vertices, so `ring`'s indices stay valid.
-   */
-  function triangulateFaceWithHoles(V, ring, holes) {
-    let outer = ring.slice();
-    const oSign = Math.sign(ringArea2(V, outer)) || 1;
-    for (const hole of holes) {
-      const start = V.length;
-      const hi = hole.map((q, i) => { V.push([q[0], q[1], q[2]]); return start + i; });
-      if (Math.sign(ringArea2(V, hi)) === oSign) hi.reverse();   // holes run against
-      const edges = [];
-      const addEdges = idx => {
-        for (let i = 0; i < idx.length; i++)
-          edges.push([idx[i], idx[(i + 1) % idx.length]]);
-      };
-      addEdges(outer); addEdges(hi);
-      let best = null;
-      for (let i = 0; i < outer.length; i++)
-        for (let j = 0; j < hi.length; j++) {
-          const a = V[outer[i]], b = V[hi[j]];
-          const d = (a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]);
-          if (best && d >= best.d) continue;
-          let blocked = false;
-          for (const e of edges) {
-            if (e[0] === outer[i] || e[1] === outer[i] ||
-                e[0] === hi[j] || e[1] === hi[j]) continue;
-            if (segCross(a, b, V[e[0]], V[e[1]])) { blocked = true; break; }
-          }
-          if (!blocked) best = { i, j, d };
-        }
-      if (!best) best = { i: 0, j: 0 };
-      const merged = outer.slice(0, best.i + 1);
-      for (let k = 0; k <= hi.length; k++) merged.push(hi[(best.j + k) % hi.length]);
-      merged.push(outer[best.i]);
-      outer = merged.concat(outer.slice(best.i + 1));
-    }
-    return triangulateFace(V, outer);
-  }
-
-  /** is this face the down-facing deck plane one seat's loop lies in? */
-  function faceHoldsSeat(P, seat) {
-    let z0 = Infinity, z1 = -Infinity;
-    for (const p of P) { if (p[2] < z0) z0 = p[2]; if (p[2] > z1) z1 = p[2]; }
-    if (z1 - z0 > 1e-4 || Math.abs(z0 - seat.z) > 1e-4) return false;
-    for (const q of seat.ring) if (!pointInPoly2(q, P)) return false;
-    return true;
-  }
-
   /**
    * One key, as a triangle soup.
    *   cx     centre x            w   width (from the size law)
    *   type   key type name
    *   lb/rb  bias of the occupied slot to the left / right, or null
-   *   seats  kept for callers that still pass it; the pair face is a
-   *          floating loop now, so nothing is cut into the deck
    */
-  function buildKey(cx, w, type, lb, rb, seats) {
+  function buildKey(cx, w, type, lb, rb) {
     const q = profileFor(type, lb, rb);
     const V = profilePoints(q.p, q.mirror, w, cx - w / 2);
     const f = q.p.f, t = [];
-    const emit = tris => {
-      for (const tri of tris) {
-        const a = V[tri[0]], b = V[tri[1]], c = V[tri[2]];
-        t.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
-      }
-    };
-    /* index the faces so a seat can claim a whole coplanar REGION of them —
-     * a belly is a dozen fragments, and the loop is cut into the merged
-     * outline, never into whichever fragment it happens to start in */
-    const faces = [];
     for (let k = 0; k < f.length;) {
       const m = f[k++];
       const ring = f.slice(k, k + m); k += m;
       if (q.mirror) ring.reverse();          // mirroring flips face winding
-      faces.push(ring);
-    }
-    /* a key's two bars land on the SAME belly, so the seats are grouped by
-     * their plane and cut in together — one merge, one triangulation, both
-     * loops as holes */
-    const claimed = new Set();
-    const byZ = new Map();
-    for (const sea of (seats || [])) {
-      const kz = Math.round(sea.z * 1e4);
-      (byZ.get(kz) || (byZ.set(kz, []), byZ.get(kz))).push(sea);
-    }
-    for (const group0 of byZ.values()) {
-      const z = group0[0].z, group = [];
-      for (let i = 0; i < faces.length; i++) {
-        const P = faces[i].map(j => V[j]);
-        let z0 = Infinity, z1 = -Infinity;
-        for (const p of P) { if (p[2] < z0) z0 = p[2]; if (p[2] > z1) z1 = p[2]; }
-        if (z1 - z0 > 1e-4 || Math.abs(z0 - z) > 1e-4) continue;
-        if (polyArea2(P) >= 0) continue;               // down-facing only
-        group.push(i);
-      }
-      if (!group.length) continue;
-      const loops = mergeCoplanar(group.map(i => faces[i].map(j => V[j])));
-      const outers = loops.filter(R => polyArea2(R) < 0);
-      const holes  = loops.filter(R => polyArea2(R) >= 0);
-      const fit = new Map();                           // outer loop -> its seats
-      for (const sea of group0) {
-        const R = outers.filter(o => sea.ring.every(p => pointInPoly2(p, o)))
-                        .sort((a, b) => polyArea2(a) - polyArea2(b))[0];
-        if (R) (fit.get(R) || (fit.set(R, []), fit.get(R))).push(sea);
-      }
-      if (!fit.size) continue;                         // seats hang off the belly
-      for (const i of group) claimed.add(i);
-      const lift = R => R.map(pt => [pt[0], pt[1], z]);
-      for (const R of outers) {
-        const idx = lift(R).map(pt => (V.push(pt), V.length - 1));
-        const cut = (fit.get(R) || []).map(sea => sea.ring);
-        const own = holes.filter(h => h.every(p => pointInPoly2(p, R))).map(lift);
-        emit(triangulateFaceWithHoles(V, idx, own.concat(cut)));
+      for (const tri of triangulateFace(V, ring)) {
+        const a = V[tri[0]], b = V[tri[1]], c = V[tri[2]];
+        t.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
       }
     }
-    for (let i = 0; i < faces.length; i++)
-      if (!claimed.has(i)) emit(triangulateFace(V, faces[i]));
     return t;
   }
 
@@ -790,122 +649,6 @@
       if (q.mirror) ring.reverse();
       out.push(ring.map(i => V[i]));
     }
-    return out;
-  }
-
-  /* ------------------------------------------------------------------ *
-   *  THE KEY'S BELLY IS NOT ONE FACE                                    *
-   *                                                                     *
-   *  A drafted key's underside comes off the sheet as a dozen coplanar   *
-   *  faces meeting on shared edges — so "the deck" is a REGION, not a    *
-   *  polygon, and seating a pair face on it and reading its extent      *
-   *  into it have to work on the merged outline rather than on whichever *
-   *  fragment happened to be biggest.                                    *
-   *                                                                     *
-   *  Merging is exact and cheap here: the key is edge-manifold, so every *
-   *  seam between two coplanar faces appears twice, once in each         *
-   *  direction.  Cancel those and what is left is the region's own       *
-   *  boundary, which chains straight into loops.                        *
-   * ------------------------------------------------------------------ */
-  const MERGE_Q = 1e5;
-
-  /**
-   * Merge a set of coplanar polygons into their boundary loops (XY, wound
-   * as the input was).
-   *
-   * Cancel every edge that also appears reversed — those are the seams
-   * between two fragments — and walk what is left.  The walk cannot just
-   * follow "any unused edge out": a belly pinches, and a pinch vertex has
-   * several edges out, so following the wrong one splices two unrelated
-   * parts of the boundary into one nonsense loop.  At each vertex it
-   * therefore takes the next edge CLOCKWISE from the one it arrived on,
-   * which is the standard planar-subdivision face walk and separates the
-   * loops correctly at every pinch.
-   */
-  function mergeCoplanar(polys) {
-    const key = p => Math.round(p[0] * MERGE_Q) + ',' + Math.round(p[1] * MERGE_Q);
-    const pos = new Map(), cnt = new Map();
-    for (const P of polys)
-      for (let i = 0; i < P.length; i++) {
-        const a = P[i], b = P[(i + 1) % P.length];
-        const ka = key(a), kb = key(b);
-        if (ka === kb) continue;
-        pos.set(ka, a); pos.set(kb, b);
-        const e = ka + '>' + kb;
-        cnt.set(e, (cnt.get(e) || 0) + 1);
-      }
-    /* surviving directed edges, grouped by tail, each with its heading */
-    const out = new Map();
-    for (const [e, c] of cnt) {
-      const i = e.indexOf('>'), a = e.slice(0, i), b = e.slice(i + 1);
-      const n = c - (cnt.get(b + '>' + a) || 0);          // seams cancel
-      if (n <= 0) continue;
-      const pa = pos.get(a), pb = pos.get(b);
-      const l = out.get(a) || (out.set(a, []), out.get(a));
-      for (let k = 0; k < n; k++)
-        l.push({ to: b, ang: Math.atan2(pb[1] - pa[1], pb[0] - pa[0]), used: false });
-    }
-    const TAU = Math.PI * 2;
-    const loops = [];
-    for (const [start, list] of out)
-      for (const first of list) {
-        if (first.used) continue;
-        first.used = true;
-        const loop = [start];
-        let from = start, edge = first, guard = 0;
-        while (guard++ < 8192) {
-          loop.push(edge.to);
-          if (edge.to === start) break;
-          const cands = out.get(edge.to);
-          if (!cands) break;
-          const back = edge.ang + Math.PI;
-          let pick = null, bestA = Infinity;
-          for (const c of cands) {
-            if (c.used) continue;
-            let d = (back - c.ang) % TAU;               // clockwise from the
-            if (d <= 1e-9) d += TAU;                    // edge we came in on
-            if (d < bestA) { bestA = d; pick = c; }
-          }
-          if (!pick) break;
-          pick.used = true;
-          from = edge.to; edge = pick;
-        }
-        if (loop.length >= 4 && loop[loop.length - 1] === start)
-          loops.push(loop.slice(0, -1).map(k => pos.get(k)));
-      }
-    return loops;
-  }
-
-  /** XY signed area (twice) of a point ring */
-  function polyArea2(R) {
-    let s = 0;
-    for (let i = 0; i < R.length; i++) {
-      const a = R[i], b = R[(i + 1) % R.length];
-      s += (a[0] - b[0]) * (a[1] + b[1]);
-    }
-    return s;
-  }
-
-  /**
-   * The key's down-facing planar regions, merged, lowest first.  The
-   * lowest one is the belly a pair face lies in; `loops` are its
-   * merged boundaries, `polys` the drafted fragments they replace.
-   */
-  function keyDecks(cx, w, type, lb, rb) {
-    const groups = new Map();
-    for (const P of keyPolygons(cx, w, type, lb, rb)) {
-      let z0 = Infinity, z1 = -Infinity;
-      for (const p of P) { if (p[2] < z0) z0 = p[2]; if (p[2] > z1) z1 = p[2]; }
-      if (z1 - z0 > 1e-4) continue;
-      if (polyArea2(P) >= 0) continue;                    // down-facing only
-      const kz = Math.round(z0 * 1e4);
-      const g = groups.get(kz) || (groups.set(kz, { z: z0, polys: [] }), groups.get(kz));
-      g.polys.push(P);
-    }
-    const out = [];
-    for (const g of groups.values())
-      out.push({ z: g.z, polys: g.polys, loops: mergeCoplanar(g.polys) });
-    out.sort((a, b) => a.z - b.z);
     return out;
   }
 
@@ -1237,96 +980,79 @@
     return out;
   }
 
-  /* ------------------------------------------------------------------ *
-   *  A FOOT IS TWO FLOATING FACES, AND NOTHING ELSE                     *
-   *                                                                     *
-   *  PAD FACE    the drafted "-| |-" exactly as "Feet - A" / "Feet - B"  *
-   *              draw it, flat at z = FOOT.z.  No thickness, no walls,   *
-   *              no caps — the face the sensor sees, and only that.      *
-   *  PAIR FACE   the SAME 16 vertices, same order, same winding, lying   *
-   *              in the plane of the key's own underside deck.  Its      *
-   *              stems reach PAIR.stem past the drafted pad before it is *
-   *              seated, so the pair spans the deck rather than perching *
-   *              in the middle of it; seatTransform then fits it, and a  *
-   *              stem that runs off the deck is SHORTENED there.         *
-   *                                                                     *
-   *  Nothing joins the two.  There is no bridge, no plinth, no ramp and  *
-   *  no weld into the key: they are a pair of loops that describe the    *
-   *  relationship, and the relationship is all this stage produces.      *
-   * ------------------------------------------------------------------ */
-
-  /** emit one flat n-gon as triangles in the plane z, keeping its winding */
-  function pushFlatFace(t, ring, z) {
-    const V = ring.map(p => [p[0], p[1], 0]);
-    const idx = ring.map((_, k) => k);
-    for (const tri of triangulateFace(V, idx)) {
-      const a = ring[tri[0]], b = ring[tri[1]], c = ring[tri[2]];
-      pushTri(t, [a[0], a[1], z], [b[0], b[1], z], [c[0], c[1], z]);
-    }
-  }
-
-  /**
-   * one part per sensor foot, named to match "Feet - A" / "Feet - B".
-   *
-   * `keys` is optional and is the list pairKeys() builds — when it is
-   * given, each foot also carries the pairing face for the key that foot
-   * belongs to.  Without it a foot is just its pad face, which is what the
-   * feet-only previews want.
-   */
-  function footParts(keys) {
-    const byFoot = new Map();
-    for (const k of (keys || [])) byFoot.set(Math.round(k.foot * 1e4), k);
+  /** one part per sensor foot, named to match "Feet - A" / "Feet - B" */
+  function footParts() {
+    const h = FOOT.t / 2;
     return footCentres().map((cx, i) => {
       const tris = [];
-      const pad = footOutline(cx);
-      for (const ring of pad) pushFlatFace(tris, ring, FOOT.z);
-
-      const k = byFoot.get(Math.round(cx * 1e4));
-      const pair = k ? pairFaces(k.cx, k.w, k.type, k.lb, k.rb, cx, k.sib) : null;
-      if (pair) for (const f of pair) pushFlatFace(tris, f.ring, f.z);
-
+      /* the drafted "-| |-" outline, given FOOT.t of thickness so it is a
+       * solid the slicer and the bridge can both see.  Top and bottom caps
+       * are the drafted n-gons, ear-clipped; the walls are the loft. */
+      for (const ring of footOutline(cx)) {
+        const V = ring.map(p => [p[0], p[1], 0]);
+        const idx = ring.map((_, k) => k);
+        for (const tri of triangulateFace(V, idx)) {
+          const a = ring[tri[0]], b = ring[tri[1]], c = ring[tri[2]];
+          pushTri(tris, [a[0], a[1], FOOT.z + h], [b[0], b[1], FOOT.z + h],
+                        [c[0], c[1], FOOT.z + h]);
+          pushTri(tris, [c[0], c[1], FOOT.z - h], [b[0], b[1], FOOT.z - h],
+                        [a[0], a[1], FOOT.z - h]);
+        }
+        for (let k = 0; k < ring.length; k++) {
+          const a = ring[k], b = ring[(k + 1) % ring.length];
+          pushQuad(tris, [a[0], a[1], FOOT.z - h], [b[0], b[1], FOOT.z - h],
+                         [b[0], b[1], FOOT.z + h], [a[0], a[1], FOOT.z + h]);
+        }
+      }
       return {
         name: 'Foot_' + (i < FEET_PER_HALF ? 'A' : 'B') + '_' +
               String(i % FEET_PER_HALF + 1).padStart(2, '0'),
-        index: i, half: i < FEET_PER_HALF ? 'A' : 'B', cx,
-        pad, pair, tris
+        index: i, half: i < FEET_PER_HALF ? 'A' : 'B', cx, tris
       };
     });
   }
 
-  function buildFeet(keys) {
+  function buildFeet() {
     const t = [];
-    for (const p of footParts(keys)) t.push(...p.tris);
+    for (const p of footParts()) t.push(...p.tris);
     return t;
   }
 
 
   /* ==================================================================== *
-   *  FOOT LOOP PAIRS  —  sensor foot "-| |-"  ->  the SAME "-| |-"        *
-   *                      lying in the key's underside deck                *
+   *  BRIDGE EDGE LOOPS  —  key underside "-| |-"  ->  sensor foot "-| |-" *
    *                                                                      *
    *  KEYS[i] belongs to FEET[i], but the two are not over one another: a  *
    *  split pair shares one x and still has to reach two feet 11.3 mm      *
-   *  apart.  The loop pair STATES that relationship; it does not close    *
-   *  it.  Nothing is built between the two loops.                        *
+   *  apart.  The connector closes that gap.                              *
    *                                                                      *
-   *    PAD FACE    the drafted ring itself, flat at the sensor pad — the  *
-   *                shape "Feet - A" / "Feet - B" actually draw, vertex    *
-   *                for vertex, so the face that presses the sensor is     *
-   *                the drafted one.                                      *
-   *    PAIR FACE   the same 8 vertices in the same order and winding,     *
-   *                lying in the key's own underside deck plane.          *
+   *  PRINT ORIENTATION IS THE CONSTRAINT.  These keys print face DOWN —   *
+   *  the playing surface is the bed — so the build direction is design    *
+   *  -z: the key's top prints first and the bridge grows away from the    *
+   *  bed.  A layer is only printable if it sits on the layer above it in  *
+   *  design z, give or take a 45 degree overhang.  So the bridge is not   *
+   *  a thin web that jogs sideways (that is a near-horizontal cantilever  *
+   *  and needs support everywhere); it is a FILLED wedge that is widest   *
+   *  at the foot and tapers back to the key at no more than 45 degrees.   *
    *                                                                      *
-   *  Both are FLOATING FACES: no thickness, no walls, no caps, no band    *
-   *  between them and no weld into the key.  The 1 mm stem and the 2 mm   *
-   *  dome window survive the move, because both loops are the drafted     *
-   *  shape rather than a bounding box of it.                             *
+   *  Reading it in print order, top of the stack downward:                *
    *                                                                      *
-   *  WHAT THE PAIR FACE IS ALLOWED TO DO.  Its stems reach PAIR.stem      *
-   *  past the drafted pad first; the seat then fits it to the key's own   *
-   *  belly, shrinking only in x and snapping to the deck edge in y.  So   *
-   *  a stem with nowhere to go is SHORTENED at that end alone, and the    *
-   *  shape is never re-centred or scaled.  See stemExtend and seatAxis.   *
+   *    1  ANCHOR   a span inside the key — the overlap of the pad with    *
+   *                the key's own footprint over the pad, or, when the     *
+   *                foot is entirely beside the key, BRIDGE.bite mm of     *
+   *                the key's flank.  Whatever is above it is key, so the  *
+   *                first bridge layer is fully supported.                 *
+   *    2  RAMP     the span opens out from the anchor to the full 10.4 mm *
+   *                pad at exactly 45 degrees — one mm of x per mm of z,   *
+   *                the steepest a printer will bridge unsupported.        *
+   *    3  PLINTH   the full pad section, straight down.                   *
+   *    4  TIP      the last BRIDGE.tip mm steps IN to the drafted foot    *
+   *                "-| |-" itself, so the face that touches the sensor is *
+   *                the shape "Feet - A" / "Feet - B" actually draw.       *
+   *                Stepping in never overhangs.                          *
+   *                                                                      *
+   *  Nothing in that stack ever grows faster than 45 degrees going down,  *
+   *  so the whole connector prints without a single support.             *
    * ==================================================================== */
   /* ==================================================================== *
    *  PRINT FIT                                                           *
@@ -1391,9 +1117,10 @@
    * with an empty window between them for the dome.  A connector that fills
    * that window solid for any part of its height — even one meant to step
    * in to the true shape only at the very tip — walls off the dome's own
-   * clearance where the dome has to sit.  So the pair
-   * face is built as two independent loops, one per ring, each confined
-   * to its own ring's y band; the window between them is never filled.
+   * clearance for the rest of its climb back into the key.  So the bridge
+   * is built as two independent connectors, one per ring, each confined to
+   * its own ring's y band the whole way up; the window stays open at every
+   * height, not just at the tip.
    */
   function footIslands(cx) {
     return footOutline(cx).map(ring => {
@@ -1403,146 +1130,15 @@
     });
   }
 
-  const PAIR = {
+  const BRIDGE = {
     travel: 2.0,     // AKM320 rubber-dome travel
     margin: 0.5,     // air on top of the travel
-    stem:   1.0,     // width of the "-| |-" stem, drafted
-    split:  0.99387  // the gap between the two halves of a split pair
+    tip:    1.0,     // height of the drafted "-| |-" contact tip
+    bite:   1.0,     // how far the anchor reaches into the key's flank
+    slope:  1.0,     // mm of x per mm of z on the ramp — 1.0 is 45 degrees
+    inset:  0.25,    // shaved off each side in x, so neighbours never touch
+    crown:  0.5      // never bring a ramp closer than this to the key's top
   };
-
-  /* ------------------------------------------------------------------ *
-   *  THE RAISED FOOT PAIR IS DRAFTED, NOT DERIVED                       *
-   *                                                                     *
-   *  Read verbatim out of the "Raised Feet (Pair)" collection: the face *
-   *  popped off each key's own underside deck.  Every one of the 32 is  *
-   *  the same "-| |-" — a CROSSBAR spanning the full width of that      *
-   *  key's deck, a 1 mm central STEM reaching out of each bar, and the  *
-   *  2 mm dome window between them — and every one of them uses one of  *
-   *  exactly TWO y profiles.  So the profile is stored, like            *
-   *  FOOT_SHAPE, rather than fitted.                                    *
-   *                                                                     *
-   *  Each profile is six design-y values, back to front:                *
-   *    y0  back stem tip                                                *
-   *    y1  back bar, back edge      y2  back bar, front edge            *
-   *    y3  front bar, back edge     y4  front bar, front edge           *
-   *    y5  front stem tip                                               *
-   *                                                                     *
-   *    full   the standard 14.0 mm shape: 5 mm stem, 1 mm bar, 2 mm     *
-   *           window, 1 mm bar, 5 mm stem.  Used by every white key,    *
-   *           by both full-width accidentals and by the Second half of  *
-   *           a split pair — anything whose deck reaches y 35.3776.     *
-   *    split  the Second half of a split pair: the same 14.0 mm reach,  *
-   *           but drawn with slightly heavier bars and a 1.902 mm       *
-   *           window rather than 1/2/1.                                 *
-   *    short  the 10.25 mm shape the First half of a split pair gets:   *
-   *           its key ends at y 27.8189, so the front stem is 1.25 mm.  *
-   * ------------------------------------------------------------------ */
-  const PAIR_SHAPE = {
-    full:  [21.3777, 26.3777, 27.3777, 29.3776, 30.3776, 35.3776],
-    split: [21.3777, 26.3777, 27.4659, 29.3682, 30.4147, 35.3776],
-    short: [17.5688, 22.5669, 23.5688, 25.5687, 26.5687, 27.8189]
-  };
-
-  /**
-   * `snap` picks which of the two rules this axis obeys.
-   *
-   *   false (x)  SHRINK ONLY.  The ring keeps its drafted width and makes
-   *              the LEAST move that lands it on the deck; it is pulled in
-   *              only when the deck cannot hold it.  In x the outermost
-   *              coordinates are the crossbar ends, and the bar is drafted
-   *              at the pad's true width, so widening it would mean the
-   *              pair face no longer describes the pad.
-   *   true  (y)  SNAP TO THE DECK.  The outermost coordinate at each end
-   *              goes to the deck's own edge, out as well as in.  In y the
-   *              outermost coordinates are the stem tips, and a stem is
-   *              exactly the part that is meant to reach — so the pair
-   *              face spans the key's belly instead of perching in the
-   *              middle of it, and a stem that has nowhere to go is
-   *              shortened rather than the whole shape being re-centred.
-   *
-   * Either way every INTERIOR coordinate merely rides along on the same
-   * translation: the 1 mm stem keeps its 1 mm in x, and the bar thickness
-   * and the 2 mm dome window keep theirs in y.
-   */
-  function seatAxis(ring, k, lo, hi, snap) {
-    let r0 = Infinity, r1 = -Infinity;
-    for (const p of ring) { if (p[k] < r0) r0 = p[k]; if (p[k] > r1) r1 = p[k]; }
-    let a0 = lo, a1 = hi;
-    if (!snap) {                                    // x insets, y does not
-      a0 = lo + PAIR.bite; a1 = hi - PAIR.bite;
-    }
-    if (a1 - a0 < PAIR.minSeat) {                   // deck too narrow to inset
-      const c = (lo + hi) / 2, h = Math.max(PAIR.minSeat, hi - lo) / 2;
-      a0 = c - h; a1 = c + h;
-    }
-    if (snap) {
-      /* A STEM REACHES PAIR.stem, AND NEVER FURTHER.  The window the tips
-       * snap to is capped at the extended ring's own span, so a deep belly
-       * cannot drag the stems out across the whole key — it just leaves
-       * them at full length.  Where the belly is shallower than that, the
-       * cap does nothing and one tip is shortened to the deck edge, which
-       * is the whole point of snapping in y. */
-      if (a1 - a0 > r1 - r0) {
-        const w = r1 - r0;
-        a0 = Math.min(Math.max(r0, a0), a1 - w); a1 = a0 + w;
-      }
-      const d = (a0 + a1) / 2 - (r0 + r1) / 2;
-      return v => Math.abs(v - r0) < SEAT_EPS ? a0
-                : Math.abs(v - r1) < SEAT_EPS ? a1
-                : v + d;
-    }
-    const span = Math.min(r1 - r0, a1 - a0);        // shrink only, never grow
-    /* the LEAST move that lands it, not a re-centring: a belly can run the
-     * whole depth of the key, and centring in it would drag the seat off
-     * the sensor entirely.  Where the ring already fits, it does not move
-     * at all. */
-    const t0 = Math.min(Math.max(r0, a0), a1 - span), t1 = t0 + span;
-    const d = (t0 + t1) / 2 - (r0 + r1) / 2;
-    return v => Math.abs(v - r0) < SEAT_EPS ? t0
-              : Math.abs(v - r1) < SEAT_EPS ? t1
-              : v + d;
-  }
-
-  /**
-   * THE STEMS REACH FIRST, THE SEAT FITS SECOND.
-   *
-   * The drafted "-| |-" is 9 mm deep, which is the sensor pad's depth, not
-   * the key's.  Before it is seated, both stem tips are pushed PAIR.stem
-   * further out in y, so the pair face has something to lose when the deck
-   * is short.  seatTransform then does the fitting, and because it is a
-   * least-move shrink it takes that length back off ONE end — the end that
-   * actually runs off the deck — instead of re-centring the whole shape.
-   * That is why a key like the split black keeps a full-length stem on one
-   * side and a clipped one on the other.
-   *
-   * x is never extended: in x the outermost coordinates are the crossbar
-   * ends, and the bar is drafted at the pad's true width.
-   */
-  function stemExtend(rings) {
-    let y0 = Infinity, y1 = -Infinity;
-    for (const r of rings) for (const p of r) {
-      if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
-    }
-    return ring => ring.map(p => [p[0],
-      Math.abs(p[1] - y0) < SEAT_EPS ? y0 - PAIR.stem :
-      Math.abs(p[1] - y1) < SEAT_EPS ? y1 + PAIR.stem : p[1]]);
-  }
-
-  /**
-   * The seat transform for one whole "-| |-".  It is built from BOTH bars
-   * at once and then applied to each of them, so the 2 mm dome window and
-   * the offset between the bars survive the move: seat each bar on its own
-   * and they would both centre on the same land and close the window.
-   */
-  function seatTransform(rings, land) {
-    const all = [].concat.apply([], rings);
-    const fx = seatAxis(all, 0, land.x0, land.x1, false);
-    const fy = seatAxis(all, 1, land.y0, land.y1, true);
-    return ring => ring.map(p => [fx(p[0]), fy(p[1])]);
-  }
-
-  /** the drafted ring, moved onto `land` — see seatAxis */
-  function seatRing(ring, land) { return seatTransform([ring], land)(ring); }
 
   /** the x span a key presents at the spine face — where its band must boss */
   function keyBackSpan(cx, w, type, lb, rb) {
@@ -1589,17 +1185,16 @@
    */
   function keyPadSection(cx, w, type, lb, rb, padY0, padY1) {
     let x0 = Infinity, x1 = -Infinity, ky0 = Infinity, ky1 = -Infinity;
-    let zTop = -Infinity, zDeck = -Infinity, deck = null;
+    let zTop = -Infinity, zDeck = -Infinity;
     for (const P of keyPolygons(cx, w, type, lb, rb)) {
       const Q = clipToBand(P, padY0, padY1);
       if (!Q) continue;
-      let lz = Infinity, hz = -Infinity, qx0 = Infinity, qx1 = -Infinity;
+      let lz = Infinity, hz = -Infinity;
       for (const p of Q) {
         if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0];
         if (p[1] < ky0) ky0 = p[1]; if (p[1] > ky1) ky1 = p[1];
         if (p[2] > zTop) zTop = p[2];
         if (p[2] < lz) lz = p[2]; if (p[2] > hz) hz = p[2];
-        if (p[0] < qx0) qx0 = p[0]; if (p[0] > qx1) qx1 = p[0];
       }
       if (hz - lz > 1e-4) continue;
       let nz = 0;
@@ -1607,34 +1202,10 @@
         const a = Q[i], b = Q[(i + 1) % Q.length];
         nz += (a[0] - b[0]) * (a[1] + b[1]);
       }
-      if (nz >= 0) continue;                        // down-facing only
-      if (lz > zDeck) zDeck = lz;                   // the deepest pocket
+      if (nz < 0 && lz > zDeck) zDeck = lz;
     }
     if (!isFinite(zTop)) return null;
-    /* THE LAND.  What a pair face actually lies in: the key's own
-     * belly — the LOWEST down-facing region, merged out of the drafted
-     * fragments (keyDecks), and of that region the biggest loop reaching
-     * across this band.  A connector climbing from the sensor meets that
-     * one first, and it is the only surface wide enough to seat the
-     * drafted "-| |-" on. */
-    for (const g of keyDecks(cx, w, type, lb, rb)) {
-      let best = null;
-      for (const R of g.loops) {
-        const a = polyArea2(R);
-        if (a >= 0) continue;                       // a hole in the belly
-        let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
-        for (const p of R) {
-          if (p[0] < bx0) bx0 = p[0]; if (p[0] > bx1) bx1 = p[0];
-          if (p[1] < by0) by0 = p[1]; if (p[1] > by1) by1 = p[1];
-        }
-        if (by1 < padY0 - 1e-6 || by0 > padY1 + 1e-6) continue;
-        if (!best || -a > best.area)
-          best = { x0: bx0, x1: bx1, y0: by0, y1: by1, z: g.z,
-                   area: -a, loop: R };
-      }
-      if (best) { deck = best; break; }
-    }
-    return { x0, x1, y0: ky0, y1: ky1, padY0, padY1, deck,
+    return { x0, x1, y0: ky0, y1: ky1, padY0, padY1,
              zTop, zDeck: isFinite(zDeck) ? zDeck : zTop };
   }
 
@@ -1669,320 +1240,304 @@
   }
 
   /**
-   * THE LAND: the x span of the key's own underside deck.
+   * The connector for one "-| |-" island, as a stack of horizontal
+   * sections.  Returns { anchor:[x0,x1], zAnchor, zPlinth, pad:[x0,x1],
+   * ok, headroom } where ok is false if the key is not tall enough to hold
+   * a 45 degree ramp — which does not happen in any drafted layout, but is
+   * measured rather than assumed.  `K` is the key's section over the WHOLE
+   * pad depth (for zTop/zDeck, which describe the key, not one island);
+   * `isl` is the one island's own — much narrower — y band.
    *
-   * That is all the pair face takes from the key — the popped faces in
-   * "Raised Feet (Pair)" are each exactly as wide as the deck they came
-   * off, and their y comes from PAIR_SHAPE rather than from the key.
-   *
-   * The one thing the drafted belly cannot tell us is where a SPLIT PAIR
-   * divides.  Both halves share one slot, and the deeper half's belly loop
-   * is drawn across the whole of it, so the two would come out on top of
-   * one another.  `sib` is the other half's land when there is one: this
-   * half then takes the rest of the slot, less PAIR.split of air.
+   * `allKeys`/`selfKey`, when given, bound the ramp a second way: not just
+   * by this key's own ceiling, but by the LOWEST down-facing surface any
+   * OTHER key presents anywhere the ramp actually passes under — with the
+   * full travel+margin (BRIDGE.travel + BRIDGE.margin) reserved below it,
+   * the same headroom a foreign key's own dome needs.  A large key-to-foot
+   * offset (a split pair reaching two feet 11.3 mm apart, or worse) is
+   * expected, not an error — but closing that gap by climbing THROUGH a
+   * neighbour's body is.  Capping the climb at the tightest neighbour
+   * along the way, rather than only at this key's own height, is what
+   * keeps the two from ever actually meeting: the ramp simply steepens
+   * past 45 degrees (reported by `ok`/`headroom`, and needs support to
+   * print) rather than intersect.
    */
-  function pairLand(cx, w, type, lb, rb, sib) {
+  function planIsland(cx, w, type, lb, rb, footX, K, isl, allKeys, selfKey) {
+    const i = BRIDGE.inset;
+    const pad = [footX - FOOT.w / 2 + i, footX + FOOT.w / 2 - i];
+    /* the key's material within JUST this island's band — falling back to
+     * the whole-pad section on the rare key too short to reach this one
+     * island's narrower slice at all */
+    const Ki = keyPadSection(cx, w, type, lb, rb, isl.y0, isl.y1) || K;
+    /* where the bridge grips the key */
+    const lo = Math.max(pad[0], Ki.x0), hi = Math.min(pad[1], Ki.x1);
+    let anchor, beside;
+    if (hi - lo > BRIDGE.bite) { anchor = [lo, hi]; beside = false; }
+    else if (footX > (Ki.x0 + Ki.x1) / 2)
+      { anchor = [Ki.x1 - BRIDGE.bite, Ki.x1]; beside = true; }
+    else
+      { anchor = [Ki.x0, Ki.x0 + BRIDGE.bite]; beside = true; }
+    /* the ramp has to open from `anchor` out to `pad`, at BRIDGE.slope */
+    /* the same in y: the connector is as deep as this island's own band
+     * down at the sensor and no deeper than the key's own footprint up at
+     * the anchor, so the two halves of a split pair — which share an x
+     * span but sit at different y — never reach into one another, and the
+     * OTHER island of this same key — a fixed 2 mm away in y — never does
+     * either. */
+    const padY = [isl.y0, isl.y1];
+    const ay0 = Math.max(padY[0], Ki.y0), ay1 = Math.min(padY[1], Ki.y1);
+    const anchorY = (ay1 - ay0 > BRIDGE.bite) ? [ay0, ay1] : padY.slice();
+    const grow = Math.max(anchor[0] - pad[0], pad[1] - anchor[1],
+                          anchorY[0] - padY[0], padY[1] - anchorY[1], 0);
+    const zPlinth = FOOT.z + BRIDGE.tip;
+    /* 45 degrees if the key is tall enough to hold it; if it is not, the
+     * ramp takes the steepest slope that does fit rather than running off
+     * the top of the key, and the audit reports the angle it had to use. */
+    let ceiling = K.zTop - BRIDGE.crown;
+    if (allKeys) {
+      const x0 = Math.min(anchor[0], pad[0]), x1 = Math.max(anchor[1], pad[1]);
+      const y0 = Math.min(anchorY[0], padY[0]), y1 = Math.max(anchorY[1], padY[1]);
+      const fc = foreignCeiling(allKeys, selfKey, x0, x1, y0, y1);
+      if (isFinite(fc)) ceiling = Math.min(ceiling, fc - BRIDGE.travel - BRIDGE.margin);
+    }
+    const room = Math.max(1e-6, ceiling - zPlinth);
+    const slopeUsed = Math.max(BRIDGE.slope, grow / room);
+    const zAnchor = zPlinth + grow / slopeUsed;
+    /* Carry the anchor section up INTO the key, not merely up to it.  A
+     * connector that stops exactly on the key's underside meets it on a
+     * coplanar face, and a union leaves the two as separate shells — which
+     * is precisely how three keys' connectors came off as loose parts.  It
+     * pushes FIT.engage past the deck so the two share solid — but never
+     * past the ceiling (own key or foreign), which zAnchor already met.  */
+    const zMerge = Math.max(zAnchor, Math.min(K.zDeck + FIT.engage, ceiling));
+    return {
+      pad, anchor, padY, anchorY, beside, grow, zPlinth, zAnchor, zMerge, slopeUsed,
+      ring: isl.ring,
+      ok: slopeUsed <= BRIDGE.slope + 1e-9,
+      headroom: ceiling - zAnchor
+    };
+  }
+
+  /**
+   * The lowest down-facing surface ANY key other than `selfKey` presents,
+   * anywhere in the x/y box a ramp is about to sweep through.  A single
+   * scalar, not a per-x profile: the ramp is one straight-line loft, so it
+   * can only ever be as tall, everywhere, as the tightest point it crosses.
+   */
+  function foreignCeiling(allKeys, selfKey, x0, x1, y0, y1) {
+    const STEP = 0.5;
+    const n = Math.max(2, Math.ceil((x1 - x0) / STEP) + 1);
+    let ceil = Infinity;
+    for (const fk of allKeys) {
+      if (fk === selfKey) continue;
+      const prof = keyUnderProfile(fk.cx, fk.w, fk.type, fk.lb, fk.rb, y0, y1, x0, STEP, n);
+      for (const v of prof) if (isFinite(v) && v < ceil) ceil = v;
+    }
+    return ceil;
+  }
+
+  /**
+   * The connector for one key: TWO independent islands, one per bar of the
+   * "-| |-", each planned by planIsland().  Returns
+   *   { islands:[islandA, islandB], ok, headroom, slopeUsed, zTop, zDeck }
+   * `allKeys`/`selfKey` are optional — see planIsland() — and, when given,
+   * are what keeps a large key-to-foot offset from climbing through a
+   * neighbour instead of merely being tall.
+   */
+  function bridgePlan(cx, w, type, lb, rb, footX, allKeys, selfKey) {
     const K = keyPadSection(cx, w, type, lb, rb,
                             FOOT.yCentre - FOOT.d / 2, FOOT.yCentre + FOOT.d / 2);
     if (K == null) return null;
-    const deck = K.deck
-      ? { x0: K.deck.x0, x1: K.deck.x1, y1: K.deck.y1, z: K.deck.z, seated: true }
-      : { x0: K.x0, x1: K.x1, y1: K.y1, z: K.zDeck, seated: false };
-    if (sib && sib.x1 - sib.x0 < (deck.x1 - deck.x0) * 0.75) {
-      /* the sibling holds one end of the slot; take the other */
-      if (sib.x0 - deck.x0 > deck.x1 - sib.x1) deck.x1 = sib.x0 - PAIR.split;
-      else                                     deck.x0 = sib.x1 + PAIR.split;
-      deck.trimmed = true;      // this is the Second half — see PAIR_SHAPE
-    }
-    return deck;
-  }
-
-  /**
-   * THE PAIR RING IS THE PAD RING, VERTEX FOR VERTEX.
-   *
-   * Rather than draw the popped shape independently, map the drafted pad
-   * ring onto the pair's coordinates by ROLE: each x is one of the four
-   * the "-| |-" uses (bar end, stem edge, stem edge, bar end) and each y
-   * is one of three (the bar's inner edge, its outer edge, the stem tip).
-   * The result is the same 8 points in the same order and the same winding
-   * as the pad ring it belongs to, which is what lets the two loft into a
-   * closed solid with nothing to match up: vertex i bridges to vertex i.
-   */
-  function mapRingToPair(ring, lx0, lx1, sc, s1, inner, outer, tip) {
-    /* CLUSTER, do not round.  The drafted pad carries a few ten-thousandths
-     * of noise — 5.700024 against 5.700027 on one stem edge — and a fixed
-     * rounding can split one role in two.  Group within a tenth of a
-     * millimetre instead: far below the smallest real feature here (the
-     * 1 mm stem) and far above the noise. */
-    const TOL = 0.1;
-    const cluster = vals => {
-      const out = [];
-      for (const v of vals.slice().sort((p, q) => p - q))
-        if (!out.length || v - out[out.length - 1] > TOL) out.push(v);
-      return out;
+    const islands = footIslands(footX)
+      .map(isl => planIsland(cx, w, type, lb, rb, footX, K, isl, allKeys, selfKey));
+    return {
+      islands,
+      beside: islands.every(p => p.beside),
+      zTop: K.zTop, zDeck: K.zDeck, keyX: [K.x0, K.x1],
+      ok: islands.every(p => p.ok),
+      headroom: Math.min(...islands.map(p => p.headroom)),
+      slopeUsed: Math.max(...islands.map(p => p.slopeUsed))
     };
-    const nearest = (v, cs) => {
-      let bi = 0, bd = Infinity;
-      for (let i = 0; i < cs.length; i++) {
-        const d = Math.abs(v - cs[i]);
-        if (d < bd) { bd = d; bi = i; }
-      }
-      return bi;
-    };
-    const xs = cluster(ring.map(p => p[0]));
-    const ys = cluster(ring.map(p => p[1]));
-    const X = [lx0, sc, s1, lx1];
-    /* which drafted y is which: the bar edge nearer the pad's centre is
-     * the inner one, the far extreme is the stem tip, and what is left is
-     * the outer edge the stem leaves from. */
-    const byNear = ys.slice().sort((p, q) =>
-      Math.abs(p - FOOT.yCentre) - Math.abs(q - FOOT.yCentre));
-    const Y = new Map();
-    Y.set(byNear[0], inner); Y.set(byNear[1], outer); Y.set(byNear[2], tip);
-    return ring.map(p => [X[nearest(p[0], xs)], Y.get(ys[nearest(p[1], ys)])]);
   }
 
-  /**
-   * The pairing faces for one key: the popped "-| |-", rebuilt.
-   *
-   * Two flat loops, one per bar, in the plane of the key's own underside
-   * deck.  The crossbar spans the land; the stem is PAIR.stem wide and
-   * centred on it; the y values are the drafted profile, so the bar
-   * thickness, the 2 mm dome window and the stem reach are the ones the
-   * sheet draws rather than anything fitted here.
-   *
-   * A key whose deck stops short of the full profile's front stem gets the
-   * short profile; the Second half of a split pair gets its own.  Each
-   * ring comes back in its pad ring's order — see mapRingToPair.
-   */
-  function pairFaces(cx, w, type, lb, rb, footX, sib) {
-    const land = pairLand(cx, w, type, lb, rb, sib);
-    if (land == null) return null;
-    const P = land.y1 < PAIR_SHAPE.full[5] - 1e-3 ? PAIR_SHAPE.short
-            : land.trimmed                        ? PAIR_SHAPE.split
-                                                  : PAIR_SHAPE.full;
-    const x0 = land.x0, x1 = land.x1;
-    const sc = (x0 + x1) / 2 - PAIR.stem / 2, s1 = sc + PAIR.stem;
-    const pad = footOutline(footX);
-    /* pad ring 0 reaches toward the player, ring 1 toward the spine — the
-     * front half of the drafted profile and the back half respectively */
-    return [
-      { z: land.z, seated: land.seated,
-        ring: mapRingToPair(pad[0], x0, x1, sc, s1, P[3], P[4], P[5]) },
-      { z: land.z, seated: land.seated,
-        ring: mapRingToPair(pad[1], x0, x1, sc, s1, P[2], P[1], P[0]) }
-    ];
-  }
-
-  /* ==================================================================== *
-   *  THE SENSOR PRESS  —  the loop pair, closed into a solid              *
-   *                                                                      *
-   *  One prism per bar of the "-| |-": the drafted pad ring at the        *
-   *  bottom, its pair ring in the key's deck plane at the top, ONE quad   *
-   *  band between them vertex i to vertex i, and BOTH ends capped.  Each  *
-   *  bar is therefore a closed watertight solid — every directed edge     *
-   *  used exactly once — and the face that presses the sensor is the      *
-   *  drafted pad ring itself rather than an approximation of it.          *
-   *                                                                      *
-   *  TWO PRISMS, NOT ONE.  The window between the bars is where the       *
-   *  rubber dome sits.  Lofting the pair as one ring would close it;      *
-   *  lofting each bar on its own leaves it open at every height, which is *
-   *  why the pad is drafted as two n-gons rather than one to begin with.  *
-   *                                                                      *
-   *  Nothing is stepped and nothing is squared off.  The 1 mm stem and    *
-   *  the 2 mm window survive the whole climb, because both loops are the  *
-   *  drafted shape rather than a bounding box of it.                      *
-   * ==================================================================== */
-
-  /**
-   * A closed prism between two equal-length rings, `bot` at z0 and `top`
-   * at z1.  Both are normalised to CCW together, so vertex i still bridges
-   * to vertex i; the caps are then wound to CLOSE the walls rather than by
-   * convention, which is what makes the result watertight instead of a
-   * shell with two lids facing the wrong way.
-   */
-  function pushPrism(t, bot, top, z0, z1) {
-    let B = bot, T = top;
-    if (polyArea2(B) < 0) { B = B.slice().reverse(); T = T.slice().reverse(); }
-    const m = B.length;
-    for (let k = 0; k < m; k++) {
-      const j = (k + 1) % m;
-      pushQuad(t, [B[k][0], B[k][1], z0], [B[j][0], B[j][1], z0],
-                  [T[j][0], T[j][1], z1], [T[k][0], T[k][1], z1]);
-    }
-    const V = B.map(p => [p[0], p[1], 0]);
-    const idx = B.map((_, k) => k);
+  /** extrude a closed plan outline between two z levels, capped both ends */
+  function extrudeOutline(t, ring, z0, z1) {
+    const V = ring.map(p => [p[0], p[1], 0]);
+    const idx = ring.map((_, k) => k);
     for (const tri of triangulateFace(V, idx)) {
-      const i = tri[0], j = tri[1], k = tri[2];
-      pushTri(t, [B[i][0], B[i][1], z0], [B[k][0], B[k][1], z0],
-                 [B[j][0], B[j][1], z0]);                       // down-facing
-      pushTri(t, [T[i][0], T[i][1], z1], [T[j][0], T[j][1], z1],
-                 [T[k][0], T[k][1], z1]);                       // up-facing
+      const a = ring[tri[0]], b = ring[tri[1]], c = ring[tri[2]];
+      pushTri(t, [a[0], a[1], z1], [b[0], b[1], z1], [c[0], c[1], z1]);
+      pushTri(t, [c[0], c[1], z0], [b[0], b[1], z0], [a[0], a[1], z0]);
+    }
+    for (let k = 0; k < ring.length; k++) {
+      const a = ring[k], b = ring[(k + 1) % ring.length];
+      pushQuad(t, [a[0], a[1], z0], [b[0], b[1], z0],
+                  [b[0], b[1], z1], [a[0], a[1], z1]);
     }
   }
 
-  /**
-   * One key's sensor press: two closed prisms, one per bar of the
-   * "-| |-", from the drafted pad up to the key's own deck plane.
-   */
-  function buildPress(cx, w, type, lb, rb, footX, sib) {
-    const faces = pairFaces(cx, w, type, lb, rb, footX, sib);
-    if (faces == null) return [];
-    const pad = footOutline(footX);
-    const t = [];
-    for (let i = 0; i < faces.length; i++)
-      pushPrism(t, pad[i], faces[i].ring, FOOT.z, faces[i].z);
-    return t;
+  /** loft a stack of equal-length edge loops into one closed solid */
+  function loftRings(t, rings) {
+    const m = rings[0].length;
+    for (let s = 0; s + 1 < rings.length; s++) {
+      const A = rings[s], B = rings[s + 1];
+      for (let k = 0; k < m; k++) {
+        const j = (k + 1) % m;
+        pushQuad(t, A[k], B[k], B[j], A[j]);
+      }
+    }
+    const top = rings[0], bot = rings[rings.length - 1];
+    for (let k = 1; k + 1 < m; k++) {
+      pushTri(t, top[0], top[k + 1], top[k]);
+      pushTri(t, bot[0], bot[k], bot[k + 1]);
+    }
   }
 
-  /** one press part per key, named and coloured to match its key */
-  function pressParts(keys) {
+  /** the ring stack of one island's ramp + plinth, top (in the key) to bottom */
+  function islandRings(isl) {
+    const ring = (x, y, z) => [[x[0], y[0], z], [x[1], y[0], z],
+                               [x[1], y[1], z], [x[0], y[1], z]];
     const out = [];
-    for (const k of (keys || [])) {
-      const tris = buildPress(k.cx, k.w, k.type, k.lb, k.rb, k.foot, k.sib);
-      if (!tris.length) continue;
-      out.push({ name: 'Press_' + String(k.index).padStart(2, '0'),
-                 index: k.index, layer: k.layer, foot: k.foot, tris });
-    }
+    if (isl.zMerge > isl.zAnchor + 1e-6)
+      out.push(ring(isl.anchor, isl.anchorY, isl.zMerge));
+    out.push(ring(isl.anchor, isl.anchorY, isl.zAnchor));
+    out.push(ring(isl.pad, isl.padY, isl.zPlinth));
     return out;
   }
 
+  /** the two ring stacks (one per "-| |-" bar) that make up a key's bridge */
+  function bridgeRings(plan) { return plan.islands.map(islandRings); }
+
   /**
-   * Is a triangle soup closed?  Every DIRECTED edge has to appear exactly
-   * once and its opposite exactly once.  A bare undirected count would
-   * pass a cap wound the wrong way; this does not.
+   * One key's bridge, as a triangle soup: TWO independent connectors, one
+   * per bar of the "-| |-", each a loft through its own ramp/plinth plus
+   * its own drafted tip.  The window between the bars — where the sensor's
+   * dome sits — is never filled, at any height.
    */
-  function isWatertight(tris) {
-    const k4 = v => Math.round(v * 1e4);
-    const key = (t, i, j) => k4(t[i]) + ',' + k4(t[i+1]) + ',' + k4(t[i+2]) +
-                       '|' + k4(t[j]) + ',' + k4(t[j+1]) + ',' + k4(t[j+2]);
-    const dir = new Map();
-    for (let i = 0; i < tris.length; i += 9)
-      for (let k = 0; k < 3; k++) {
-        const e = key(tris, i + k * 3, i + ((k + 1) % 3) * 3);
-        dir.set(e, (dir.get(e) || 0) + 1);
-      }
-    let bad = 0;
-    for (const e of dir.keys()) {
-      const p = e.split('|');
-      if (dir.get(e) !== 1 || (dir.get(p[1] + '|' + p[0]) || 0) !== 1) bad++;
+  function buildBridge(cx, w, type, lb, rb, footX, allKeys, selfKey) {
+    const plan = bridgePlan(cx, w, type, lb, rb, footX, allKeys, selfKey);
+    if (plan == null) return [];
+    const t = [];
+    for (const isl of plan.islands) {
+      loftRings(t, islandRings(isl));
+      /* rest ON the pad, not inside it: the drafted foot is a plane and
+       * FOOT.t only gives it a body, so the tip stops at its top face */
+      extrudeOutline(t, isl.ring, FOOT.z + FOOT.t / 2, isl.zPlinth + BRIDGE.tip);
     }
-    return { closed: bad === 0, badEdges: bad, edges: dir.size };
-  }
-
-  /** signed volume of a closed soup — positive when the normals face out */
-  function meshVolume(tris) {
-    let v = 0;
-    for (let i = 0; i < tris.length; i += 9)
-      v += (tris[i]   * (tris[i+4] * tris[i+8] - tris[i+7] * tris[i+5])
-          - tris[i+1] * (tris[i+3] * tris[i+8] - tris[i+6] * tris[i+5])
-          + tris[i+2] * (tris[i+3] * tris[i+7] - tris[i+6] * tris[i+4])) / 6;
-    return v;
-  }
-
-  /** the pair face's plan, for the audit */
-  function pairPlan(cx, w, type, lb, rb, footX, sib) {
-    const faces = pairFaces(cx, w, type, lb, rb, footX, sib);
-    if (faces == null) return null;
-    const ext = (R, k) => {
-      let a = Infinity, b = -Infinity;
-      for (const q of R) { if (q[k] < a) a = q[k]; if (q[k] > b) b = q[k]; }
-      return [a, b];
-    };
-    const islands = faces.map(f => ({
-      top: f.ring, zPad: FOOT.z, zDeck: f.z, rise: f.z - FOOT.z,
-      topX: ext(f.ring, 0), topY: ext(f.ring, 1), seated: f.seated,
-      ok: f.z - FOOT.z >= PAIR.travel + PAIR.margin - 1e-9
-    }));
-    return {
-      islands, zDeck: faces[0].z,
-      seated: islands.every(p => p.seated),
-      ok: islands.every(p => p.ok)
-    };
+    return t;
   }
 
   /**
-   * What the pairing actually achieves, measured rather than assumed.
-   * With nothing built between the loops there is no ramp and no slope to
-   * audit; what is left is the relationship itself:
-   *
-   *   seated        every pair face found a real down-facing deck on its
-   *                 key to lie in, rather than falling back to a bounding
-   *                 box of the key's section
-   *   minRise       the least air between a pad face and its own pair
-   *                 face — the dome has to travel through it, so it must
-   *                 beat PAIR.travel + PAIR.margin
-   *   minGap        narrowest air in x between two different keys' pair
-   *                 faces, compared bar-to-bar (same island index), since
-   *                 islands of a different index sit at disjoint y bands
+   * What the connectors actually achieve, measured rather than assumed.
+   *   supportFree   every island's ramp fits inside its own height at 45 deg
+   *   minGap        narrowest air between two different keys' connectors —
+   *                 compared bar-to-bar (same island index), since the two
+   *                 islands of a DIFFERENT index sit at disjoint y bands
+   *                 and can never reach one another regardless of x
+   *   underForeign  least vertical air where a connector passes beneath a
+   *                 key that is not its own  (must beat travel + margin)
    *   overForeign   least air above a sensor pad that is not its own
-   *   watertight    every press came out a closed solid, right way out
-   *   pressVolume   how much filament the 32 presses add, in mm3
+   *                 (must beat travel)
+   * Each key contributes one column per island (2 per key), so a key's own
+   * two islands are never compared against one another — they are fixed
+   * 2 mm apart in y by the drafted foot shape and cannot intersect.
    */
-  function pairAudit(keys) {
-    /* the press is the deliverable now, so audit the solid, not just the
-     * loops: every one has to come out closed and right way out, or it is
-     * not a part a slicer can do anything with. */
-    let leaky = null, inverted = null, volume = 0;
-    for (const k of keys) {
-      const tris = buildPress(k.cx, k.w, k.type, k.lb, k.rb, k.foot, k.sib);
-      if (!tris.length) continue;
-      if (leaky == null && !isWatertight(tris).closed) leaky = k.index;
-      const v = meshVolume(tris);
-      if (inverted == null && v <= 0) inverted = k.index;
-      volume += v;
-    }
+  function bridgeAudit(keys) {
+    const STEP = 0.1;
     const plans = keys.map(k => ({
-      k, p: pairPlan(k.cx, k.w, k.type, k.lb, k.rb, k.foot, k.sib)
+      k, p: bridgePlan(k.cx, k.w, k.type, k.lb, k.rb, k.foot, keys, k)
     })).filter(o => o.p);
 
-    let minRise = Infinity, riseAt = null;
-    let minGap = Infinity, gapAt = null;
-    let overForeign = Infinity;
-
+    /* the section one island occupies at height z */
+    const span = (p, z) => {
+      if (z >= p.zAnchor) return p.anchor;
+      const f = (p.zAnchor - z) / Math.max(1e-9, p.zAnchor - p.zPlinth);
+      return [p.anchor[0] + (p.pad[0] - p.anchor[0]) * f,
+              p.anchor[1] + (p.pad[1] - p.anchor[1]) * f];
+    };
+    /* sample every island into a per-x [zmin, zmax] column profile */
+    const cols = [];
     for (const { k, p } of plans)
-      for (const isl of p.islands)
-        if (isl.rise < minRise) { minRise = isl.rise; riseAt = k.index; }
+      p.islands.forEach((isl, island) => {
+        const lo = Math.min(isl.pad[0], isl.anchor[0]), hi = Math.max(isl.pad[1], isl.anchor[1]);
+        const n = Math.max(2, Math.ceil((hi - lo) / STEP) + 1);
+        const zmin = new Array(n).fill(Infinity), zmax = new Array(n).fill(-Infinity);
+        for (let s = 0; s <= 200; s++) {
+          const z = isl.zPlinth + (isl.zMerge - isl.zPlinth) * s / 200;
+          const sp = span(isl, z);
+          const i0 = Math.max(0, Math.ceil((sp[0] - lo) / STEP));
+          const i1 = Math.min(n - 1, Math.floor((sp[1] - lo) / STEP));
+          for (let i = i0; i <= i1; i++) {
+            if (z < zmin[i]) zmin[i] = z;
+            if (z > zmax[i]) zmax[i] = z;
+          }
+        }
+        cols.push({ k, island, isl, lo, n, zmin, zmax });
+      });
 
-    /* pair faces of two different keys, bar for bar, in the same plane */
-    for (let i = 0; i < plans.length; i++)
-      for (let j = i + 1; j < plans.length; j++) {
-        const A = plans[i], B = plans[j];
-        for (let n = 0; n < Math.min(A.p.islands.length, B.p.islands.length); n++) {
-          const a = A.p.islands[n], b = B.p.islands[n];
-          if (Math.abs(a.zDeck - b.zDeck) > 1e-4) continue;
-          if (a.topY[1] < b.topY[0] - 1e-9 || b.topY[1] < a.topY[0] - 1e-9) continue;
-          const gap = a.topX[0] > b.topX[1] ? a.topX[0] - b.topX[1]
-                    : b.topX[0] > a.topX[1] ? b.topX[0] - a.topX[1]
-                    : -Math.min(a.topX[1] - b.topX[0], b.topX[1] - a.topX[0]);
-          if (gap < minGap) { minGap = gap; gapAt = [A.k.index, B.k.index]; }
+    let minGap = Infinity, underForeign = Infinity, overForeign = Infinity;
+    let worstRamp = Infinity, rampAt = null, worstSlope = 0, underAt = null;
+    for (const { k, p } of plans)
+      for (const isl of p.islands) {
+        if (isl.headroom < worstRamp) { worstRamp = isl.headroom; rampAt = k.index; }
+        if (isl.slopeUsed > worstSlope) worstSlope = isl.slopeUsed;
+      }
+    /* connector vs connector — only ever between the SAME island index of
+     * two DIFFERENT keys; different indices sit at disjoint y and never
+     * meet, and a key's two islands are never checked against each other */
+    for (let a = 0; a < cols.length; a++)
+      for (let b = a + 1; b < cols.length; b++) {
+        const A = cols[a], B = cols[b];
+        if (A.k === B.k || A.island !== B.island) continue;
+        const lo = Math.max(A.lo, B.lo);
+        const hi = Math.min(A.lo + (A.n - 1) * STEP, B.lo + (B.n - 1) * STEP);
+        if (hi < lo) {
+          minGap = Math.min(minGap, lo - hi);
+          continue;
+        }
+        for (let x = lo; x <= hi; x += STEP) {
+          const ia = Math.round((x - A.lo) / STEP), ib = Math.round((x - B.lo) / STEP);
+          if (!isFinite(A.zmax[ia]) || !isFinite(B.zmax[ib])) continue;
+          const g = A.zmin[ia] > B.zmin[ib]
+            ? A.zmin[ia] - B.zmax[ib]
+            : B.zmin[ib] - A.zmax[ia];
+          if (g < minGap) minGap = g;
         }
       }
-
-    /* a pair face must not hang over a sensor pad that is not its own */
+    /* connector vs foreign keys and foreign pads */
     const feet = footCentres();
-    for (const { k, p } of plans)
-      for (const isl of p.islands)
-        for (const fx of feet) {
-          if (Math.abs(fx - k.foot) < 1e-6) continue;
-          if (isl.topX[1] < fx - FOOT.w / 2 || isl.topX[0] > fx + FOOT.w / 2) continue;
-          const air = isl.zDeck - FOOT.z;
+    for (const A of cols) {
+      for (const { k: Bk } of plans) {
+        if (Bk === A.k) continue;
+        const prof = keyUnderProfile(Bk.cx, Bk.w, Bk.type, Bk.lb, Bk.rb,
+                                     A.isl.padY[0], A.isl.padY[1],
+                                     A.lo, STEP, A.n);
+        for (let i = 0; i < A.n; i++) {
+          if (!isFinite(prof[i]) || !isFinite(A.zmax[i])) continue;
+          const air = prof[i] - A.zmax[i];
+          if (air < underForeign) { underForeign = air; underAt = [A.k.index, Bk.index]; }
+        }
+      }
+      for (const fx of feet) {
+        if (Math.abs(fx - A.k.foot) < 1e-6) continue;
+        for (let i = 0; i < A.n; i++) {
+          const x = A.lo + i * STEP;
+          if (Math.abs(x - fx) > FOOT.w / 2 || !isFinite(A.zmin[i])) continue;
+          const air = A.zmin[i] - FOOT.z;
           if (air < overForeign) overForeign = air;
         }
-
-    const unseated = plans.find(o => !o.p.seated);
+      }
+    }
     return {
       keys: plans.length,
-      watertight: leaky == null && inverted == null,
-      leakyAt: leaky, invertedAt: inverted,
-      pressVolume: volume,
-      seated: plans.every(o => o.p.seated),
-      unseatedAt: unseated ? unseated.k.index : null,
-      minRise: isFinite(minRise) ? minRise : null, riseAt,
-      minGap: isFinite(minGap) ? minGap : null, gapAt,
+      supportFree: plans.every(o => o.p.ok),
+      maxRampSlope: worstSlope,
+      maxRampAngle: Math.atan(worstSlope) * 180 / Math.PI,
+      minRampHeadroom: worstRamp, worstAt: rampAt, underAt,
+      minGap: isFinite(minGap) ? minGap : null,
+      underForeign: isFinite(underForeign) ? underForeign : null,
       overForeign: isFinite(overForeign) ? overForeign : null,
-      clearsTravel: (!isFinite(minRise) || minRise >= PAIR.travel + PAIR.margin)
-                 && (!isFinite(overForeign) || overForeign >= PAIR.travel)
+      clearsTravel: (!isFinite(underForeign) || underForeign >= BRIDGE.travel + BRIDGE.margin)
+                 && (!isFinite(overForeign) || overForeign >= BRIDGE.travel)
     };
   }
 
@@ -1997,19 +1552,12 @@
     whiteWidth, whitePitch, accWidth, slotDelta,
     pushTri, pushQuad, pushBox, rectWithHoles,
     ctxKey, profileFor, profilePoints, buildKey, keyPolygons,
-    triangulateFace, triangulateFaceWithHoles, pointInPoly2, faceHoldsSeat,
-    keyDecks, mergeCoplanar, polyArea2, keyExtent,
+    triangulateFace, keyExtent,
     buildSpine, buildFeet,
-    PAIR, FOOT_SHAPE,
-    /* --- shims, so a page written against the old attaching-element API
-     * keeps loading.  There are no attaching elements any more: the
-     * builders return nothing and BRIDGE/bridgeAudit are PAIR/pairAudit
-     * under their old names.  Prefer the PAIR names in new code. --- */
-    BRIDGE: PAIR, bridgeAudit: pairAudit,
-    bridgeSeats: () => [], buildBridge: () => [], footOutline, footIslands,
-    keyBackSpan, keyPadSection,
-    pairPlan, pairFaces, pairLand, pairAudit, PAIR_SHAPE, pushFlatFace,
-    mapRingToPair, buildPress, pressParts, pushPrism, isWatertight, meshVolume,
+    BRIDGE, FOOT_SHAPE, footOutline, footIslands,
+    keyBackSpan, keyPadSection, keyUnderProfile, foreignCeiling, planIsland, bridgePlan,
+    bridgeRings, islandRings, buildBridge,
+    loftRings, extrudeOutline, bridgeAudit,
     spineKindOf, spineKindForColours, spineLayerCount,
     SPINE_LAYER_COLORS, spineLayerColor, spineLayerMaterial,
     spineHalves, spineParts, spineBands, spineZRange, footParts,
