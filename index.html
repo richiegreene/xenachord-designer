@@ -488,7 +488,7 @@ function rebuild(){
     `${L.layers} layer${L.layers===1?'':'s'} ` +
     `<span title="One slab per key colour, each key's rear tongue plugging into the layer for its own colour. Gray always takes all three: its tongue is the bottom band and black's sits above it, so the two are stacked, not alternatives.">ⓘ</span><br>` +
     `widest key→foot reach <b>${L.footDrift.toFixed(2)} mm</b> (key ${L.footDriftAt}) ` +
-    `<span title="Split pairs share one X and still reach two feet 11.3 mm apart. That gap is closed by the bridge edge loops, which drop from the key's underside rails to its own foot's crossbars and hold a travel + margin corridor clear of every neighbour.">ⓘ</span><br>` +
+    `<span title="Split pairs share one X and still reach two feet 11.3 mm apart. That gap is closed by the sensor press: the drafted pad lofted up to the pair face popped off the key's own underside deck, capped into a watertight solid, with the dome window left open the whole way.">ⓘ</span><br>` +
     Object.keys(c).map(k=>`${c[k]}× ${k}`).join(' · ');
   wn.innerHTML = L.warnings.length
     ? L.warnings.map(w=>`<div class="warning">${w}</div>`).join('')
@@ -510,12 +510,12 @@ const baseName = () => `xenachord-${L.notesEq}edo-s${design.scale}`;
 document.querySelectorAll('button[data-part]').forEach(b=>{
   b.onclick = ()=>{ if(!meshes) return;
     const p=b.dataset.part;
-    download(`${baseName()}-${p}.stl`, XD.toSTL(meshes[p], p)); };
+    download(`${baseName()}-${p}.stl`, XD.toSTL(XD.printMesh(meshes, p), p)); };
 });
 $('dl-zip').onclick = ()=>{
   if(!meshes) return;
   const files = ['white','black','gray','spine','feet'].map(p=>({
-    name:`${baseName()}-${p}.stl`, data: XD.toSTL(meshes[p], p) }));
+    name:`${baseName()}-${p}.stl`, data: XD.toSTL(XD.printMesh(meshes, p), p) }));
   files.push({ name: `${baseName()}-design-log.py`,
                data: new TextEncoder().encode(XD.pythonLog(L, {origin: design.origin})) });
   download(`${baseName()}.zip`, XD.makeZip(files), 'application/zip');
@@ -541,18 +541,27 @@ const canvas = $('gl');
 const gl = canvas.getContext('webgl',{antialias:true}) || canvas.getContext('experimental-webgl');
 /* one table, shared with the Blender log's materials — see XM.COLORS */
 const COLORS = XM.COLORS;
-const PART_LABEL = { white:'white', black:'black', gray:'gray', spine:'spine', feet:'feet' };
+const PART_LABEL = { white:'white', black:'black', gray:'gray', spine:'spine',
+                     press:'sensor press' };
 /* how far each comb lifts when "separate combs" is dragged, in units of the
    slider value.  Order is the assembly order of the spine layers.            */
-const EXPLODE_ORDER = { feet:-0.7, spine:0, gray:1, black:2, white:3 };
-const visible = { white:true, black:true, gray:true, spine:true, feet:true };
+/* how far each comb lifts when "separate combs" is dragged, in units of the
+   slider value.  Order is the assembly order of the spine layers.  There is
+   no "press" step: a press leaves with the comb it prints as part of.      */
+const EXPLODE_ORDER = { spine:0, gray:1, black:2, white:3 };
+const visible = { white:true, black:true, gray:true, spine:true, press:true };
 /* spine bands are drawn one buffer per layer, keyed "spine:<layer>", so each
    band can carry the colour its object has in the drafting sandbox.  They all
    answer to the single "spine" toggle and explode step.                     */
 const isSpineKey = k => k.indexOf('spine:') === 0;
-const partOf = k => isSpineKey(k) ? 'spine' : k;
+/* presses are drawn one buffer per KEY COLOUR, keyed "press:<colour>", so
+   each carries the filament it actually prints in — the same arrangement
+   the spine bands use, and they all answer to the single "press" toggle. */
+const isPressKey = k => k.indexOf('press:') === 0;
+const partOf = k => isSpineKey(k) ? 'spine' : isPressKey(k) ? 'press' : k;
 const colorOf = k => isSpineKey(k)
   ? XM.spineLayerColor(L ? L.spineKind : 'three', k.slice(6))
+  : isPressKey(k) ? (COLORS[k.slice(6)] || [1,0,1])
   : (COLORS[k] || [1,0,1]);
 /* for "separate combs": a spine band whose layer name IS a key colour
    (the three-type spine's gray/black/white bands) travels with that
@@ -561,6 +570,9 @@ const colorOf = k => isSpineKey(k)
    "upper" bands carry more than one key colour, so they have no single
    comb to follow and stay with the base "spine" explode step.          */
 const explodeGroupOf = k => {
+  /* a press prints as part of its key, so it leaves with that key's comb
+     rather than on a step of its own */
+  if (isPressKey(k)) return k.slice(6);
   if (!isSpineKey(k)) return k;
   const layerName = k.slice(6);
   return (layerName === 'gray' || layerName === 'black' || layerName === 'white')
@@ -631,19 +643,30 @@ function uploadMeshes(){
   buffers={};
   for(const k of Object.keys(meshes)){
     if(k==='spine'||k==='spineLayers') continue;      // spine goes in per layer
-    if(!Array.isArray(meshes[k])) continue;           // e.g. bridgeCorridor, a number
+    if(k==='press'||k==='pressLayers') continue;      // press goes in per colour
+    /* The feet are no longer drawn.  Every pad face is now the bottom cap
+       of its own sensor press, in the same plane and the same outline, so
+       drawing both puts two coincident surfaces in the depth buffer and
+       they flicker against each other.  The feet are still built, still
+       exported and still written to the Blender log — they are simply not
+       a separate thing to look at once the press is there. */
+    if(k==='feet') continue;
+    if(!Array.isArray(meshes[k])) continue;           // e.g. pressLayers, an object
     if(meshes[k].length) buffers[k]=meshToBuffer(meshes[k]);
   }
   const SL = meshes.spineLayers || {};
   for(const lay of Object.keys(SL))
     if(SL[lay].length) buffers['spine:'+lay]=meshToBuffer(SL[lay]);
+  const PL = meshes.pressLayers || {};
+  for(const lay of Object.keys(PL))
+    if(PL[lay].length) buffers['press:'+lay]=meshToBuffer(PL[lay]);
   if(pickBuf){ gl.deleteBuffer(pickBuf.buf); pickBuf=null; }
 }
 
 /* ---- visibility toggles ---- */
 function buildVisToggles(){
   const g=$('visgrp'); g.innerHTML='';
-  for(const k of ['white','black','gray','spine','feet']){
+  for(const k of ['white','black','gray','spine','press']){
     const lab=document.createElement('label');
     lab.className='vis'+(visible[k]?' on':'');
     const rgb=c=>'rgb('+c.map(v=>Math.round(v*255)).join(',')+')';
@@ -655,10 +678,21 @@ function buildVisToggles(){
         `${n} layer" style="background:${rgb(XM.spineLayerColor(L.spineKind,n))}`+
         `;margin-right:1px"></span>`).join('');
       label=`spine (${L.spineKind})`;
+    } else if(k==='press' && L){
+      /* one swatch per key colour this design presses in — a press is
+         printed as part of its key, in its key's filament */
+      dots=L.spineColours.map(n=>`<span class="dot" title="sensor press, `+
+        `${n} filament" style="background:${rgb(COLORS[n])};margin-right:1px">`+
+        `</span>`).join('');
     } else {
       dots=`<span class="dot" style="background:${rgb(COLORS[k])}"></span>`;
     }
     lab.innerHTML=`<input type="checkbox" ${visible[k]?'checked':''}>`+dots+label;
+    if(k==='press') lab.title =
+      'One watertight solid per key: the drafted sensor pad lofted up to the '+
+      'pair face in that key\'s underside deck, capped both ends, with the '+
+      'dome window left open. It prints in its key\'s filament, so the .stl '+
+      'for a colour carries its presses.';
     lab.querySelector('input').onchange=e=>{
       visible[k]=e.target.checked; lab.classList.toggle('on',visible[k]); draw(); };
     g.appendChild(lab);
@@ -955,11 +989,6 @@ function keyBoxes(){
   for(const sl of L.slots) for(const m of sl.members) out.push(Object.assign({
     part:m.spec.layer, kind:'acc', ref:m, slot:sl, type:m.type },
     XM.keyExtent(m.cx, L.aW, m.type, null, null)));
-  L.feet.forEach((fx,i)=>out.push({
-    part:'feet', kind:'foot', index:i, type:'sensor foot',
-    x0:fx-XM.FOOT.w/2, x1:fx+XM.FOOT.w/2,
-    y0:XM.FOOT.yCentre-XM.FOOT.d/2, y1:XM.FOOT.yCentre+XM.FOOT.d/2,
-    z0:XM.FOOT.z-0.4, z1:XM.FOOT.z+0.4 }));
   return out;
 }
 function rayBox(o,d,b,zo){

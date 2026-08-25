@@ -250,7 +250,7 @@
   const COLORS = {
     white: [0.95, 0.95, 0.93], black: [0.16, 0.16, 0.19],
     gray:  [0.55, 0.55, 0.58], spine: [0.30, 0.31, 0.36],
-    feet:  [0.24, 0.42, 0.60]
+    feet:  [0.24, 0.42, 0.60], press: [0.72, 0.45, 0.22]
   };
 
   const DRAFT = 0.1018;      // side draft above z = Z.whiteTop (5.8 degrees)
@@ -1064,18 +1064,21 @@
     }
   }
 
+  // Spine band colours are pinned to COLORS.gray / .black / .white — the
+  // exact same swatches the keys and the sensor presses render in, so a
+  // spine band and the key/press sitting on it read as one material.
   const SPINE_LAYER_COLORS = {
-    one:   { all:   { srgb: [0.07, 0.07, 0.08], linear: [0, 0, 0],
+    one:   { all:   { srgb: COLORS.black, linear: [0.0220, 0.0220, 0.0301],
                       material: 'Material.003' } },
-    two:   { lower: { srgb: [0.07, 0.07, 0.08], linear: [0, 0, 0],
+    two:   { lower: { srgb: COLORS.black, linear: [0.0220, 0.0220, 0.0301],
                       material: 'Material.003' },
-             upper: { srgb: [0.91, 0.91, 0.90], linear: [0.8, 0.8, 0.8],
+             upper: { srgb: COLORS.white, linear: [0.8900, 0.8900, 0.8481],
                       material: null } },
-    three: { gray:  { srgb: [0.43, 0.43, 0.44], linear: [0.1549, 0.1549, 0.1549],
+    three: { gray:  { srgb: COLORS.gray,  linear: [0.2634, 0.2634, 0.2954],
                       material: 'Material.002' },
-             black: { srgb: [0.07, 0.07, 0.08], linear: [0, 0, 0],
+             black: { srgb: COLORS.black, linear: [0.0220, 0.0220, 0.0301],
                       material: 'Material.003' },
-             white: { srgb: [0.91, 0.91, 0.90], linear: [0.8, 0.8, 0.8],
+             white: { srgb: COLORS.white, linear: [0.8900, 0.8900, 0.8481],
                       material: null } }
   };
 

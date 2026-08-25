@@ -457,16 +457,28 @@
     out.feet = XM.buildFeet(bkeys);
 
     /* THE SENSOR PRESS.  Each key's loop pair, closed into a watertight
-     * solid.  It prints as part of its key, in its key's filament, so its
-     * triangles go into that colour's mesh — the preview, the per-colour
-     * STL and the Blender material all follow from that one decision. */
+     * solid.  It prints as part of its key, in its key's filament — but it
+     * is kept OUT of the key colour's mesh here and merged only at export
+     * (pressLayers), so the preview can draw it once, in its own colour,
+     * under its own toggle.  Merging it in twice would z-fight. */
     out.press = [];
-    out.pressParts = XM.pressParts(bkeys);
-    for (const p of out.pressParts) {
+    out.pressLayers = { white: [], black: [], gray: [] };
+    for (const p of XM.pressParts(bkeys)) {
       out.press.push(...p.tris);
-      out[p.layer].push(...p.tris);
+      (out.pressLayers[p.layer] = out.pressLayers[p.layer] || []).push(...p.tris);
     }
     return out;
+  }
+
+  /**
+   * One colour's mesh AS IT PRINTS: the keys plus every sensor press in
+   * that filament.  The preview keeps the two apart so each gets its own
+   * toggle; an STL has to hand the slicer one part, so it merges them.
+   */
+  function printMesh(meshes, part) {
+    const base = meshes[part] || [];
+    const extra = (meshes.pressLayers || {})[part];
+    return extra && extra.length ? base.concat(extra) : base;
   }
 
   /* ------------------------------------------------------------------ *
@@ -1598,7 +1610,7 @@ if __name__ == "__main__":
   }
 
   const api = {
-    presetDesign, computeLayout, pairKeys, buildMeshes, toSTL, makeZip,
+    presetDesign, computeLayout, pairKeys, printMesh, buildMeshes, toSTL, makeZip,
     pythonLog, summary, notesPerPeriod, layerCount, templateColours,
     whiteCount, widthAt, suggestScale,
     bounds, worldOffset, ORIGIN_MODES
