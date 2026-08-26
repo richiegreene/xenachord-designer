@@ -487,9 +487,9 @@
    * ------------------------------------------------------------------ */
   const KEY_PAIRS = {
     'Split: Gray→Black': {
-      id: 'pair-gray-black', members: ['Split Black Second', 'Split Gray First'],
+      id: 'pair-gray-black', members: ['Split Gray First', 'Split Black Second'],
       label: 'Split: Gray→Black', hand: 'left',
-      blurb: 'Split Black Second (rear) + Split Gray First (front).  The ' +
+      blurb: 'Split Gray First (front) + Split Black Second (rear).  The ' +
              'gray arm runs back on the LEFT.  Every split slot on the ' +
              'drafted 15 / 17 / 19 sheets is this pair.'
     },
@@ -537,11 +537,11 @@
       label: '15-EDO  (Cimbalo Cromatico [15])',
       slots: [
         ['Full Sized Black'],
-        ['Split Black Second', 'Split Gray First'],
-        ['Split Black Second', 'Split Gray First'],
+        ['Split Gray First', 'Split Black Second'],
+        ['Split Gray First', 'Split Black Second'],
         null,
         ['Full Sized Black'],
-        ['Split Black Second', 'Split Gray First'],
+        ['Split Gray First', 'Split Black Second'],
         null
       ],
       notes: 15,
@@ -553,12 +553,12 @@
     17: {
       label: '17-EDO  (Cimbalo Cromatico [17])',
       slots: [
-        ['Split Black Second', 'Split Gray First'],
-        ['Split Black Second', 'Split Gray First'],
-        ['Split Black Second', 'Split Gray First'],
+        ['Split Gray First', 'Split Black Second'],
+        ['Split Gray First', 'Split Black Second'],
+        ['Split Gray First', 'Split Black Second'],
         null,
-        ['Split Black Second', 'Split Gray First'],
-        ['Split Black Second', 'Split Gray First'],
+        ['Split Gray First', 'Split Black Second'],
+        ['Split Gray First', 'Split Black Second'],
         null
       ],
       notes: 17,
@@ -568,12 +568,12 @@
     19: {
       label: '19-EDO  (Cimbalo Cromatico [19])',
       slots: [
-        ['Split Black Second', 'Split Gray First'],
-        ['Split Black Second', 'Split Gray First'],
-        ['Split Black Second', 'Split Gray First'],
+        ['Split Gray First', 'Split Black Second'],
+        ['Split Gray First', 'Split Black Second'],
+        ['Split Gray First', 'Split Black Second'],
         ['Full Sized Gray'],
-        ['Split Black Second', 'Split Gray First'],
-        ['Split Black Second', 'Split Gray First'],
+        ['Split Gray First', 'Split Black Second'],
+        ['Split Gray First', 'Split Black Second'],
         ['Full Sized Gray']
       ],
       notes: 19,
