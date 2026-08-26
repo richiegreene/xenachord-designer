@@ -56,9 +56,7 @@
   #inspect td{padding:1px 0;vertical-align:top}
   #inspect td:first-child{color:var(--dim);padding-right:8px;white-space:nowrap}
   #inspect td:last-child{text-align:right;font-variant-numeric:tabular-nums}
-  #camread{position:absolute;left:12px;top:12px;color:var(--dim);font-size:10.5px;
-    background:rgba(30,31,37,.7);border-radius:5px;padding:3px 7px;
-    font-variant-numeric:tabular-nums;pointer-events:none}
+  #camread{display:none}
   h1{font-size:15px;margin:2px 0 2px}
   h1 small{color:var(--dim);font-weight:400}
   .sub{color:var(--dim);font-size:11.5px;margin:0 0 12px}
@@ -210,24 +208,20 @@
 <div id="app">
   <div id="panel">
     <h1>Xenachord Designer <small>· Cimbalo Cromatico</small></h1>
-    <p class="sub">Spine, feet and every dimension are inferred from
-      <code>Cimbalo_Cromatico_Drafting_Sandbox_Leveling.blend</code>.
-      Start from 32 plain whites and drag key types into the gaps between them.</p>
 
     <fieldset>
-      <legend>Keyboard</legend>
+      <legend>Layout Presets</legend>
       <div class="row">
-        <div><label for="preset">Load a drafted sheet</label>
-          <select id="preset"></select></div>
+        <div><select id="preset"></select></div>
       </div>
       <button class="primary wide" id="clear-all" style="width:100%;margin-top:9px"
         title="32 identical white keys, narrowed so that all 32 fit inside spine half A + half B">
         ↺ Clear All — 32 plain white keys</button>
-      <p class="fixed-note"><b>32 keys, always.</b> One AKM320 — spine half A
+      <p class="fixed-note" style="display:none"><b>32 keys, always.</b> One AKM320 — spine half A
         and half B, 16 sensor feet each. Drop a key into a gap and whites come
         off the right-hand end to pay for it; everything then re-widens so the
         keyboard still ends exactly at the spine.</p>
-      <div id="sizeread"></div>
+      <div id="sizeread" style="display:none"></div>
     </fieldset>
 
     <fieldset>
@@ -238,22 +232,35 @@
     <fieldset>
       <legend>Key widths — drag the dividers</legend>
       <div id="wbar"></div>
-      <div id="wtable"></div>
+      <div id="wtable" style="display:none"></div>
       <button class="primary wide" id="wreset" style="width:100%;margin-top:9px"
         title="The bar is the four classes drawn to scale against one another. Drag a divider to trade width between two of them; the size solve then re-fits the whole keyboard, so widening one class narrows the others rather than running off the spine. An accidental stops at 0.86× a white — past that the white has no rear left to cut away for it.">
         ↺ Reset to Standard Scaling</button>
       <button class="primary wide" id="kreset" style="width:100%;margin-top:6px"
-        title="One key at a time. The bar sets the law; a single key can still break it. Hover a key's edge down in the strip and it becomes a divider you can drag, the way a window's edge is. Between two whites the drag trades width between exactly those two — one widens, its neighbour pays — so the keyboard still ends at the spine. On an accidental's own two sides it grows or shrinks about its centre, eating into the rear of the whites either side until they have no rear left to give.">
+        title="Reset keys widths set in draggable bottom bar and/or senor press optimization">
         ↺ Clear Ad Hoc Adjustments</button>
       <div class="presswrap"
-        title="The 32 sensor pads never move, and they sit at a different pitch from the keys — so every key's connector leans across the gap between its own material and the pad it drives, and the sharper that lean the more of the press twists instead of pushing straight down. Slide right and each white is re-widened case by case so every key stands over its own pad — a white carrying an accidental widens, one carrying nothing narrows — while every split slot is set so its two halves straddle the two pads they drive. At 0% the keyboard is exactly as you arranged it; in between, the two are blended.">
+        title="0% is your own arrangement · 100% stands every key as square over its sensor pad as the widths allow.">
         <div class="pressrow">
           <label for="presspct">⤓ Optimize for Sensor Press</label>
           <span id="presspct-v" class="pressval">0%</span>
         </div>
         <input id="presspct" type="range" min="0" max="100" step="1" value="0">
-        <p class="hint" id="pressinfo">0% is your own arrangement · 100% stands every
+        <p class="hint" id="pressinfo" style="display:none">0% is your own arrangement · 100% stands every
           key as square over its sensor pad as the widths allow.</p>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Export</legend>
+      <div class="btns">
+        <button class="wide" id="dl-py">⬇ Save design log (.py)</button>
+        <button class="wide" id="dl-zip">⬇ All parts (.zip)</button>
+        <button data-part="white">white .stl</button>
+        <button data-part="black">black .stl</button>
+        <button data-part="gray">gray .stl</button>
+        <button data-part="spine">spine .stl</button>
+        <button class="primary wide" id="copy-py" title="The Python log is a runnable Blender script: a readable data header (datum, size law, every key, spine, feet) followed by a builder that rebuilds the design from the Key Type Categories collection.">⧉ Copy Python Log</button>
       </div>
     </fieldset>
 
@@ -261,29 +268,6 @@
       <legend>Status</legend>
       <div id="stats"></div>
       <div id="warnings"></div>
-    </fieldset>
-
-    <fieldset>
-      <legend>Export</legend>
-      <label for="origin">Blender world origin</label>
-      <select id="origin">
-        <option value="centre">model centre at 0, 0, 0</option>
-        <option value="spine">X centred · Y 0 at spine front · Z 0 at spine bottom</option>
-        <option value="sheet">drafting sandbox position (round-trips into Leveling.blend)</option>
-      </select>
-      <p class="hint" id="origininfo"></p>
-      <div class="btns">
-        <button class="primary wide" id="copy-py">⧉ Copy Python Log</button>
-        <button class="wide" id="dl-py">⬇ Save design log (.py)</button>
-        <button class="wide" id="dl-zip">⬇ All parts (.zip)</button>
-        <button data-part="white">white .stl</button>
-        <button data-part="black">black .stl</button>
-        <button data-part="gray">gray .stl</button>
-        <button data-part="spine">spine .stl</button>
-      </div>
-      <p class="hint">The Python log is a runnable Blender script: a readable data
-        header (datum, size law, every key, spine, feet) followed by a builder that
-        rebuilds the design from the <i>Key Type Categories</i> collection.</p>
     </fieldset>
   </div>
 
@@ -369,8 +353,6 @@ presetSel.onchange = () => {
   forgetPressBlend();
   syncInputs(); rebuild();
 };
-$('origin').onchange = () => { design.origin = $('origin').value; save(); showOrigin(); if(picked) showInspect(picked); };
-
 /* CLEAR ALL — the cleared keyboard is not "empty", it is the 32-white one:
  * every key identical, narrowed until all 32 stand inside the spine. */
 $('clear-all').onclick = () => {
@@ -385,7 +367,6 @@ $('clear-all').onclick = () => {
 };
 
 function syncInputs(){
-  $('origin').value = design.origin || 'centre';
   presetSel.value = design.preset || '';
   const sl = $('presspct');
   if (sl){
@@ -417,17 +398,7 @@ function showSize(){
 
 /* where the generated keyboard lands in Blender, under the chosen origin */
 function originOf(){ return XD.worldOffset(L, design.origin || 'centre'); }
-function showOrigin(){
-  if(!L) return;
-  const O = originOf(), b = O.b;
-  const r = (v)=>v.toFixed(2);
-  $('origininfo').innerHTML =
-    `Builds into <b>X</b> ${r(b.x0+O.x0)} … ${r(b.x1+O.x0)} · ` +
-    `<b>Y</b> ${r(O.y0-b.y1)} … ${r(O.y0-b.y0)} · ` +
-    `<b>Z</b> ${r(b.z0+O.z0)} … ${r(b.z1+O.z0)}<br>` +
-    `centre ${r(b.cx+O.x0)}, ${r(O.y0-b.cy)}, ${r(b.cz+O.z0)} — ` +
-    `everything is parented to a <i>Xenachord Root</i> empty at 0, 0, 0.`;
-}
+function showOrigin(){}
 
 /* ===================== palette ===================== */
 const cssOf = t => XM.KEY_TYPES[t].css === 'white' ? 'w'
@@ -520,7 +491,9 @@ function paintWidths(r){
     const d = document.createElement('div');
     d.className = 'wseg ' + c;
     d.style.flex = `0 0 ${(100*r[c]/tot).toFixed(4)}%`;
-    d.title = `${XM.CLASS_LABEL[c]} — ${r[c].toFixed(3)}× a white key`;
+    const mm = L && L.classW ? L.classW[c] : null;
+    d.title = `${XM.CLASS_LABEL[c]} — ${r[c].toFixed(3)}×` +
+      (mm != null ? ` · ${mm.toFixed(2)} mm` : ' a white key');
     d.textContent = XM.CLASS_LABEL[c];
     bar.appendChild(d);
   }
@@ -1413,19 +1386,20 @@ function showPress(sol){
   const t = pressBlend();
   $('presspct-v').textContent = Math.round(t * 100) + '%';
   const info = $('pressinfo');
+  const val = $('presspct-v');
+  info.innerHTML = '0% is your own arrangement · 100% stands every key as ' +
+    'square over its sensor pad as the widths allow.';
   if (!sol || !sol.now){
-    info.innerHTML = '0% is your own arrangement · 100% stands every key as ' +
-      'square over its sensor pad as the widths allow.';
+    if (val) val.removeAttribute('title');
     return;
   }
   let L2 = null;
   try { L2 = XD.computeLayout(design); } catch(e){}
   const at = L2 ? pressOffset(L2) : null;
-  info.innerHTML =
-    `key-to-pad reach <b>${at ? at.rms.toFixed(2) : '—'} mm</b> typical, ` +
-    `worst <b>${at ? at.max.toFixed(2) : '—'} mm</b> · ` +
-    `<span style="color:var(--dim)">0% ${sol.was.rms.toFixed(2)} → ` +
-    `100% ${sol.now.rms.toFixed(2)} mm</span>`;
+  const title = `key-to-pad reach ${at ? at.rms.toFixed(2) : '—'} mm typical, ` +
+    `worst ${at ? at.max.toFixed(2) : '—'} mm · ` +
+    `0% ${sol.was.rms.toFixed(2)} → 100% ${sol.now.rms.toFixed(2)} mm`;
+  if (val) val.title = title;
 }
 
 (function(){
