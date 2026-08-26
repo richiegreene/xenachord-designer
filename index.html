@@ -310,7 +310,7 @@
         <canvas id="navgizmo" width="108" height="108" title="Click an axis to view it &middot; drag to orbit"></canvas>
         <div class="navgizmo-row">
           <button data-view="iso" class="navgizmo-mini">iso</button>
-          <button data-view="under" class="navgizmo-mini">under</button>
+          <button id="v-proj" class="navgizmo-mini" title="Toggle Perspective / Orthographic">persp</button>
           <button id="v-fit" class="navgizmo-mini">fit</button>
         </div>
         <div class="navgizmo-row">
@@ -1668,6 +1668,12 @@ function mat4mul(a,b){const o=new Float32Array(16);
   return o;}
 function persp(f0,as,n,fq){const f=1/Math.tan(f0/2),nf=1/(n-fq);
   return new Float32Array([f/as,0,0,0, 0,f,0,0, 0,0,(fq+n)*nf,-1, 0,0,2*fq*n*nf,0]);}
+/* orthographic projection matching persp()'s framing at the camera's
+ * current target distance, so toggling POV/orth doesn't change apparent
+ * zoom — the half-height is derived from the same FOV and dist used by
+ * the perspective frustum. */
+function ortho(halfH,as,n,fq){const halfW=halfH*as,nf=1/(n-fq);
+  return new Float32Array([1/halfW,0,0,0, 0,1/halfH,0,0, 0,0,2*nf,0, 0,0,(fq+n)*nf,1]);}
 const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
 const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
 const mul=(a,k)=>[a[0]*k,a[1]*k,a[2]*k];
@@ -1760,14 +1766,21 @@ const VIEWS = {
   front:  {yaw: 0.00, pitch: 0.00},
   back:   {yaw: Math.PI, pitch: 0.00},
   left:   {yaw:-Math.PI/2, pitch: 0.00},
-  right:  {yaw: Math.PI/2, pitch: 0.00},
-  under:  {yaw: 0.28, pitch:-0.62}    // three-quarter view from below
+  right:  {yaw: Math.PI/2, pitch: 0.00}
 };
 document.querySelectorAll('button[data-view]').forEach(b=>{
   b.onclick=()=>{ const v=VIEWS[b.dataset.view];
     cam.yaw=v.yaw; cam.pitch=v.pitch; draw(); };
 });
 $('v-fit').onclick=fit;
+
+let projMode='persp';
+const projBtn=$('v-proj');
+projBtn.onclick=()=>{
+  projMode = projMode==='persp' ? 'orth' : 'persp';
+  projBtn.textContent = projMode;
+  draw();
+};
 
 const BG_DARK=[0.075,0.08,0.095], BG_LIGHT=[222/255,225/255,229/255];
 let bgColor=BG_DARK.slice();
@@ -1890,7 +1903,10 @@ function draw(){
   gl.clearColor(...bgColor,1);
   gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
   const B=camBasis();
-  const mvp=mat4mul(persp(FOV,w/h,0.5,20000),lookAtBasis(B.eye,B.right,B.up,B.fwd));
+  const proj = projMode==='persp'
+    ? persp(FOV, w/h, 0.5, 20000)
+    : ortho(cam.dist*Math.tan(FOV/2), w/h, 0.5, 20000);
+  const mvp=mat4mul(proj,lookAtBasis(B.eye,B.right,B.up,B.fwd));
   gl.uniformMatrix4fv(locMVP,false,mvp);
   gl.uniform3fv(locEye, B.eye);
   for(const [k,b] of Object.entries(buffers)){
