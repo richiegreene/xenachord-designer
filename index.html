@@ -217,7 +217,7 @@
       </div>
       <button class="primary wide" id="clear-all" style="width:100%;margin-top:9px"
         title="32 identical white keys, narrowed so that all 32 fit inside spine half A + half B">
-        ↺ Clear All — 32 plain white keys</button>
+        ↺ Clear All: 32 White Keys</button>
       <p class="fixed-note" style="display:none"><b>32 keys, always.</b> One AKM320 — spine half A
         and half B, 16 sensor feet each. Drop a key into a gap and whites come
         off the right-hand end to pay for it; everything then re-widens so the
@@ -228,6 +228,20 @@
     <fieldset>
       <legend>Key Type Categories: drag/drop to bottom</legend>
       <div id="palette"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Repeating Layout: Notes in Scale</legend>
+      <div class="presswrap"
+        title="How many notes there are in the scale before it repeats. At 32 the whole keyboard is one arrangement; below that, the key types of the first N notes are the period, stamped out again and again up to the right.">
+        <div class="pressrow">
+          <label for="period">↻ Notes in Scale</label>
+          <span id="period-v" class="pressval">32</span>
+        </div>
+        <input id="period" type="range" min="2" max="32" step="1" value="32">
+        <p class="hint" id="periodinfo">32 = no repeat &middot; below that the first N notes&rsquo; key
+          types repeat across the keyboard</p>
+      </div>
     </fieldset>
 
     <fieldset>
@@ -377,6 +391,7 @@ presetSel.onchange = () => {
   } else {
     design = XD.presetDesign(+presetSel.value);
   }
+  design.period = XM.NOTES;
   forgetPressBlend();
   syncInputs(); rebuild();
 };
@@ -414,7 +429,8 @@ $('clear-all').onclick = () => {
    * where every white is the same key, which is exactly what an exception
    * on a single key denies */
   design = Object.assign(XD.clearedDesign(design.rotation),
-                         { origin: design.origin, widths: design.widths });
+                         { origin: design.origin, widths: design.widths,
+                           period: periodNow() });
   forgetPressBlend();
   syncInputs(); rebuild();
   toast(`cleared — 32 white keys, ${L ? L.wW.toFixed(2) : ''} mm each, spanning the spine`);
@@ -422,6 +438,12 @@ $('clear-all').onclick = () => {
 
 function syncInputs(){
   presetSel.value = design.preset || '';
+  const pr = $('period');
+  if (pr){
+    const n = periodNow();
+    pr.value = n;
+    $('period-v').textContent = n === XM.NOTES ? '32 · no repeat' : String(n);
+  }
   const sl = $('presspct');
   if (sl){
     const t = pressBlend();
@@ -1479,7 +1501,61 @@ function showPress(sol){
 
 /* ===================== rebuild ===================== */
 function refresh(){ syncInputs(); rebuild(); }
+/* the slider is the scale length itself, so it survives presets, Clear All
+ * and reloads the way the origin and the width ratios do */
+function periodNow(){
+  const n = design.period | 0;
+  return (n >= 2 && n <= XM.NOTES) ? n : XM.NOTES;
+}
+$('period').oninput = e => {
+  design.period = Math.max(2, Math.min(XM.NOTES, +e.target.value | 0));
+  design.preset = null;
+  $('period-v').textContent =
+    design.period === XM.NOTES ? '32 · no repeat' : String(design.period);
+  rebuild();
+};
+
+/* ===================== repeating layout =====================
+ *
+ * NOTES IN SCALE.  A design is normally 32 keys arranged one at a time; a
+ * scale of N < 32 says the arrangement is really a period of N notes and
+ * everything past it is that period said again.  The period is read off
+ * the FIRST N notes exactly as they stand — white by white, with whatever
+ * sits in the gap after each — and then stamped out to the right until the
+ * 32nd note, so editing anywhere inside the first N re-voices the whole
+ * keyboard.  A group that straddles the boundary is cut at it.
+ */
+function applyPeriod(){
+  const N = design.period | 0;
+  if (!N || N >= XM.NOTES) return;
+  const src = design.slots || {};
+
+  /* read the period: one unit per white, carrying the gap after it */
+  const units = [];
+  let notes = 0;
+  for (let i = 0; notes < N; i++){
+    let acc = (src[i] || []).map(XM.canonType);
+    if (notes + 1 >= N) acc = [];
+    else if (notes + 1 + acc.length > N) acc = acc.slice(0, N - notes - 1);
+    units.push(acc);
+    notes += 1 + acc.length;
+  }
+  if (!units.length) return;
+
+  /* stamp it out over the 32 */
+  const out = {};
+  let placed = 0, u = 0;
+  for (let i = 0; placed < XM.NOTES; i++){
+    placed++;                                  // white i itself
+    if (placed >= XM.NOTES) break;
+    const acc = units[u++ % units.length].slice(0, XM.NOTES - placed);
+    if (acc.length){ out[i] = acc; placed += acc.length; }
+  }
+  design.slots = out;
+}
+
 function rebuild(){
+  applyPeriod();
   save();
   let err = null;
   try { L = XD.computeLayout(design); meshes = XD.buildMeshes(L); }
