@@ -213,6 +213,7 @@
       <legend>Layout Presets</legend>
       <div class="row">
         <div><select id="preset"></select></div>
+        <button id="preset-del" title="Delete the selected saved preset" style="padding:4px 8px">⌫</button>
       </div>
       <button class="primary wide" id="clear-all" style="width:100%;margin-top:9px"
         title="32 identical white keys, narrowed so that all 32 fit inside spine half A + half B">
@@ -225,12 +226,12 @@
     </fieldset>
 
     <fieldset>
-      <legend>Key Type Categories — drag/drop in bottom</legend>
+      <legend>Key Type Categories: drag/drop to bottom</legend>
       <div id="palette"></div>
     </fieldset>
 
     <fieldset>
-      <legend>Key widths — drag the dividers</legend>
+      <legend>Key widths: drag dividers</legend>
       <div id="wbar"></div>
       <div id="wtable" style="display:none"></div>
       <button class="primary wide" id="wreset" style="width:100%;margin-top:9px"
@@ -254,13 +255,14 @@
     <fieldset>
       <legend>Export</legend>
       <div class="btns">
-        <button class="wide" id="dl-py">⬇ Save design log (.py)</button>
-        <button class="wide" id="dl-zip">⬇ All parts (.zip)</button>
+        <button class="wide" id="dl-zip">⬇ Save STL Files for All Parts (.zip)</button>
         <button data-part="white">white .stl</button>
         <button data-part="black">black .stl</button>
         <button data-part="gray">gray .stl</button>
         <button data-part="spine">spine .stl</button>
         <button class="primary wide" id="copy-py" title="The Python log is a runnable Blender script: a readable data header (datum, size law, every key, spine, feet) followed by a builder that rebuilds the design from the Key Type Categories collection.">⧉ Copy Python Log</button>
+        <button class="wide" id="dl-py">⬇ Save design log (.py)</button>
+        <button class="wide" id="save-preset" title="Save the current layout, widths and scale as a named preset in the Layout Presets menu above">⬇ Save to Presets</button>
       </div>
     </fieldset>
 
@@ -344,14 +346,66 @@ function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('on'
   clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('on'),1800); }
 
 /* ===================== controls ===================== */
+const CUSTOM_LS = 'xenachord-designer-v2-presets';
+const CUSTOM_PREFIX = 'custom:';
+
+function loadCustomPresets(){ try{
+  return JSON.parse(localStorage.getItem(CUSTOM_LS)) || {};
+}catch(e){} return {}; }
+function saveCustomPresets(p){ try{ localStorage.setItem(CUSTOM_LS, JSON.stringify(p)); }catch(e){} }
+
 const presetSel = $('preset');
-presetSel.innerHTML = '<option value="">— custom —</option>' +
-  Object.keys(XM.LAYOUTS).map(k=>`<option value="${k}">${XM.LAYOUTS[k].label}</option>`).join('');
+function buildPresetOptions(){
+  const custom = loadCustomPresets();
+  const customHtml = Object.keys(custom).length
+    ? '<optgroup label="Saved Presets">' + Object.keys(custom)
+        .map(name=>`<option value="${CUSTOM_PREFIX}${name}">${name}</option>`).join('') + '</optgroup>'
+    : '';
+  presetSel.innerHTML =
+    '<option value="" disabled hidden></option>' +
+    customHtml;
+}
+buildPresetOptions();
 presetSel.onchange = () => {
   if (!presetSel.value) return;
-  design = XD.presetDesign(+presetSel.value);
+  if (presetSel.value.startsWith(CUSTOM_PREFIX)){
+    const name = presetSel.value.slice(CUSTOM_PREFIX.length);
+    const custom = loadCustomPresets();
+    if (!custom[name]) return;
+    design = migrate(JSON.parse(JSON.stringify(custom[name])));
+    design.preset = presetSel.value;
+  } else {
+    design = XD.presetDesign(+presetSel.value);
+  }
   forgetPressBlend();
   syncInputs(); rebuild();
+};
+$('preset-del').onclick = () => {
+  const v = presetSel.value;
+  if (!v || !v.startsWith(CUSTOM_PREFIX)){
+    toast('only saved presets can be deleted');
+    return;
+  }
+  const name = v.slice(CUSTOM_PREFIX.length);
+  const custom = loadCustomPresets();
+  delete custom[name];
+  saveCustomPresets(custom);
+  buildPresetOptions();
+  design.preset = null;
+  syncInputs();
+  toast(`deleted preset "${name}"`);
+};
+$('save-preset').onclick = () => {
+  const name = (prompt('Save current design as preset:', ''))?.trim();
+  if (!name) return;
+  const custom = loadCustomPresets();
+  if (custom[name] && !confirm(`Overwrite existing preset "${name}"?`)) return;
+  custom[name] = JSON.parse(JSON.stringify(design));
+  saveCustomPresets(custom);
+  buildPresetOptions();
+  design.preset = CUSTOM_PREFIX + name;
+  syncInputs();
+  toast(`saved preset "${name}"`);
 };
 /* CLEAR ALL — the cleared keyboard is not "empty", it is the 32-white one:
  * every key identical, narrowed until all 32 stand inside the spine. */
