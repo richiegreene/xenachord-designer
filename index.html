@@ -202,6 +202,15 @@
     border-radius:7px;font-size:12px;opacity:0;pointer-events:none;transition:opacity .2s}
   #toast.on{opacity:1}
   code{background:var(--panel2);padding:1px 4px;border-radius:3px;font-size:11px}
+  /* ---------- sensor-press blend ---------- */
+  .presswrap{margin-top:10px;padding:9px 10px 7px;background:var(--panel2);
+    border:1px solid var(--line);border-radius:8px}
+  .pressrow{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  .pressrow label{margin:0;font-weight:600;color:var(--text);font-size:11.5px}
+  .pressval{font-variant-numeric:tabular-nums;color:var(--accent);font-weight:600;
+    font-size:11.5px}
+  .presswrap input[type=range]{width:100%;margin:7px 0 0;accent-color:var(--accent)}
+  .presswrap .hint{margin:5px 0 0}
 </style>
 </head>
 <body>
@@ -246,15 +255,22 @@
       <legend>Key widths — drag the dividers</legend>
       <div id="wbar"></div>
       <div id="wtable"></div>
-      <button class="primary wide" id="optpress" style="width:100%;margin-top:9px"
-        title="The 32 sensor feet sit at a fixed 11.3 mm pitch and never move; the keys sit on the white pitch, which is a different number — so each key's connector has to lean across the offset between its own centre and the centre of the foot it drives, and the sharper that lean the more of the press twists instead of pushing straight down. This sets each white's width case by case so every key stands as nearly as possible directly over its own foot: a white with an accidental after it carries two notes across its pitch and widens, one with nothing after it narrows. Both halves of a split pair share one centre and still drive two feet 11.3 mm apart — that gap is aimed at the midpoint of the two, which is the best a shared centre can do.">
-        ⤓ Optimize for Sensor Press</button>
-      <button class="primary wide" id="wreset" style="width:100%;margin-top:6px"
+      <button class="primary wide" id="wreset" style="width:100%;margin-top:9px"
         title="The bar is the four classes drawn to scale against one another. Drag a divider to trade width between two of them; the size solve then re-fits the whole keyboard, so widening one class narrows the others rather than running off the spine. An accidental stops at 0.86× a white — past that the white has no rear left to cut away for it.">
         ↺ Reset to Standard Scaling</button>
       <button class="primary wide" id="kreset" style="width:100%;margin-top:6px"
         title="One key at a time. The bar sets the law; a single key can still break it. Hover a key's edge down in the strip and it becomes a divider you can drag, the way a window's edge is. Between two whites the drag trades width between exactly those two — one widens, its neighbour pays — so the keyboard still ends at the spine. On an accidental's own two sides it grows or shrinks about its centre, eating into the rear of the whites either side until they have no rear left to give.">
         ↺ Clear Ad Hoc Adjustments</button>
+      <div class="presswrap"
+        title="The 32 sensor pads never move, and they sit at a different pitch from the keys — so every key's connector leans across the gap between its own material and the pad it drives, and the sharper that lean the more of the press twists instead of pushing straight down. Slide right and each white is re-widened case by case so every key stands over its own pad — a white carrying an accidental widens, one carrying nothing narrows — while every split slot is set so its two halves straddle the two pads they drive. At 0% the keyboard is exactly as you arranged it; in between, the two are blended.">
+        <div class="pressrow">
+          <label for="presspct">⤓ Optimize for Sensor Press</label>
+          <span id="presspct-v" class="pressval">0%</span>
+        </div>
+        <input id="presspct" type="range" min="0" max="100" step="1" value="0">
+        <p class="hint" id="pressinfo">0% is your own arrangement · 100% stands every
+          key as square over its sensor pad as the widths allow.</p>
+      </div>
     </fieldset>
 
     <fieldset>
@@ -366,6 +382,7 @@ presetSel.innerHTML = '<option value="">— custom —</option>' +
 presetSel.onchange = () => {
   if (!presetSel.value) return;
   design = XD.presetDesign(+presetSel.value);
+  forgetPressBlend();
   syncInputs(); rebuild();
 };
 $('origin').onchange = () => { design.origin = $('origin').value; save(); showOrigin(); if(picked) showInspect(picked); };
@@ -378,6 +395,7 @@ $('clear-all').onclick = () => {
    * on a single key denies */
   design = Object.assign(XD.clearedDesign(design.rotation),
                          { origin: design.origin, widths: design.widths });
+  forgetPressBlend();
   syncInputs(); rebuild();
   toast(`cleared — 32 white keys, ${L ? L.wW.toFixed(2) : ''} mm each, spanning the spine`);
 };
@@ -385,6 +403,12 @@ $('clear-all').onclick = () => {
 function syncInputs(){
   $('origin').value = design.origin || 'centre';
   presetSel.value = design.preset || '';
+  const sl = $('presspct');
+  if (sl){
+    const t = pressBlend();
+    sl.value = Math.round(t * 100);
+    $('presspct-v').textContent = Math.round(t * 100) + '%';
+  }
 }
 
 /* THE SIZE IS AN OUTCOME, NOT A SETTING.  s is solved for on every rebuild
@@ -586,6 +610,7 @@ function buildWidths(){ paintWidths(ratiosNow()); }
     window.removeEventListener('pointerup', stop);
     window.removeEventListener('pointercancel', stop);
     drag = null; pending = 0;
+    reblendPress();
     refresh();
   };
   bar().addEventListener('pointerdown', e => {
@@ -603,6 +628,7 @@ function buildWidths(){ paintWidths(ratiosNow()); }
 $('wreset').onclick = e => {
   e.preventDefault();
   delete design.widths; design.preset = null;
+  clearPressBlend();
   refresh();
   toast('key widths back to the sheet’s law — every accidental 83/185 of a white');
 };
@@ -852,6 +878,9 @@ function liveLayout(){
     document.body.classList.remove('resizing');
     inner().classList.remove('resizing');
     drag = null; pending = 0; gripHeld = null;
+    /* a hand-set width IS the arrangement now — the blend has nothing older
+     * to return to, so whatever is on screen becomes 0% */
+    forgetPressBlend();
     refresh();
   };
 
@@ -886,6 +915,7 @@ $('kreset').onclick = e => {
   e.preventDefault();
   if (!keyScaleCount()) return toast('no key has been resized by hand');
   delete design.keyScale; design.preset = null;
+  forgetPressBlend();
   refresh();
   toast('every key back to its class width');
 };
@@ -1188,12 +1218,25 @@ function pressFitSlots(L2){
   return moved;
 }
 
-function optimizeSensorPress(){
+/**
+ * Solve the press for the arrangement `base`, and return the widths it
+ * wants.  Nothing is committed: the design is put back exactly as it was
+ * before returning, so this is safe to call for the blend slider, which
+ * needs the answer without taking it.
+ */
+function solveSensorPress(base){
+  const keep = design.keyScale ? JSON.parse(JSON.stringify(design.keyScale)) : null;
   const snap = () => JSON.parse(JSON.stringify(design.keyScale || {}));
+  const restore = () => {
+    if (keep) design.keyScale = keep; else delete design.keyScale;
+  };
+  design.keyScale = JSON.parse(JSON.stringify(base || {}));
+  if (!Object.keys(design.keyScale).length) delete design.keyScale;
+
   let L0;
   try { L0 = XD.computeLayout(design); }
-  catch(e){ return toast('the keyboard does not lay out — nothing to optimize'); }
-  if (L0.whites.length < 2) return toast('too few white keys to re-space');
+  catch(e){ restore(); return null; }
+  if (L0.whites.length < 2){ restore(); return null; }
 
   const was = pressOffset(L0);
   let best = { e: was, ks: snap() };
@@ -1202,7 +1245,7 @@ function optimizeSensorPress(){
    * moves both a little, and the two levers lean on each other — a wider
    * split slot cuts its neighbouring whites' rears, which moves their
    * material.  So solve, apply, measure, and solve again from where the
-   * engine actually put things.  It settles in one or two. */
+   * engine actually put things, until a pass stops paying for itself. */
   for (let pass = 0; pass < 6; pass++){
     let L2;
     try { L2 = XD.computeLayout(design); } catch(e){ break; }
@@ -1223,24 +1266,156 @@ function optimizeSensorPress(){
     let L3;
     try { L3 = XD.computeLayout(design); } catch(e){ break; }
     const e = pressOffset(L3);
-    if (e.rms < best.e.rms - 1e-9) best = { e, ks: snap() };
+    const gain = best.e.rms - e.rms;
+    if (gain > 1e-9) best = { e, ks: snap() };
+    /* a pass that buys less than ten microns is not worth the next one */
+    if (gain < 0.01) break;
   }
 
-  design.keyScale = best.ks;
-  if (!Object.keys(design.keyScale).length) delete design.keyScale;
-  design.preset = null;
-  refresh();
-
-  const now = best.e;
-  if (now.rms >= was.rms - 5e-3)
-    return toast(`already as square over the sensors as these widths allow ` +
-                 `— worst reach ${was.max.toFixed(2)} mm`);
-  toast(`sensor press: key-to-pad reach ${was.rms.toFixed(2)} → ` +
-        `${now.rms.toFixed(2)} mm typical, worst ${was.max.toFixed(2)} → ` +
-        `${now.max.toFixed(2)} mm`);
+  restore();
+  return { ks: best.ks, was, now: best.e };
 }
 
-$('optpress').onclick = e => { e.preventDefault(); optimizeSensorPress(); };
+/* ---------------------------------------------------------------------
+ * THE BLEND
+ *
+ * The solve is one particular set of widths; the arrangement the user
+ * built is another.  The slider walks between them — every width moving
+ * from what it was to what the press wants, in step — so the keyboard can
+ * be squared up as far as it is worth squaring and no further.  At 0 the
+ * keyboard is exactly what it was; at 1 it is the solve.
+ *
+ * `pressBase` is the arrangement, and it is what 0 returns to.  The solve
+ * is derived from it, so it is cached rather than stored, and thrown away
+ * whenever the design changes shape under it.
+ * ------------------------------------------------------------------- */
+let pressCache = null;
+
+/** what the solve depends on: which keys stand where, and the base widths */
+function pressSig(){
+  return JSON.stringify([design.slots, design.rotation | 0,
+                         design.widths || null, design.pressBase || null]);
+}
+function pressBlend(){
+  const v = +design.pressBlend;
+  return isFinite(v) ? Math.min(1, Math.max(0, v)) : 0;
+}
+
+/** the solve for the current arrangement, computed once and kept */
+function pressSolution(){
+  const sig = pressSig();
+  if (pressCache && pressCache.sig === sig) return pressCache.sol;
+  if (!design.pressBase)
+    design.pressBase = JSON.parse(JSON.stringify(design.keyScale || {}));
+  const sol = solveSensorPress(design.pressBase);
+  pressCache = { sig: pressSig(), sol };
+  return sol;
+}
+
+/** widths `t` of the way from the arrangement to the solve */
+function applyPressBlend(t){
+  /* 0 is the arrangement itself — no solve is needed to hand it back, which
+   * is what lets the reset buttons switch the blend off for free */
+  if (t <= 0){
+    const b = design.pressBase;
+    if (b){
+      design.keyScale = JSON.parse(JSON.stringify(b));
+      if (!Object.keys(design.keyScale).length) delete design.keyScale;
+    }
+    design.pressBlend = 0;
+    return pressCache ? pressCache.sol : null;
+  }
+  const sol = pressSolution();
+  const base = design.pressBase || {};
+  if (!sol){ design.pressBlend = 0; return null; }
+  const out = {};
+  const ids = new Set(Object.keys(base).concat(Object.keys(sol.ks)));
+  for (const id of ids){
+    const a = base[id] != null ? base[id] : 1;
+    const b = sol.ks[id] != null ? sol.ks[id] : 1;
+    const v = a + t * (b - a);
+    if (Math.abs(v - 1) >= 5e-4) out[id] = +v.toFixed(6);
+  }
+  design.keyScale = out;
+  if (!Object.keys(out).length) delete design.keyScale;
+  design.pressBlend = t;
+  if (t > 0) design.preset = null;
+  return sol;
+}
+
+/**
+ * Switch the blend off WITHOUT touching the widths that are on screen —
+ * whatever is showing simply becomes the arrangement.  This is what a hand
+ * resize wants: the width you just dragged is yours now, and 0% is it.
+ */
+function forgetPressBlend(){
+  pressCache = null;
+  delete design.pressBase;
+  delete design.pressBlend;
+  const sl = $('presspct');
+  if (sl) sl.value = 0;
+  const v = $('presspct-v');
+  if (v) v.textContent = '0%';
+  showPress(null);
+}
+
+/**
+ * Put the widths back to the arrangement and THEN switch the blend off.
+ * This is what the reset buttons want: they undo the optimization, so
+ * leaving it applied while the slider read 0 would be a lie.  Anything the
+ * user set by hand is in `pressBase` and survives.
+ */
+function clearPressBlend(){
+  if (pressBlend() > 0 && design.pressBase) applyPressBlend(0);
+  forgetPressBlend();
+}
+
+/** the class law moved under the solve — blend again on the new law */
+function reblendPress(){
+  if (pressBlend() <= 0){ pressCache = null; return; }
+  pressCache = null;
+  showPress(applyPressBlend(pressBlend()));
+}
+
+function showPress(sol){
+  const t = pressBlend();
+  $('presspct-v').textContent = Math.round(t * 100) + '%';
+  const info = $('pressinfo');
+  if (!sol || !sol.now){
+    info.innerHTML = '0% is your own arrangement · 100% stands every key as ' +
+      'square over its sensor pad as the widths allow.';
+    return;
+  }
+  let L2 = null;
+  try { L2 = XD.computeLayout(design); } catch(e){}
+  const at = L2 ? pressOffset(L2) : null;
+  info.innerHTML =
+    `key-to-pad reach <b>${at ? at.rms.toFixed(2) : '—'} mm</b> typical, ` +
+    `worst <b>${at ? at.max.toFixed(2) : '—'} mm</b> · ` +
+    `<span style="color:var(--dim)">0% ${sol.was.rms.toFixed(2)} → ` +
+    `100% ${sol.now.rms.toFixed(2)} mm</span>`;
+}
+
+(function(){
+  const sl = $('presspct');
+  let solved = false;
+  /* solve before the drag starts, not during it: the answer costs about a
+   * second, and every move after it is a plain interpolation */
+  const warm = () => {
+    if (solved) return;
+    solved = true;
+    if (!pressCache || pressCache.sig !== pressSig()) toast('solving the press…');
+  };
+  sl.addEventListener('pointerdown', warm);
+  sl.addEventListener('keydown', warm);
+  sl.addEventListener('input', () => {
+    warm();
+    const sol = applyPressBlend((+sl.value || 0) / 100);
+    refresh();
+    showPress(sol);
+    if (!sol) toast('the keyboard does not lay out — nothing to optimize');
+  });
+})();
 
 /* ===================== rebuild ===================== */
 function refresh(){ syncInputs(); rebuild(); }
