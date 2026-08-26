@@ -1522,19 +1522,26 @@ $('period').oninput = e => {
   rebuild();
 };
 
-/* ---- rotate the pattern by one scale step ----
- * A step is a white and whatever it carries in its own gap, so rotating
- * moves every key type one degree along the scale and wraps what falls off
- * one end back on at the other.  It is applied once, to the arrangement
- * itself, rather than kept as a number — so the rotated keyboard is just
- * an ordinary hand-editable design, and the repeat above still reads its
- * period off the first N notes exactly as before.
+/* ---- rotate the pattern by one step ----
+ * A step is one note, not one white: the arrangement is a cyclic string of
+ * notes — whites and the accidentals standing in the gaps between them —
+ * and rotating slides that whole string one note along, wrapping what
+ * falls off one end back on at the other.  So a rotation may perfectly
+ * well leave a black, gray or split pair standing at position 0 with no
+ * white to its left; gap -1, the gap BEFORE white 0, is where those go,
+ * and the layout engine already builds it, with the whites re-flowing to
+ * fill what is left.
+ *
+ * It is applied once, to the arrangement itself, rather than kept as a
+ * number — so the rotated keyboard is just an ordinary hand-editable
+ * design, and the repeat above still reads its period off the first N
+ * notes exactly as before.
  */
 function rotatePattern(dir){
-  const units = readUnits(periodNow());
-  if (units.length < 2){ toast('nothing to rotate — the pattern is one step long'); return; }
-  const r = ((dir % units.length) + units.length) % units.length;
-  design.slots = stampUnits(units.slice(units.length - r).concat(units.slice(0, units.length - r)));
+  const tok = readTokens(periodNow());
+  if (tok.length < 2){ toast('nothing to rotate — the pattern is one note long'); return; }
+  const r = ((dir % tok.length) + tok.length) % tok.length;
+  design.slots = stampTokens(tok.slice(tok.length - r).concat(tok.slice(0, tok.length - r)));
   design.preset = null;
   rebuild();
   toast(`pattern rotated one step ${dir > 0 ? 'up' : 'down'}`);
@@ -1552,30 +1559,39 @@ $('rot-dn').onclick = () => rotatePattern(-1);
  * 32nd note, so editing anywhere inside the first N re-voices the whole
  * keyboard.  A group that straddles the boundary is cut at it.
  */
-/** read the first N notes as units: one per white, carrying its own gap */
-function readUnits(N){
+/** the first N notes as a flat string of tokens: WHITE, or a key-type name.
+ *  Gap -1 — the accidentals standing to the LEFT of white 0 — leads it, so
+ *  a pattern that begins on a black, gray or split reads back as one.   */
+const WHITE_TOK = '\u0000white';
+function readTokens(N){
   const src = design.slots || {};
-  const units = [];
-  let notes = 0;
-  for (let i = 0; notes < N; i++){
-    let acc = (src[i] || []).map(XM.canonType);
-    if (notes + 1 >= N) acc = [];
-    else if (notes + 1 + acc.length > N) acc = acc.slice(0, N - notes - 1);
-    units.push(acc);
-    notes += 1 + acc.length;
+  const tok = [];
+  for (const n of (src[-1] || [])){
+    if (tok.length >= N) break;
+    tok.push(XM.canonType(n));
   }
-  return units;
+  for (let i = 0; tok.length < N; i++){
+    tok.push(WHITE_TOK);
+    for (const n of (src[i] || [])){
+      if (tok.length >= N) break;
+      tok.push(XM.canonType(n));
+    }
+  }
+  return tok.slice(0, N);
 }
 
-/** say those units over and over until the 32nd note */
-function stampUnits(units){
+/** say those tokens over and over until the 32nd note, and read the result
+ *  back out as a gap map.  A leading run of accidentals lands in gap -1;
+ *  everything after an accidental's nearest white to the left lands in
+ *  that white's own gap, which is the same shape computeLayout walks.  */
+function stampTokens(tok){
   const out = {};
-  let placed = 0, u = 0;
-  for (let i = 0; placed < XM.NOTES; i++){
-    placed++;                                  // white i itself
-    if (placed >= XM.NOTES) break;
-    const acc = units[u++ % units.length].slice(0, XM.NOTES - placed);
-    if (acc.length){ out[i] = acc; placed += acc.length; }
+  if (!tok.length || !tok.some(t => t === WHITE_TOK)) return out;
+  let white = -1;
+  for (let n = 0; n < XM.NOTES; n++){
+    const t = tok[n % tok.length];
+    if (t === WHITE_TOK){ white++; continue; }
+    (out[white] || (out[white] = [])).push(t);
   }
   return out;
 }
@@ -1583,9 +1599,9 @@ function stampUnits(units){
 function applyPeriod(){
   const N = design.period | 0;
   if (!N || N >= XM.NOTES) return;
-  const units = readUnits(N);
-  if (!units.length) return;
-  design.slots = stampUnits(units);
+  const tok = readTokens(N);
+  if (!tok.some(t => t === WHITE_TOK)) return;   // a period of pure accidentals is not a keyboard
+  design.slots = stampTokens(tok);
 }
 
 function rebuild(){
