@@ -355,6 +355,11 @@ function migrate(s){
   s.template = [null,null,null,null,null,null,null];
   delete s.overrides;
   if (s.autoScale === undefined) s.autoScale = true;
+  /* notes in scale: anything outside 2…32, or missing, is the whole
+   * keyboard said once — which is what every design saved before the
+   * repeat existed was */
+  const per = s.period | 0;
+  s.period = (per >= 2 && per <= XM.NOTES) ? per : XM.NOTES;
   return s;
 }
 
@@ -396,9 +401,12 @@ presetSel.onchange = () => {
     design = migrate(JSON.parse(JSON.stringify(custom[name])));
     design.preset = presetSel.value;
   } else {
+    /* a drafted sheet is written out as 32 individual keys, so it opens as
+     * the whole keyboard said once; a SAVED preset keeps the scale length
+     * it was saved with */
     design = XD.presetDesign(+presetSel.value);
+    design.period = XM.NOTES;
   }
-  design.period = XM.NOTES;
   forgetPressBlend();
   syncInputs(); rebuild();
 };
@@ -422,7 +430,11 @@ $('save-preset').onclick = () => {
   if (!name) return;
   const custom = loadCustomPresets();
   if (custom[name] && !confirm(`Overwrite existing preset "${name}"?`)) return;
-  custom[name] = JSON.parse(JSON.stringify(design));
+  /* the scale length is part of the design, not of the session: a preset
+   * that forgot it would come back as 32 loose keys that merely happen to
+   * look periodic, and the next edit inside the period would not repeat */
+  custom[name] = Object.assign(JSON.parse(JSON.stringify(design)),
+                               { period: periodNow() });
   saveCustomPresets(custom);
   buildPresetOptions();
   design.preset = CUSTOM_PREFIX + name;
