@@ -379,7 +379,7 @@
   /* Part colours.  One table, used by the WebGL preview and written into the
    * Blender log as materials, so the two renderings read the same.        */
   const COLORS = {
-    white: [0.95, 0.95, 0.93], black: [0.16, 0.16, 0.19],
+    white: [1.0, 1.0, 1.0], black: [0.16, 0.16, 0.19],
     gray:  [0.55, 0.55, 0.58], spine: [0.30, 0.31, 0.36],
     feet:  [0.24, 0.42, 0.60], press: [0.72, 0.45, 0.22]
   };

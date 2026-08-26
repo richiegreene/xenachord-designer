@@ -1587,7 +1587,7 @@ void main(){
  float key=max(dot(n,normalize(vec3(0.35,-0.5,0.8))),0.0);
  float fill=max(dot(n,normalize(vec3(-0.5,0.6,0.2))),0.0);
  float head=max(dot(n,v),0.0);
- gl_FragColor=vec4(uC*(0.26+0.46*key+0.16*fill+0.22*head),1.0);}`;
+ gl_FragColor=vec4(min(uC*(0.34+0.46*key+0.16*fill+0.28*head),vec3(1.0)),1.0);}`;
 let locPos,locNrm,locMVP,locC,locEye,locOfs;
 if (gl){
   const sh=(t,src)=>{const o=gl.createShader(t);gl.shaderSource(o,src);gl.compileShader(o);
@@ -1814,7 +1814,7 @@ projBtn.onclick=()=>{
   draw();
 };
 
-const BG_DARK=[0.075,0.08,0.095], BG_LIGHT=[222/255,225/255,229/255];
+const BG_DARK=[0.075,0.08,0.095], BG_LIGHT=[214/255,214/255,214/255];
 let bgColor=BG_DARK.slice();
 const themeBtn=$('v-theme');
 themeBtn.onclick=()=>{
