@@ -202,6 +202,8 @@
     font-size:11.5px}
   .presswrap input[type=range]{width:100%;margin:7px 0 0;accent-color:var(--accent)}
   .presswrap .hint{margin:5px 0 0}
+  .rotbtns{display:flex;gap:5px}
+  .rotbtns button{padding:2px 12px;font-size:12px;line-height:1.4}
 </style>
 </head>
 <body>
@@ -217,7 +219,7 @@
       </div>
       <button class="primary wide" id="clear-all" style="width:100%;margin-top:9px"
         title="32 identical white keys, narrowed so that all 32 fit inside spine half A + half B">
-        ↺ Clear All: 32 White Keys</button>
+        ↺ Clear All (32 White Keys)</button>
       <p class="fixed-note" style="display:none"><b>32 keys, always.</b> One AKM320 — spine half A
         and half B, 16 sensor feet each. Drop a key into a gap and whites come
         off the right-hand end to pay for it; everything then re-widens so the
@@ -231,16 +233,21 @@
     </fieldset>
 
     <fieldset>
-      <legend>Repeating Layout: Notes in Scale</legend>
+      <legend>Repeating Layout</legend>
       <div class="presswrap"
         title="How many notes there are in the scale before it repeats. At 32 the whole keyboard is one arrangement; below that, the key types of the first N notes are the period, stamped out again and again up to the right.">
         <div class="pressrow">
-          <label for="period">↻ Notes in Scale</label>
+          <label for="period">Notes in Scale</label>
           <span id="period-v" class="pressval">32</span>
         </div>
         <input id="period" type="range" min="2" max="32" step="1" value="32">
-        <p class="hint" id="periodinfo">32 = no repeat &middot; below that the first N notes&rsquo; key
-          types repeat across the keyboard</p>
+        <div class="pressrow" style="margin-top:9px">
+          <label>↕ Rotate Pattern by Step</label>
+          <span class="rotbtns">
+            <button id="rot-dn" title="Rotate the pattern one step down — every key type moves one scale step to the left, and what falls off the bottom comes back on at the top">◀</button>
+            <button id="rot-up" title="Rotate the pattern one step up — every key type moves one scale step to the right, and what falls off the top comes back on at the bottom">▶</button>
+          </span>
+        </div>
       </div>
     </fieldset>
 
@@ -257,7 +264,7 @@
       <div class="presswrap"
         title="0% is your own arrangement · 100% stands every key as square over its sensor pad as the widths allow.">
         <div class="pressrow">
-          <label for="presspct">⤓ Optimize for Sensor Press</label>
+          <label for="presspct">Optimize for Sensor Press</label>
           <span id="presspct-v" class="pressval">0%</span>
         </div>
         <input id="presspct" type="range" min="0" max="100" step="1" value="0">
@@ -1515,6 +1522,26 @@ $('period').oninput = e => {
   rebuild();
 };
 
+/* ---- rotate the pattern by one scale step ----
+ * A step is a white and whatever it carries in its own gap, so rotating
+ * moves every key type one degree along the scale and wraps what falls off
+ * one end back on at the other.  It is applied once, to the arrangement
+ * itself, rather than kept as a number — so the rotated keyboard is just
+ * an ordinary hand-editable design, and the repeat above still reads its
+ * period off the first N notes exactly as before.
+ */
+function rotatePattern(dir){
+  const units = readUnits(periodNow());
+  if (units.length < 2){ toast('nothing to rotate — the pattern is one step long'); return; }
+  const r = ((dir % units.length) + units.length) % units.length;
+  design.slots = stampUnits(units.slice(units.length - r).concat(units.slice(0, units.length - r)));
+  design.preset = null;
+  rebuild();
+  toast(`pattern rotated one step ${dir > 0 ? 'up' : 'down'}`);
+}
+$('rot-up').onclick = () => rotatePattern(+1);
+$('rot-dn').onclick = () => rotatePattern(-1);
+
 /* ===================== repeating layout =====================
  *
  * NOTES IN SCALE.  A design is normally 32 keys arranged one at a time; a
@@ -1525,12 +1552,9 @@ $('period').oninput = e => {
  * 32nd note, so editing anywhere inside the first N re-voices the whole
  * keyboard.  A group that straddles the boundary is cut at it.
  */
-function applyPeriod(){
-  const N = design.period | 0;
-  if (!N || N >= XM.NOTES) return;
+/** read the first N notes as units: one per white, carrying its own gap */
+function readUnits(N){
   const src = design.slots || {};
-
-  /* read the period: one unit per white, carrying the gap after it */
   const units = [];
   let notes = 0;
   for (let i = 0; notes < N; i++){
@@ -1540,9 +1564,11 @@ function applyPeriod(){
     units.push(acc);
     notes += 1 + acc.length;
   }
-  if (!units.length) return;
+  return units;
+}
 
-  /* stamp it out over the 32 */
+/** say those units over and over until the 32nd note */
+function stampUnits(units){
   const out = {};
   let placed = 0, u = 0;
   for (let i = 0; placed < XM.NOTES; i++){
@@ -1551,7 +1577,15 @@ function applyPeriod(){
     const acc = units[u++ % units.length].slice(0, XM.NOTES - placed);
     if (acc.length){ out[i] = acc; placed += acc.length; }
   }
-  design.slots = out;
+  return out;
+}
+
+function applyPeriod(){
+  const N = design.period | 0;
+  if (!N || N >= XM.NOTES) return;
+  const units = readUnits(N);
+  if (!units.length) return;
+  design.slots = stampUnits(units);
 }
 
 function rebuild(){
