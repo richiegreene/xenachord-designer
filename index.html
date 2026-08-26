@@ -6,9 +6,9 @@
 <title>Xenachord Designer — Cimbalo Cromatico</title>
 <style>
   :root {
-    --bg:#15161a; --panel:#1e1f25; --panel2:#25262e; --line:#33343d;
+    --bg:#15161a; --panel:#1e1f25; --panel2:#25262e; --panel-bright:#2f313a; --line:#33343d;
     --text:#e9e9ec; --dim:#9a9ba4; --accent:#6fb7ff; --warn:#ffb454; --ok:#79d18b;
-    --kw:#f3f3f0; --kb:#2b2b31; --kg:#8d8e95;
+    --kw:#f3f3f0; --kb:#2b2b31; --kg:#8d8e95; --palette-bg:var(--panel-bright);
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
@@ -79,33 +79,26 @@
     border-left:2px solid var(--accent);background:rgba(111,183,255,.07);border-radius:0 4px 4px 0}
   .fixed-note b{color:var(--text)}
 
-  /* ---------- key type palette ---------- */
-  #palette{display:grid;grid-template-columns:1fr;gap:5px;margin-top:4px}
-  .chip{--c:#888;height:40px;border-radius:6px;border:1px solid var(--line);
-    cursor:grab;user-select:none;display:flex;align-items:center;gap:9px;
-    padding:0 9px 0 6px;font-size:10.5px;line-height:1.2;background:var(--panel2)}
+  /* ---------- key type palette ----------
+     A horizontal row of four icon-only chips. The visible label/blurb text
+     that used to sit beside each swatch is now tooltip-only (title attr) —
+     the chip is identified by its drawn shape, matched left-to-right against
+     the icon SVGs shipped alongside this file.                             */
+  #palette{display:flex;gap:4px;margin-top:4px;padding:6px 4px;
+    background:var(--palette-bg);border:1px solid var(--line);border-radius:8px}
+  .chip{--c:#888;flex:1 1 0;min-width:0;height:130px;border-radius:6px;
+    border:1px solid transparent;cursor:grab;user-select:none;display:flex;
+    align-items:center;justify-content:center;padding:2px}
   .chip:active{cursor:grabbing}
   .chip:hover{border-color:var(--accent)}
-  /* every swatch is the SAME width — only the depth differs, as in the sheet */
-  .chip .swbox{width:34px;height:30px;position:relative;flex:0 0 34px;
-    background:#141519;border:1px solid #2c2d35;border-radius:3px;overflow:hidden}
-  .chip .swatch{position:absolute;left:4px;right:4px;top:0;background:var(--c);
-    border:1px solid rgba(0,0,0,.5);border-top:0;border-radius:0 0 2px 2px}
-  .chip .txt{min-width:0}
-  .chip b{font-weight:600;display:block;white-space:nowrap}
-  .chip span{color:var(--dim);display:block;font-size:9.5px}
+  .chip .icon{width:100%;height:100%;display:flex;align-items:flex-start;justify-content:center}
+  /* fixed width, auto height: all four SVGs are drawn at real mm scale and
+     share nearly the same width, so a shared px-per-mm scale (rather than
+     each image independently fit to the box) is what makes the shorter
+     Gray key actually render shorter instead of being stretched to match
+     the others. */
+  .chip .icon img{width:30px;height:auto;max-height:100%;display:block}
   .chip.dragging{opacity:.45;border-color:var(--accent)}
-  .chip.w{--c:var(--kw)} .chip.b{--c:var(--kb)} .chip.g{--c:var(--kg)}
-
-  /* ---------- a split pair chip: two swatches, one component ----------
-     The swbox holds both halves side by side at the handedness the pair
-     is named for, so the chip LOOKS like what lands in the gap.         */
-  .chip.pair .swbox{display:flex;align-items:flex-start}
-  .chip.pair .half{position:relative;flex:1 1 0;height:100%}
-  .chip.pair .half .swatch{position:absolute;left:1px;right:1px;top:0}
-  .chip.pair .half.gray .swatch{background:var(--kg)}
-  .chip.pair .half.black .swatch{background:var(--kb)}
-  .chip.pair b{color:#cfe6ff}
 
   /* ---------- key-width proportion bar ----------
      Four segments drawn to scale against one another, with a grip on each
@@ -240,15 +233,6 @@
     <fieldset>
       <legend>Key Type Categories — drag these</legend>
       <div id="palette"></div>
-      <p class="hint">Every chip is drawn at one width; the real width comes from
-        the keyboard when it lands. A <b>split pair</b> is one component — it
-        drops both halves, and clicking either half removes both.</p>
-      <p class="hint"><b>The ends are gaps too.</b> There is a target before the
-        first white and one after the last, so a keyboard can <i>begin</i> or
-        <i>end</i> on an accidental. An end gap has a white on one side only,
-        so that white grows outward to stand under it — the accidental keeps
-        its place in the pitch and the deck runs unbroken to the edge of the
-        mount instead of finishing on a floating key.</p>
     </fieldset>
 
     <fieldset>
@@ -448,10 +432,29 @@ function showOrigin(){
 /* ===================== palette ===================== */
 const cssOf = t => XM.KEY_TYPES[t].css === 'white' ? 'w'
                : XM.KEY_TYPES[t].css === 'black' ? 'b' : 'g';
-const H_OF = d => Math.max(3, Math.round(30 * d / 85.0688));
 
-/* one draggable chip.  A `name` in KEY_PAIRS draws BOTH halves — the pair
- * is a single component and the chip has to look like one.               */
+/* the artwork for each draggable name — one SVG per chip, shipped as loose
+ * files alongside this page. Referenced (not inlined) so the file stays the
+ * single source of truth for the drawing; encodeURI handles the spaces,
+ * colon and "->" in the filenames.                                        */
+const ICON_FILE = {
+  'Full Sized Black':  'Full sized Black.svg',
+  'Full Sized Gray':   'Full Sized Gray 2.svg',
+  'Split: Gray→Black': 'Split: Gray->Black.svg',
+  'Split: Black→Gray': 'Split: Black->Gray.svg',
+};
+
+/* hover tooltip text — name only, no usage/width detail */
+const TOOLTIP = {
+  'Full Sized Black':  'Black Key',
+  'Full Sized Gray':   'Gray Key',
+  'Split: Gray→Black': 'Split Keys: Gray→Black',
+  'Split: Black→Gray': 'Split Keys: Black→Gray',
+};
+
+/* one draggable chip. The label/blurb that used to be printed beside the
+ * swatch is now tooltip-only (title attr) — the chip itself is just the
+ * icon SVG, so drag-and-drop keeps its data/handlers unchanged.           */
 function chipFor(name){
   const el = document.createElement('div');
   const pair = XM.KEY_PAIRS[name];
@@ -463,31 +466,19 @@ function chipFor(name){
   });
   el.addEventListener('dragend', ()=>{ dragType=null; el.classList.remove('dragging'); });
 
+  const iconSrc = './' + encodeURI(ICON_FILE[name]);
+  const iconHtml = `<div class="icon"><img src="${iconSrc}" alt="${name}" draggable="false"></div>`;
+
   if (pair){
-    const [rear, front] = pair.members;         // black, gray
-    const R = XM.KEY_TYPES[rear], F = XM.KEY_TYPES[front];
-    /* draw them in the order the chip is NAMED for: the gray arm's side
-     * first when it is on the left, the black first when it is not */
-    const halves = F.armSide === 'left'
-      ? [['gray', F], ['black', R]] : [['black', R], ['gray', F]];
     el.className = 'chip pair';
-    el.title = pair.blurb;
-    el.innerHTML =
-      `<div class="swbox">` + halves.map(([c, s]) =>
-        `<div class="half ${c}"><div class="swatch" style="height:${H_OF(s.depth)}px"></div></div>`
-      ).join('') + `</div>` +
-      `<div class="txt"><b>${pair.label}</b><span>` +
-      `pair · ${R.label} + ${F.label}</span></div>`;
+    el.title = TOOLTIP[name];
+    el.innerHTML = iconHtml;
     return el;
   }
 
-  const s = XM.KEY_TYPES[name];
   el.className = 'chip ' + cssOf(name);
-  el.title = s.blurb;
-  el.innerHTML = `<div class="swbox"><div class="swatch" style="height:${H_OF(s.depth)}px"></div></div>` +
-    `<div class="txt"><b>${s.label}</b><span>` +
-    `${s.kind==='white' ? 'white row · ' : 'single · '}` +
-    `depth ${s.depth.toFixed(2)} mm</span></div>`;
+  el.title = TOOLTIP[name];
+  el.innerHTML = iconHtml;
   return el;
 }
 
@@ -988,6 +979,11 @@ const PRESS_MIN = 0.55, PRESS_MAX = 1.9;
  * caps it against the whites either side, so this only has to stop the
  * search running away. */
 const PRESS_SLOT_MIN = 0.6, PRESS_SLOT_MAX = 2.5;
+/* a slot holding ONE key is held much closer to the class law.  A pair
+ * spreads apart as its slot widens and wants the room; a lone key does not
+ * move at all (see pressFitSlots), so all its width can do is eat the rear
+ * of the whites beside it — useful in small doses, ruinous past that. */
+const PRESS_SLOT_SOLO = 1.5;
 /* the step used to measure how fast a slot's halves spread as it widens */
 const PRESS_PROBE = 0.15;
 /* pull toward the widths the class law already gives.  The cursor has a
@@ -1157,73 +1153,105 @@ function pressSolve(rows, n, prior, S, lo, hi){
   return null;
 }
 
-/** half the distance between the two halves' material, per shared slot */
-function pressHalfSep(L2, bc){
-  const out = new Map();
-  for (const sl of L2.slots){
-    if (sl.members.length !== 2) continue;
-    const c = sl.members.map(m => bc.get(m));
-    out.set(sl.i, Math.abs(c[1] - c[0]) / 2);
-  }
-  return out;
-}
-
 /**
- * Set every split slot's width so its pair straddles the two pads it
- * drives.  Minimising the two halves' errors over the separation `h` gives
- * h = (f2 - f1)/2 exactly, whatever the slot's centre is — so each slot is
- * its own little problem and the pair's centre never enters it.
+ * Give every slot the width that best lands the presses around it.
  *
- * One probe layout gives d(separation)/d(scale) for every slot at once, so
- * this costs a single extra layout rather than one per slot.  The two END
- * gaps are skipped: their width feeds the grow that reaches the white
- * beside them out from under, so moving them drags that white as well.
+ * A SPLIT PAIR moves itself.  Its two halves share the slot centre and
+ * spread APART as the slot widens, each toward its own pad, so its width
+ * straightens both of its own connectors at once.
+ *
+ * A LONE KEY DOES NOT.  A full-sized black or gray is drawn symmetrically
+ * about its slot centre, so its material sits at offset 0.000 whatever its
+ * width — widening it cannot move its own press by a thousandth.  What its
+ * width DOES move is the two whites beside it, whose rears are cut back to
+ * clear it: narrow it and they keep more rear and their material spreads
+ * out toward their own pads; widen it and they give that up.  So a lone
+ * key is sized for its NEIGHBOURS, and which way it should go is a
+ * property of the design rather than a rule — some want it narrower, some
+ * wider.  That is why it is solved rather than legislated.
+ *
+ * Both cases are the same little least squares: how does each nearby key's
+ * material move as this slot's scale moves, and what does each of them
+ * want?  The rates are measured, not assumed.
+ *
+ * TWO PROBES, NOT ONE PER SLOT.  A white sits between slots i-1 and i, so
+ * perturbing every slot at once would confound the two.  Perturbing every
+ * OTHER slot leaves each white with exactly one moved neighbour, so two
+ * probe layouts give a clean rate for every slot in the keyboard.
  */
 function pressFitSlots(L2){
-  const bc = pressBackCentres(L2), h0 = pressHalfSep(L2, bc);
-  if (!h0.size) return false;
   const nW = L2.whites.length;
+  /* the two end gaps are left alone: their width feeds the grow that
+   * reaches the white beside them out from under, so moving them drags
+   * that white as well */
+  const live = L2.slots.filter(sl => sl.members.length && sl.i >= 0 && sl.i !== nW - 1);
+  if (!live.length) return false;
+
   const foot = new Map();
   for (const q of L2.notes) foot.set(q.ref, q.foot);
-  const want = new Map(), cur = new Map();
-  for (const sl of L2.slots){
-    if (sl.members.length !== 2 || sl.i === -1 || sl.i === nW - 1) continue;
-    const f = sl.members.map(m => foot.get(m)).filter(v => v != null);
-    if (f.length !== 2) continue;
-    want.set(sl.i, Math.abs(f[1] - f[0]) / 2);
-    cur.set(sl.i, XM.keyScale(design, XM.slotScaleId(sl.i)));
-  }
-  if (!want.size) return false;
+  const cur = new Map();
+  for (const sl of live) cur.set(sl.i, XM.keyScale(design, XM.slotScaleId(sl.i)));
 
-  const probe = JSON.parse(JSON.stringify(design));
-  for (const [i, sc] of cur){
+  const base = pressBackCentres(L2);
+  const par = i => ((i % 2) + 2) % 2;
+  const rate = new Map();
+
+  for (const half of [0, 1]){
+    const moving = live.filter(sl => par(sl.i) === half);
+    if (!moving.length) continue;
+    const probe = JSON.parse(JSON.stringify(design));
     const m = probe.keyScale || (probe.keyScale = {});
-    m[XM.slotScaleId(i)] = +(sc + PRESS_PROBE).toFixed(6);
+    for (const sl of moving)
+      m[XM.slotScaleId(sl.i)] = +(cur.get(sl.i) + PRESS_PROBE).toFixed(6);
+    let LP;
+    try { LP = XD.computeLayout(probe); } catch(e){ continue; }
+    /* if the probe fell on a different keyboard there is nothing to compare */
+    if (LP.notes.length !== L2.notes.length) continue;
+    const pb = pressBackCentres(LP);
+    const probeRef = new Map();
+    for (const q of LP.notes) probeRef.set(q.index, q.ref);
+    const index = new Map();
+    for (const q of L2.notes) index.set(q.ref, q.index);
+
+    for (const sl of moving){
+      const terms = [];
+      const add = ref => {
+        const i = index.get(ref);
+        if (i == null) return;
+        const pr = probeRef.get(i);
+        if (!pr) return;
+        const b = base.get(ref), f = foot.get(ref);
+        if (b == null || f == null) return;
+        terms.push({ a: (pb.get(pr) - b) / PRESS_PROBE, r: f - b });
+      };
+      for (const mm of sl.members) add(mm);          // the keys in the slot
+      if (L2.whites[sl.i]) add(L2.whites[sl.i]);      // the white on its left
+      if (L2.whites[sl.i + 1]) add(L2.whites[sl.i + 1]);
+      rate.set(sl.i, terms);
+    }
   }
-  let LP;
-  try { LP = XD.computeLayout(probe); } catch(e){ return false; }
-  const h1 = pressHalfSep(LP, pressBackCentres(LP));
 
   let moved = false;
-  for (const [i, target] of want){
-    const h = h0.get(i), hp = h1.get(i);
-    if (h == null || hp == null) continue;
-    const slope = (hp - h) / PRESS_PROBE;
-    if (!isFinite(slope) || Math.abs(slope) < 1e-6) continue;
-    let sc = cur.get(i) + (target - h) / slope;
-    sc = Math.min(PRESS_SLOT_MAX, Math.max(PRESS_SLOT_MIN, sc));
-    setKeyScale(XM.slotScaleId(i), sc);
+  for (const sl of live){
+    const terms = rate.get(sl.i);
+    if (!terms) continue;
+    let num = 0, den = 0;
+    for (const t of terms){
+      if (!isFinite(t.a) || !isFinite(t.r)) continue;
+      num += t.a * t.r; den += t.a * t.a;
+    }
+    /* nothing here responds to this slot's width — leave it at the law */
+    if (den < 1e-9) continue;
+    const hi = sl.members.length >= 2 ? PRESS_SLOT_MAX : PRESS_SLOT_SOLO;
+    let sc = cur.get(sl.i) + num / den;
+    sc = Math.min(hi, Math.max(PRESS_SLOT_MIN, sc));
+    if (Math.abs(sc - cur.get(sl.i)) < 1e-6) continue;
+    setKeyScale(XM.slotScaleId(sl.i), sc);
     moved = true;
   }
   return moved;
 }
 
-/**
- * Solve the press for the arrangement `base`, and return the widths it
- * wants.  Nothing is committed: the design is put back exactly as it was
- * before returning, so this is safe to call for the blend slider, which
- * needs the answer without taking it.
- */
 function solveSensorPress(base){
   const keep = design.keyScale ? JSON.parse(JSON.stringify(design.keyScale)) : null;
   const snap = () => JSON.parse(JSON.stringify(design.keyScale || {}));
@@ -1239,6 +1267,7 @@ function solveSensorPress(base){
   if (L0.whites.length < 2){ restore(); return null; }
 
   const was = pressOffset(L0);
+  const wasWarn = L0.warnings.length;
   let best = { e: was, ks: snap() };
 
   /* The model is exact for a given size and seat, but changing the widths
@@ -1267,7 +1296,10 @@ function solveSensorPress(base){
     try { L3 = XD.computeLayout(design); } catch(e){ break; }
     const e = pressOffset(L3);
     const gain = best.e.rms - e.rms;
-    if (gain > 1e-9) best = { e, ks: snap() };
+    /* straightening the press is never worth breaking the geometry for: a
+     * pass that reports more trouble than the arrangement started with is
+     * not allowed to win, however well it scores */
+    if (gain > 1e-9 && L3.warnings.length <= wasWarn) best = { e, ks: snap() };
     /* a pass that buys less than ten microns is not worth the next one */
     if (gain < 0.01) break;
   }

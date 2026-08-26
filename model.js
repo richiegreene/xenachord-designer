@@ -522,8 +522,8 @@
 
   /* what the palette can drop: the three full-sized keys, then the pairs */
   const PALETTE_ORDER = [
-    'Full Sized Black', 'Full Sized Gray',
-    'Split: Gray→Black', 'Split: Black→Gray'
+    'Full Sized Black', 'Split: Gray→Black',
+    'Split: Black→Gray', 'Full Sized Gray'
   ];
 
   /* ------------------------------------------------------------------ *
