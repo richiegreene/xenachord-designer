@@ -893,35 +893,49 @@ $('kreset').onclick = e => {
 /* ===================== optimize for sensor press =====================
  *
  * THE PRESS WANTS TO GO STRAIGHT DOWN.  Every key reaches down to its own
- * sensor foot, and the feet do not move: 32 of them at a fixed 11.30005 mm
- * pitch, seated on the AKM320.  The keys sit on the WHITE PITCH, which is
- * a different number — so a key's centre and the centre of the foot it
- * drives are generally not the same x, and the connector between them has
- * to lean across that offset.  The sharper that lean, the more of the
- * press twists instead of pushing, and the less of the dome's travel
- * reaches the sensor.
+ * sensor foot, and the feet do not move: 32 pads on the AKM320, at the
+ * measured (and slightly uneven) pitches in FOOT.stepsA / stepsB.  The
+ * keys sit on the WHITE PITCH, a different number — so a key's material
+ * and the pad it drives are generally not at the same x, and the connector
+ * between them leans across the difference.  The sharper that lean, the
+ * more of the press twists instead of pushing, and the less of the dome's
+ * travel reaches the sensor.
  *
- * The offset is not fixed by the sheet: it falls out of the widths.  A
- * white's x0 is the previous white's x0 plus that white's own width plus
- * the 1.5 mm gap, and an accidental sits at the plain midpoint between its
- * two whites.  So the row is a cursor driven by the white widths alone,
- * and `keyScale` already lets a single white break the class law.  Those
- * multipliers are the free variables; the feet are the targets.
+ * WHAT IS MEASURED IS THE MATERIAL, NOT THE CENTRE LINE.  A key's nominal
+ * centre is not where it actually stands at the spine: a white's rear is
+ * cut back by whatever accidental leans into it, and BOTH HALVES OF A
+ * SPLIT PAIR SHARE ONE SLOT CENTRE while their material sits to either
+ * side of it.  keyBackSpan gives the span a key really presents at the
+ * spine face, and the middle of that span is what the connector has to
+ * start from — so that is what this aims at the foot.
  *
- * A white followed by an accidental carries two notes across its pitch and
- * wants to be about twice as wide as one followed by nothing — exactly the
- * variation the drafted sheets do not have, and exactly why their
- * connectors lean.
+ * TWO LEVERS, AND THEY DO DIFFERENT JOBS.
  *
- * THE MODEL IS EXACT, INCLUDING THE TWO END WHITES.  Every white and every
- * gap centre is a plain linear function of the widths — but an END gap has
- * no white on its outer side, so the engine grows the white beside it
- * OUTWARD after the cursor has run (see "THE WHITE BESIDE AN END GAP
- * REACHES OUT UNDER IT" in core.js).  That growth moves the white's centre
- * by half of itself and leaves the gap where it was, so it is measured and
- * subtracted before the solve and added back after.  Without it the last
- * white's row is wrong by the whole grow and the solve chases a target
- * that does not exist.
+ *   White widths move the ROW.  x0[i+1] = x0[i] + w[i] + 1.5 and an
+ *   accidental sits at the midpoint of its two whites, so the whole
+ *   keyboard is a cursor driven by the white widths, and every key and gap
+ *   centre is a plain linear function of them.  A white followed by an
+ *   accidental carries two notes across its pitch and wants to be about
+ *   twice as wide as one followed by nothing — exactly the variation the
+ *   drafted sheets do not have, and exactly why their connectors lean.
+ *
+ *   Slot widths move the MATERIAL INSIDE a gap.  A gap's centre is the
+ *   midpoint of its two whites and does not care how wide the gap is — but
+ *   the two halves of a split pair spread APART as the slot widens, each
+ *   toward its own foot.  Their ideal is therefore exact and local: the
+ *   pair's two back-spans should sit exactly as far apart as the two pads
+ *   they drive, whatever the pair's centre happens to be.  Widening a
+ *   split slot straightens BOTH of its connectors at once, which is why it
+ *   is worth doing even though it costs the neighbouring whites some rear.
+ *
+ * THE MODEL IS EXACT, INCLUDING THE TWO END WHITES.  An END gap has no
+ * white on its outer side, so the engine grows the white beside it OUTWARD
+ * after the cursor has run (see "THE WHITE BESIDE AN END GAP REACHES OUT
+ * UNDER IT" in core.js).  That growth moves the white's centre by half of
+ * itself and leaves the gap where it was, so it is measured and subtracted
+ * before the solve and added back after.  For the same reason the two end
+ * gaps' own widths are left alone: their width feeds that grow, so moving
+ * them drags the white beside them and costs more than it buys.
  *
  * THE TOTAL IS NOT OURS TO CHOOSE.  `s` is solved so the keyboard ends
  * exactly on the spine, so if the widths sum to less the size solve simply
@@ -930,20 +944,22 @@ $('kreset').onclick = e => {
  * already is — which pins `s` exactly, and makes the answer the true
  * optimum rather than one the size solve will overwrite.
  *
- * WHAT CANNOT BE FIXED.  Both halves of a split pair stand on one slot
- * centre and still drive two feet 11.3 mm apart; no width closes that.
- * Such a gap is aimed at the midpoint of its two feet — the best a shared
- * centre can do — and the residual is reported rather than chased.
- *
- * Slot multipliers are left alone: an accidental's width does not move its
- * centre, so it is not a lever here, and a hand-set accidental survives.
+ * WHAT NO WIDTH CAN FIX.  The 32 pads span about 350 mm; the keyboard is
+ * sized to the SPINE, which is about 372 mm.  The row is therefore spread
+ * over some 22 mm more than the sensors it drives, and the keys nearest
+ * the ends — the last one above all — are pushed outboard of their own
+ * pads no matter how the widths are shared out.  That residual is reported
+ * rather than chased.
  */
 
-/* how far a white may stray from its class.  Wide enough for the real
- * answer — a white carrying two notes needs about twice one carrying one —
- * and tight enough that no key is narrowed past the point where its
- * mid-section stops being a key. */
+/* how far a white may stray from its class */
 const PRESS_MIN = 0.55, PRESS_MAX = 1.9;
+/* how far a split slot may stray.  The engine's own ACC_RATIO_MAX still
+ * caps it against the whites either side, so this only has to stop the
+ * search running away. */
+const PRESS_SLOT_MIN = 0.6, PRESS_SLOT_MAX = 2.5;
+/* the step used to measure how fast a slot's halves spread as it widens */
+const PRESS_PROBE = 0.15;
 /* pull toward the widths the class law already gives.  The cursor has a
  * near-null direction — widen one white, narrow the next, and almost
  * nothing moves — and on a keyboard the feet cannot be matched at all (32
@@ -951,6 +967,30 @@ const PRESS_MIN = 0.55, PRESS_MAX = 1.9;
  * it into a saw-tooth that scores well and reads as nonsense.  This says:
  * of the answers that fit the feet equally well, take the evenest. */
 const PRESS_RIDGE = 1;
+
+/** where each key's material actually stands at the spine face */
+function pressBackCentres(L2){
+  const out = new Map();
+  for (const n of L2.notes){
+    const r = n.ref, white = n.kind === 'white';
+    const w = r.w || (white ? L2.wW : L2.aW);
+    const s = XM.keyBackSpan(r.cx, w, n.type,
+                             white ? r.ctxL : null, white ? r.ctxR : null);
+    out.set(n.ref, s ? (s.x0 + s.x1) / 2 : r.cx);
+  }
+  return out;
+}
+
+/** THE objective: how far each key's material is from the pad it drives */
+function pressOffset(L2){
+  const bc = pressBackCentres(L2);
+  let max = 0, sum = 0;
+  for (const n of L2.notes){
+    const d = Math.abs(bc.get(n.ref) - n.foot);
+    sum += d * d; if (d > max) max = d;
+  }
+  return { max, rms: L2.notes.length ? Math.sqrt(sum / L2.notes.length) : 0 };
+}
 
 /** the outward growth the engine adds to an end white AFTER the cursor */
 function pressGrows(L2){
@@ -965,8 +1005,10 @@ function pressGrows(L2){
  * widths before the end grow,
  *   white i centre = X0 + i*g + sum(W[j<i]) + W[i]/2
  *   gap   i centre = X0 + i*g + g/2 + sum(W[j<=i])
- * so every row is "some prefix of the widths equals this distance", and
- * the whole keyboard is one small least-squares problem.
+ * so every row is "some prefix of the widths equals this distance".  Each
+ * target is the pad MINUS the offset between the key's centre line and the
+ * material it actually presents, so solving the centres lands the
+ * material.
  */
 function pressModel(L2){
   const g = XM.SIZE.whiteGap, n = L2.whites.length, gr = pressGrows(L2);
@@ -975,19 +1017,27 @@ function pressModel(L2){
     w.w - (i === 0 ? gr.L : 0) - (i === n - 1 ? gr.R : 0));
   const foot = new Map();
   for (const q of L2.notes) foot.set(q.ref, q.foot);
-  /* a shared slot can only aim at the midpoint of the feet it drives */
-  const aim = sl => {
-    const f = sl.members.map(m => foot.get(m)).filter(v => v != null);
-    return f.length ? f.reduce((a, v) => a + v, 0) / f.length : null;
+  const bc = pressBackCentres(L2);
+  /* where this key's centre line has to be for its material to land on the
+   * pad.  A gap takes the average of what its members ask for — for a
+   * split pair that is the midpoint of the two pads, which is the best a
+   * shared centre can do; the slot's own width does the rest. */
+  const want = (ref, cx) => {
+    const f = foot.get(ref);
+    return f == null ? null : f - (bc.get(ref) - cx);
+  };
+  const mean = (sl) => {
+    const t = sl.members.map(m => want(m, sl.cx)).filter(v => v != null);
+    return t.length ? t.reduce((a, v) => a + v, 0) / t.length : null;
   };
   const rows = [];
-  /* the gap before white 0 rides on X0 alone — no width reaches it, so it
-   * is a constant the solve can only report, never move */
   const lead = L2.slots.find(s => s.i === -1 && s.members.length);
-  if (lead){ const T = aim(lead);
+  if (lead){ const T = mean(lead);
+    /* no width reaches the gap before white 0 — it rides on X0 alone, so
+     * the solve can only report it, never move it */
     if (T != null) rows.push({ a: new Array(n).fill(0), b: T - (X0 - g / 2) }); }
   L2.whites.forEach((w, i) => {
-    const T = foot.get(w);
+    const T = want(w, w.cx);
     if (T != null){
       const a = new Array(n).fill(0);
       for (let j = 0; j < i; j++) a[j] = 1;
@@ -996,7 +1046,7 @@ function pressModel(L2){
                         - (i === n - 1 ? gr.R / 2 : 0) - X0 - i * g });
     }
     const sl = L2.slots.find(q => q.i === w.i && q.i >= 0 && q.members.length);
-    if (sl){ const T2 = aim(sl);
+    if (sl){ const T2 = mean(sl);
       if (T2 != null){
         const a = new Array(n).fill(0);
         for (let j = 0; j <= i; j++) a[j] = 1;
@@ -1077,33 +1127,65 @@ function pressSolve(rows, n, prior, S, lo, hi){
   return null;
 }
 
-/** how far the row stands from what the feet want, in mm */
-function pressError(L2){
-  const foot = new Map();
-  for (const q of L2.notes) foot.set(q.ref, q.foot);
-  let sum = 0, cnt = 0, max = 0;
-  const eat = (cx, T) => {
-    if (T == null) return;
-    const d = Math.abs(cx - T);
-    sum += d * d; cnt++; if (d > max) max = d;
-  };
-  for (const w of L2.whites) eat(w.cx, foot.get(w));
-  for (const sl of L2.slots) if (sl.members.length){
-    const f = sl.members.map(m => foot.get(m)).filter(v => v != null);
-    if (f.length) eat(sl.cx, f.reduce((a, v) => a + v, 0) / f.length);
+/** half the distance between the two halves' material, per shared slot */
+function pressHalfSep(L2, bc){
+  const out = new Map();
+  for (const sl of L2.slots){
+    if (sl.members.length !== 2) continue;
+    const c = sl.members.map(m => bc.get(m));
+    out.set(sl.i, Math.abs(c[1] - c[0]) / 2);
   }
-  return { rms: cnt ? Math.sqrt(sum / cnt) : 0, max };
+  return out;
 }
 
-/** the plain figure: how far each key really is from the foot it drives,
- *  split pairs and all — what the connectors actually have to lean across */
-function footOffset(L2){
-  let max = 0, sum = 0;
-  for (const q of L2.notes){
-    const d = Math.abs(q.cx - q.foot);
-    sum += d * d; if (d > max) max = d;
+/**
+ * Set every split slot's width so its pair straddles the two pads it
+ * drives.  Minimising the two halves' errors over the separation `h` gives
+ * h = (f2 - f1)/2 exactly, whatever the slot's centre is — so each slot is
+ * its own little problem and the pair's centre never enters it.
+ *
+ * One probe layout gives d(separation)/d(scale) for every slot at once, so
+ * this costs a single extra layout rather than one per slot.  The two END
+ * gaps are skipped: their width feeds the grow that reaches the white
+ * beside them out from under, so moving them drags that white as well.
+ */
+function pressFitSlots(L2){
+  const bc = pressBackCentres(L2), h0 = pressHalfSep(L2, bc);
+  if (!h0.size) return false;
+  const nW = L2.whites.length;
+  const foot = new Map();
+  for (const q of L2.notes) foot.set(q.ref, q.foot);
+  const want = new Map(), cur = new Map();
+  for (const sl of L2.slots){
+    if (sl.members.length !== 2 || sl.i === -1 || sl.i === nW - 1) continue;
+    const f = sl.members.map(m => foot.get(m)).filter(v => v != null);
+    if (f.length !== 2) continue;
+    want.set(sl.i, Math.abs(f[1] - f[0]) / 2);
+    cur.set(sl.i, XM.keyScale(design, XM.slotScaleId(sl.i)));
   }
-  return { max, rms: L2.notes.length ? Math.sqrt(sum / L2.notes.length) : 0 };
+  if (!want.size) return false;
+
+  const probe = JSON.parse(JSON.stringify(design));
+  for (const [i, sc] of cur){
+    const m = probe.keyScale || (probe.keyScale = {});
+    m[XM.slotScaleId(i)] = +(sc + PRESS_PROBE).toFixed(6);
+  }
+  let LP;
+  try { LP = XD.computeLayout(probe); } catch(e){ return false; }
+  const h1 = pressHalfSep(LP, pressBackCentres(LP));
+
+  let moved = false;
+  for (const [i, target] of want){
+    const h = h0.get(i), hp = h1.get(i);
+    if (h == null || hp == null) continue;
+    const slope = (hp - h) / PRESS_PROBE;
+    if (!isFinite(slope) || Math.abs(slope) < 1e-6) continue;
+    let sc = cur.get(i) + (target - h) / slope;
+    sc = Math.min(PRESS_SLOT_MAX, Math.max(PRESS_SLOT_MIN, sc));
+    setKeyScale(XM.slotScaleId(i), sc);
+    moved = true;
+  }
+  return moved;
 }
 
 function optimizeSensorPress(){
@@ -1113,16 +1195,23 @@ function optimizeSensorPress(){
   catch(e){ return toast('the keyboard does not lay out — nothing to optimize'); }
   if (L0.whites.length < 2) return toast('too few white keys to re-space');
 
-  const was = footOffset(L0);
-  let best = { e: pressError(L0), ks: snap() };
+  const was = pressOffset(L0);
+  let best = { e: was, ks: snap() };
 
   /* The model is exact for a given size and seat, but changing the widths
-   * moves both a little — so solve, apply, measure, and solve again from
-   * where the engine actually put things.  It settles in one or two. */
+   * moves both a little, and the two levers lean on each other — a wider
+   * split slot cuts its neighbouring whites' rears, which moves their
+   * material.  So solve, apply, measure, and solve again from where the
+   * engine actually put things.  It settles in one or two. */
   for (let pass = 0; pass < 6; pass++){
     let L2;
     try { L2 = XD.computeLayout(design); } catch(e){ break; }
     if (L2.whites.length < 2) break;
+
+    if (pressFitSlots(L2)){
+      try { L2 = XD.computeLayout(design); } catch(e){ break; }
+    }
+
     const M = pressModel(L2), wW = L2.wW;
     const S = M.W.reduce((a, v) => a + v, 0);
     const ws = pressSolve(M.rows, M.n, M.W, S,
@@ -1130,9 +1219,10 @@ function optimizeSensorPress(){
                           wW * Math.min(XM.KEY_SCALE_MAX, PRESS_MAX));
     if (!ws) break;
     L2.whites.forEach((w, i) => setKeyScale(XM.whiteScaleId(w.i), ws[i] / wW));
+
     let L3;
     try { L3 = XD.computeLayout(design); } catch(e){ break; }
-    const e = pressError(L3);
+    const e = pressOffset(L3);
     if (e.rms < best.e.rms - 1e-9) best = { e, ks: snap() };
   }
 
@@ -1141,11 +1231,11 @@ function optimizeSensorPress(){
   design.preset = null;
   refresh();
 
-  const now = footOffset(XD.computeLayout(design));
+  const now = best.e;
   if (now.rms >= was.rms - 5e-3)
     return toast(`already as square over the sensors as these widths allow ` +
-                 `— worst offset ${was.max.toFixed(2)} mm`);
-  toast(`sensor press: key-to-foot offset ${was.rms.toFixed(2)} → ` +
+                 `— worst reach ${was.max.toFixed(2)} mm`);
+  toast(`sensor press: key-to-pad reach ${was.rms.toFixed(2)} → ` +
         `${now.rms.toFixed(2)} mm typical, worst ${was.max.toFixed(2)} → ` +
         `${now.max.toFixed(2)} mm`);
 }
