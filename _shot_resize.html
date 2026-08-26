@@ -32,6 +32,7 @@
     width:22px;height:22px;padding:0;border-radius:50%;
     display:flex;align-items:center;justify-content:center;
     font-size:12px;line-height:1}
+  #v-theme.light{background:rgba(230,231,235,.9);color:#1e1f25}
   /* ---------- viewer overlay ---------- */
   #viewbar2{position:absolute;left:12px;bottom:12px;display:flex;align-items:center;
     gap:12px;background:rgba(30,31,37,.86);backdrop-filter:blur(4px);
@@ -639,19 +640,6 @@ function setSlot(i, names){
 }
 
 const PX = 2.0;  // px per mm
-
-/* WHICH GRIP IS BEING HELD, BY NAME.  Every pointermove rebuilds the strip
- * and throws away the element the pointer is on, so "the held grip" cannot
- * be an element — it is an id the freshly built one is matched against, so
- * the divider stays lit under the pointer for the length of the drag. */
-let gripHeld = null;
-function mkGrip(gid, title){
-  const g = document.createElement('div');
-  g.className = 'kb-grip' + (gid === gripHeld ? ' on' : '');
-  g.dataset.gid = gid; g.title = title;
-  return g;
-}
-
 function buildStrip(){
   const inner = $('stripInner'); inner.innerHTML='';
   const H = 170;
@@ -706,11 +694,13 @@ function buildStrip(){
    * solve has nothing to undo — the neighbour simply pays for it.     */
   for (let i = 0; i + 1 < L.whites.length; i++){
     const a = L.whites[i], b = L.whites[i+1];
-    const g = mkGrip('white:' + i,
-      `drag to trade width between white ${a.i} (${a.w.toFixed(2)} mm) ` +
-      `and white ${b.i} (${b.w.toFixed(2)} mm)`);
+    const g = document.createElement('div');
+    g.className = 'kb-grip';
+    g.dataset.kind = 'white'; g.dataset.i = i;
     g.style.left = X((a.x1 + b.x0)/2) + 'px';
     g.style.top = GRIP_TOP + 'px'; g.style.height = GRIP_H + 'px';
+    g.title = `drag to trade width between white ${a.i} (${a.w.toFixed(2)} mm) ` +
+              `and white ${b.i} (${b.w.toFixed(2)} mm)`;
     inner.appendChild(g);
   }
 
@@ -743,11 +733,13 @@ function buildStrip(){
      * takes nothing from its neighbours' pitch — it eats into the rear of
      * the whites either side, which is what the 0.86x ceiling bounds.  */
     if (sl.members.length) for (const side of [-1, 1]){
-      const g = mkGrip('slot:' + sl.i + ':' + side,
-        `drag to resize the keys in gap ${sl.i} ` +
-        `(${sl.w.toFixed(2)} mm) — the whites either side give way`);
+      const g = document.createElement('div');
+      g.className = 'kb-grip';
+      g.dataset.kind = 'slot'; g.dataset.i = sl.i; g.dataset.side = side;
       g.style.left = ((1 + sl.w/2 + side*sl.w/2)*PX) + 'px';
       g.style.top = '0px'; g.style.height = (54*1.5) + 'px';
+      g.title = `drag to resize the keys in gap ${sl.i} ` +
+                `(${sl.w.toFixed(2)} mm) — the whites either side give way`;
       d.appendChild(g);
     }
     d.addEventListener('dragover', e=>{ e.preventDefault(); d.classList.add('over'); });
@@ -838,15 +830,15 @@ function liveLayout(){
     window.removeEventListener('pointercancel', stop);
     document.body.classList.remove('resizing');
     inner().classList.remove('resizing');
-    drag = null; pending = 0; gripHeld = null;
+    drag = null; pending = 0;
     refresh();
   };
 
   $('strip').addEventListener('pointerdown', e => {
     const g = e.target.closest('.kb-grip'); if (!g || drag || !L) return;
     e.preventDefault(); e.stopPropagation();
-    const [kind, si] = g.dataset.gid.split(':'), i = +si;
-    if (kind === 'white'){
+    const i = +g.dataset.i;
+    if (g.dataset.kind === 'white'){
       const wb = L.classW.white;
       drag = { kind:'white', i, x:e.clientX, base:wb,
                a: L.whites[i].w / wb, b: L.whites[i+1].w / wb };
@@ -859,7 +851,6 @@ function liveLayout(){
       drag = { kind:'slot', i, x:e.clientX, cx: sl.cx,
                base: L.classW[wide.cls] };
     }
-    gripHeld = g.dataset.gid;
     g.classList.add('on');
     document.body.classList.add('resizing');
     inner().classList.add('resizing');
@@ -1236,6 +1227,7 @@ themeBtn.onclick=()=>{
   const light=bgColor===BG_LIGHT;
   bgColor=light?BG_DARK:BG_LIGHT;
   themeBtn.textContent=light?'⏾':'●';
+  themeBtn.classList.toggle('light',!light);
   draw();
 };
 
@@ -1525,6 +1517,16 @@ window.addEventListener('keydown',e=>{
 /* ===================== boot ===================== */
 buildPalette(); buildVisToggles(); syncInputs(); rebuild();
 requestAnimationFrame(()=>{ fit(); requestAnimationFrame(fit); });
+</script>
+
+<script>
+window.addEventListener('load', ()=>setTimeout(()=>{
+  design = XD.presetDesign(19);
+  design.keyScale = { w3: 1.45, w4: 0.62, a7: 1.55 };
+  refresh();
+  document.querySelectorAll('.kb-grip').forEach(g=>g.classList.add('on'));
+  $('strip').scrollLeft = 0;
+}, 300));
 </script>
 </body>
 </html>

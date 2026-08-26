@@ -32,6 +32,7 @@
     width:22px;height:22px;padding:0;border-radius:50%;
     display:flex;align-items:center;justify-content:center;
     font-size:12px;line-height:1}
+  #v-theme.light{background:rgba(230,231,235,.9);color:#1e1f25}
   /* ---------- viewer overlay ---------- */
   #viewbar2{position:absolute;left:12px;bottom:12px;display:flex;align-items:center;
     gap:12px;background:rgba(30,31,37,.86);backdrop-filter:blur(4px);
@@ -1236,6 +1237,7 @@ themeBtn.onclick=()=>{
   const light=bgColor===BG_LIGHT;
   bgColor=light?BG_DARK:BG_LIGHT;
   themeBtn.textContent=light?'⏾':'●';
+  themeBtn.classList.toggle('light',!light);
   draw();
 };
 
@@ -1525,6 +1527,66 @@ window.addEventListener('keydown',e=>{
 /* ===================== boot ===================== */
 buildPalette(); buildVisToggles(); syncInputs(); rebuild();
 requestAnimationFrame(()=>{ fit(); requestAnimationFrame(fit); });
+</script>
+<script>
+/* headless harness — not part of the app */
+function log(){ const d=document.createElement('div'); d.className='TESTLOG';
+  d.textContent=[].slice.call(arguments).join(' '); document.body.appendChild(d);
+  console.log('TEST', [].slice.call(arguments).join(' ')); }
+function pt(el,type,x,y){ el.dispatchEvent(new PointerEvent(type,
+  {bubbles:true,cancelable:true,clientX:x,clientY:y,pointerId:1,isPrimary:true,button:0})); }
+function winpt(type,x,y){ window.dispatchEvent(new PointerEvent(type,
+  {bubbles:true,cancelable:true,clientX:x,clientY:y,pointerId:1,isPrimary:true,button:0})); }
+function dragGrip(sel, dxpx){
+  const g=document.querySelector(sel);
+  if(!g) return log('MISSING GRIP', sel);
+  const r=g.getBoundingClientRect(), x=r.left+r.width/2, y=r.top+r.height/2;
+  log('grip', sel, 'cursor:', getComputedStyle(g).cursor, 'at', x.toFixed(1), y.toFixed(1));
+  pt(g,'pointerdown',x,y);
+  log('  body.resizing during drag:', document.body.classList.contains('resizing'));
+  winpt('pointermove', x+dxpx, y);
+  const still=document.querySelector('.kb-grip.on');
+  log('  a grip stays lit mid-drag:', !!still, still?still.dataset.gid:'-');
+  winpt('pointerup', x+dxpx, y);
+  log('  body.resizing after drag:', document.body.classList.contains('resizing'));
+}
+window.addEventListener('load', ()=>setTimeout(()=>{
+ try{
+  const sp = XM.SPINE.halfB.x1 - XM.SPINE.halfA.x0;
+  design = XD.presetDesign(19); refresh();
+  log('grip count', document.querySelectorAll('.kb-grip').length,
+      '(white', document.querySelectorAll('.kb-grip[data-gid^=white]').length,
+      '/ slot', document.querySelectorAll('.kb-grip[data-gid^=slot]').length, ')');
+  log('before: w3', L.whites[3].w.toFixed(4), 'w4', L.whites[4].w.toFixed(4),
+      'span', (L.keyX1-L.keyX0).toFixed(4), 'spine', sp.toFixed(4));
+  const sum0 = L.whites[3].w + L.whites[4].w;
+  dragGrip('.kb-grip[data-gid="white:3"]', 30);   // +15 mm
+  log('after:  w3', L.whites[3].w.toFixed(4), 'w4', L.whites[4].w.toFixed(4),
+      'sum kept', Math.abs(L.whites[3].w+L.whites[4].w-sum0)<1e-6,
+      'span', (L.keyX1-L.keyX0).toFixed(4), 'overhang', L.overhang.toFixed(5));
+  log('keyScale', JSON.stringify(design.keyScale));
+  const s5=L.slots.find(q=>q.i===5);
+  log('slot5 before', s5.w.toFixed(4));
+  dragGrip('.kb-grip[data-gid="slot:5:1"]', 14);  // +7 mm out
+  const s5b=L.slots.find(q=>q.i===5);
+  log('slot5 after ', s5b.w.toFixed(4), 'ceiling',
+      (XM.ACC_RATIO_MAX*Math.min(L.whites[5].w,L.whites[6].w)).toFixed(4));
+  log('span', (L.keyX1-L.keyX0).toFixed(4), 'overhang', L.overhang.toFixed(5),
+      'warnings', L.warnings.length);
+  log('keyScale', JSON.stringify(design.keyScale));
+  log('sizeread mentions resized:', /resized by hand/.test($('sizeread').innerHTML));
+  // persistence
+  save(); const back = JSON.parse(localStorage.getItem(LS));
+  log('persisted keyScale', JSON.stringify(back.keyScale));
+  // python log
+  log('py has key_scales:', /"key_scales"/.test(XD.pythonLog(L, design)));
+  // reset
+  $('kreset').click();
+  log('after reset keyScale', JSON.stringify(design.keyScale),
+      'w3', L.whites[3].w.toFixed(4), 'w4', L.whites[4].w.toFixed(4));
+  log('DONE');
+ }catch(e){ log('ERROR', e && e.stack || e); }
+}, 400));
 </script>
 </body>
 </html>

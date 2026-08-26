@@ -287,6 +287,41 @@
   const whiteFloor = r => Math.max(WIDTH_RATIO_MIN,
     Math.max(r.black, r.gray, r.split) / ACC_RATIO_MAX);
 
+  /* ------------------------------------------------------------------ *
+   *  ONE KEY'S OWN WIDTH                                                *
+   *                                                                     *
+   *  The four class ratios are the keyboard's LAW: they say what a      *
+   *  black is, everywhere.  A design may still say that THIS black is   *
+   *  wider than the law, and `keyScale` is where it says so — one       *
+   *  multiplier per key, on top of whatever its class already carries.  *
+   *  A white's id is "w<index>"; a gap's is "a<index>", and a gap is    *
+   *  the unit rather than the key because both halves of a split pair   *
+   *  stand in one gap and therefore share one width, exactly as they    *
+   *  share the `split` class.                                           *
+   *                                                                     *
+   *  Absent or 1 means "as the law says", so a keyboard nobody has      *
+   *  hand-resized carries no keyScale at all and reads exactly as it    *
+   *  did before.  The ACC_RATIO_MAX ceiling above is a statement about  *
+   *  a white and the accidental beside IT, so once widths vary key by   *
+   *  key it has to be applied key by key too — computeLayout does that  *
+   *  against each gap's own two whites.                                 *
+   * ------------------------------------------------------------------ */
+  const KEY_SCALE_MIN = 0.25, KEY_SCALE_MAX = 4.0;
+  const whiteScaleId = i => 'w' + i;
+  const slotScaleId  = i => 'a' + i;
+
+  /** the multiplier key `id` carries, defaulted and clamped */
+  function keyScale(design, id) {
+    const v = +(((design && design.keyScale) || {})[id]);
+    return isFinite(v) && v > 0
+      ? Math.min(KEY_SCALE_MAX, Math.max(KEY_SCALE_MIN, v)) : 1;
+  }
+  /** how many keys this design has resized by hand */
+  function keyScaleCount(design) {
+    const m = (design && design.keyScale) || {};
+    return Object.keys(m).filter(k => Math.abs(keyScale(design, k) - 1) > 1e-4).length;
+  }
+
   /** the width one class takes at size `s` */
   const classWidth = (cls, s, r) =>
     s * SIZE.whitePerUnit * ((r || WIDTH_RATIO_DEFAULT)[cls] || ACC_RATIO);
@@ -2555,6 +2590,8 @@
     whiteWidth, whitePitch, accWidth, slotDelta,
     WIDTH_CLASSES, CLASS_LABEL, WIDTH_RATIO_DEFAULT, ACC_RATIO,
     WIDTH_RATIO_MIN, WIDTH_RATIO_MAX, ACC_RATIO_MAX, accCeiling, whiteFloor,
+    KEY_SCALE_MIN, KEY_SCALE_MAX, whiteScaleId, slotScaleId,
+    keyScale, keyScaleCount,
     widthRatios, classWidth, classOfType,
     pushTri, pushQuad, pushBox, rectWithHoles,
     ctxKey, profileFor, profilePoints, buildKey, keyPolygons,

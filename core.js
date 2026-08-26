@@ -222,13 +222,24 @@
     const whites = [], slots = [];
     let placed = 0, cut = null;
 
+    /* THE PITCH IS STILL A PITCH, PLUS WHAT RESIZING HAS PUSHED.  Every
+     * white used to sit at i * wP because every white was the same width;
+     * a design may now say that THIS white is wider than the law, so each
+     * one sits at i * wP plus the drift its resized predecessors have
+     * accumulated.  Written this way rather than as a running cursor so a
+     * keyboard nobody has resized keeps drift at exactly zero and lands on
+     * i * wP to the last bit — the drafted profiles are looked up on the
+     * key's own numbers, and a one-ulp wobble in x is not free.        */
+    let drift = 0;
     for (let i = 0; placed < NOTES; i++) {
       const wp = (i + rot) % 7;
-      const x0 = i * wP;
+      const ww = wW * XM.keyScale(design, XM.whiteScaleId(i));
+      const x0 = i * wP + drift;
       whites.push({
-        i, x0, x1: x0 + wW, cx: x0 + wW / 2, w: wW,
+        i, x0, x1: x0 + ww, cx: x0 + ww / 2, w: ww,
         period: wp, type: 'Full Sized White'
       });
+      drift += ww - wW;
       placed++;
       if (placed >= NOTES) break;
 
@@ -237,21 +248,25 @@
       const wanted = names || [];
       if (!wanted.length) {
         slots.push({
-          i, period: p, cx: whites[i].cx + wP / 2,
+          i, period: p,
+          cx: whites[i].cx + (whites[i].w + XM.SIZE.whiteGap) / 2,
           w: aW, names: names ? names.slice() : null, members: [],
           placed: true
         });
         continue;
       }
 
-      /* the plain midpoint between its two whites — no lean, see model.js */
-      const cx = whites[i].cx + wP / 2;
+      /* the plain midpoint between its two whites — no lean, see model.js.
+       * Measured off this white's own width rather than the class pitch,
+       * so it stays the midpoint when the whites are not all one size. */
+      const cx = whites[i].cx + (whites[i].w + XM.SIZE.whiteGap) / 2;
       const members = [];
       for (let k = 0; k < wanted.length && placed < NOTES; k++) {
         const spec = XM.KEY_TYPES[wanted[k]];
         if (!spec) throw new Error('unknown key type: ' + wanted[k]);
-        /* both halves of a split share the gap, so they share its width */
-        const mw = cw(spec.widthClass);
+        /* both halves of a split share the gap, so they share its width —
+         * and therefore also share the gap's own hand-set multiplier */
+        const mw = cw(spec.widthClass) * XM.keyScale(design, XM.slotScaleId(i));
         members.push({
           type: wanted[k], spec, cx, w: mw, cls: spec.widthClass,
           x0: cx - mw / 2, x1: cx + mw / 2, slot: i, ord: k
@@ -271,6 +286,25 @@
     // a trailing empty slot carries no notes and no geometry — drop it
     while (slots.length && slots[slots.length - 1].i >= whites.length - 1 &&
            !slots[slots.length - 1].members.length) slots.pop();
+
+    /* ---- the accidental ceiling, applied gap by gap ----
+     * ACC_RATIO_MAX says an accidental may not be wider than 0.86x the
+     * white it stands beside: past that the white has no rear left to cut
+     * away for it, and no inset can clear it.  widthRatios enforces that
+     * for the CLASS against the class white; once a design resizes single
+     * keys the statement has to be made about the two whites this gap
+     * actually stands between, and the narrower of them is the binding
+     * one.  This is a limit, not a warning — the gap simply stops there. */
+    for (const sl of slots) {
+      if (!sl.members.length) continue;
+      const a = whites[sl.i], b = whites[sl.i + 1];
+      const lim = XM.ACC_RATIO_MAX *
+        Math.min(a ? a.w : Infinity, b ? b.w : Infinity);
+      if (isFinite(lim)) for (const m of sl.members) if (m.w > lim) {
+        m.w = lim; m.x0 = m.cx - lim / 2; m.x1 = m.cx + lim / 2;
+      }
+      sl.w = sl.members.reduce((n, k) => Math.max(n, k.w), 0) || aW;
+    }
 
     /* ---- neighbour context + the clearance the accidentals cut out ----
      * A white's rear is derived from what actually stands beside it: the
@@ -351,7 +385,7 @@
       const key = n.type + '|' + n.cx + '|' + (n.kind === 'white' ? 'w' : 'a');
       if (!drafted.has(key)) {
         const r = n.ref, white = n.kind === 'white';
-        const w = white ? wW : (r.w || aW);
+        const w = r.w || (white ? wW : aW);
         const lb = white ? r.ctxL : null, rb = white ? r.ctxR : null;
         /* the span the key presents AT THE SPINE, not its overall extent —
          * the two halves of a pair share an overall extent (each is drawn
@@ -499,7 +533,7 @@
       z0 = Math.min(z0, e); z1 = Math.max(z1, g);
     };
     for (const w of L.whites) {
-      const e = XM.keyExtent(w.cx, L.wW, w.type, w.ctxL, w.ctxR);
+      const e = XM.keyExtent(w.cx, w.w, w.type, w.ctxL, w.ctxR);
       grow(e.x0, e.x1, e.y0, e.y1, e.z0, e.z1);
     }
     for (const sl of L.slots) for (const m of sl.members) {
@@ -576,7 +610,7 @@
       return {
         name: n.name, index: n.index, type: n.type,
         layer: XM.KEY_TYPES[n.type].layer,
-        cx: r.cx, w: white ? L.wW : (r.w || L.aW),
+        cx: r.cx, w: r.w || (white ? L.wW : L.aW),
         lb: white ? r.ctxL : null, rb: white ? r.ctxR : null,
         foot: r.foot
       };
@@ -610,7 +644,7 @@
      * so the key's own triangulation is left exactly as drafted. */
     const bkeys = pairKeys(L);
     for (const w of L.whites)
-      out.white.push(...XM.buildKey(w.cx, L.wW, w.type, w.ctxL, w.ctxR, null));
+      out.white.push(...XM.buildKey(w.cx, w.w, w.type, w.ctxL, w.ctxR, null));
     for (const sl of L.slots) {
       for (const m of sl.members)
         out[m.spec.layer].push(...XM.buildKey(m.cx, m.w, m.type, null, null, null));
@@ -816,6 +850,13 @@
       p('    "width_', c, '":  ', f(L.classW[c]), ',      # ratio ',
         f(L.ratios[c], 5), ' of a white');
     p('    "slot_delta":   ', f(L.delta), ',');
+    if (XM.keyScaleCount(d)) {
+      const ks = Object.keys(d.keyScale).sort();
+      p('    # keys resized by hand, on top of their class: "w<i>" a white,');
+      p('    # "a<i>" the gap after white i (both halves of a split share it)');
+      p('    "key_scales":   {', ks.map(k =>
+        '"' + k + '": ' + f(XM.keyScale(d, k), 5)).join(', '), '},');
+    }
     p('}');
     p('');
     p('# --- world placement -----------------------------------------------------');
@@ -851,7 +892,7 @@
       const r = n.ref;
       const spec = XM.KEY_TYPES[n.type];
       const white = spec.kind === 'white';
-      const w = white ? L.wW : (r.w || L.aW);
+      const w = r.w || (white ? L.wW : L.aW);
       const e = XM.keyExtent(r.cx, w, n.type, white ? r.ctxL : null, white ? r.ctxR : null);
       const nm = 'K' + String(n.index).padStart(2, '0') + '_' +
         (n.kind === 'white' ? 'W' + r.i + '_' + r.name
