@@ -662,8 +662,21 @@
    *  is a reconstruction of the drafted shape; it is the drafted shape.   *
    * ==================================================================== */
 
-  const ctxKey = (lb, rb) =>
-    (lb == null ? 'n' : lb) + '|' + (rb == null ? 'n' : rb);
+  /* A NEIGHBOUR CONTEXT IS NULL, OR { h, d }.  `h` is half the gap's
+   * width as a ratio of this white's — the whole of it plus the half gap
+   * at an end, where the white stands under all of it — and `d` is the
+   * depth of the deepest key in it.  Both decide the white's rear, so
+   * both belong in the profile's identity.  A bare number is still read
+   * as an `h` with a drafted depth, which is what the drafted contexts
+   * of every non-white key type are.                                  */
+  const ctxHalf  = c => c == null ? 0 : (typeof c === 'number' ? c : c.h);
+  const ctxDepth = c => (c == null || typeof c === 'number')
+    ? ACC_DEPTH_DRAFTED : c.d;
+  const ctxKey = (lb, rb) => {
+    const one = c => c == null ? 'n'
+      : typeof c === 'number' ? String(c) : c.h + '@' + c.d;
+    return one(lb) + '|' + one(rb);
+  };
 
   /* ==================================================================== *
    *  THE WHITE KEY'S REAR IS DERIVED, NOT DRAFTED                        *
@@ -712,7 +725,39 @@
     L_OUT: 0.337838, L_IN: 0.381081, C_L: 0.647297, C_R: 0.690541,
     R_IN:  0.956757, R_OUT: 1.0
   };
-  const stepYOf = b => (b === W_ROLE.R_OUT ? STEP_Y_OUTER : STEP_Y_INNER);
+  /* the drafted beta of the front shell's LEFT inner wall — the other half
+   * of the left step's corner pair, and restated as a millimetre below */
+  const W_FRONT_L_IN = 0.043243;
+  /* ------------------------------------------------------------------ *
+   *  HOW DEEP THE WHITE IS CUT BACK                                     *
+   *                                                                     *
+   *  THE STEP IS THE ACCIDENTAL'S OWN FRONT, PLUS ITS CLEARANCE.  The   *
+   *  two drafted planes above are 1.5 and 2.5 mm forward of 52.5688 —   *
+   *  the front of a Full Sized Black, and of a Split Gray, the deepest  *
+   *  things that ever stand in a gap.  Held as constants they say that  *
+   *  EVERY white is cut back that far whatever stands beside it, and a  *
+   *  Full Sized Gray stops 10 mm short of them: 11.5 mm of notch with   *
+   *  nothing in it, bare mount where the white should have run on.  It  *
+   *  is only a shadow between two whites, but at the ends of the        *
+   *  keyboard the notch is the full width of the key and reads as a     *
+   *  bite taken out of the deck.                                        *
+   *                                                                     *
+   *  So both planes follow the deepest key actually in the gap, and      *
+   *  land back on the drafted numbers exactly when that key is a deep    *
+   *  one.  The floor keeps the step clear of the underside ribbing,      *
+   *  which ends at 35.3775 — without it a lone Split Black, 27.8188      *
+   *  deep and a key that only ever stands in front of a Split Gray on    *
+   *  the sheets, would put the step inside the ribs.                     *
+   * ------------------------------------------------------------------ */
+  const ACC_DEPTH_DRAFTED = 52.5688;                          // the deep ones
+  const STEP_CLEAR_OUTER = STEP_Y_OUTER - ACC_DEPTH_DRAFTED;  // 1.5
+  const STEP_CLEAR_INNER = STEP_Y_INNER - ACC_DEPTH_DRAFTED;  // 2.5
+  const STEP_Y_FLOOR = 36.8775;                               // clear of the ribs
+  function stepPlanes(depth) {
+    const d = depth > 0 ? depth : ACC_DEPTH_DRAFTED;
+    return { outer: Math.max(STEP_Y_FLOOR,     d + STEP_CLEAR_OUTER),
+             inner: Math.max(STEP_Y_FLOOR + 1, d + STEP_CLEAR_INNER) };
+  }
 
   /**
    * Split the two right-hand walls at the step planes so the rear can move
@@ -720,7 +765,8 @@
    * plus `rearSet` — every vertex index that belongs to the rear — and the
    * corners of the two step faces that have to be added.
    */
-  function twoSidedWhiteBase(p) {
+  function twoSidedWhiteBase(p, stepOuter, stepInner) {
+    const stepYOf = b => (b === W_ROLE.R_OUT ? stepOuter : stepInner);
     const V = [];
     for (let i = 0; i < p.nv; i++) {
       const j = i * 4;
@@ -812,7 +858,7 @@
    */
   const MIN_REAR = 0.14;    // the least of its own width a rear may keep
 
-  function deriveWhiteProfile(base, halfL, halfR) {
+  function deriveWhiteProfile(base, halfL, halfR, stepL) {
     /* `halfL` / `halfR` are HALF the neighbouring class's width as a ratio
      * of this white's, or 0 for a gap with nothing in it.  A class can be
      * widened until the two insets would meet in the middle; past that the
@@ -839,12 +885,28 @@
     const fIn  = { a: WALL,  b: 0 };
     const fInR = { a: -WALL, b: 1 };
 
+    /* THE LEFT STEP IS DRAFTED, THE RIGHT ONE SYNTHESISED.  The captured
+     * white already steps on its left at the two planes above, cut for a
+     * deep accidental; the base for the right side was split at the planes
+     * THIS gap asked for.  So the left one is moved here, to the front of
+     * whatever actually stands on that side — and only when something
+     * does, since with no inset the step is collinear and welds away. */
     const V = base.V.map(v => Object.assign({}, v));
+    /* A step is a pair of corners, not one: the INSET wall ends at the
+     * plane and the FULL-WIDTH wall begins on it, so both walls have a
+     * vertex there and both have to move together — moving only the inset
+     * one leaves the step where it was and tears the face between them. */
+    if (bL > 0 && stepL) for (const v of V) {
+      if (Math.abs(v.y - STEP_Y_OUTER) < 1e-6 &&
+          (v.b === W_ROLE.L_OUT || v.b === 0)) v.y = stepL.outer;
+      else if (Math.abs(v.y - STEP_Y_INNER) < 1e-6 &&
+          (v.b === W_ROLE.L_IN || Math.abs(v.b - W_FRONT_L_IN) < 1e-6)) v.y = stepL.inner;
+    }
     for (let i = 0; i < V.length; i++) {
       const v = V[i], q = put[v.b];
       if (q) { v.a = q.a; v.b = q.b; continue; }
       if (!base.rearSet.has(i)) {                   // a front face
-        if (Math.abs(v.b - 0.043243) < 1e-6) { v.a = fIn.a;  v.b = fIn.b; }
+        if (Math.abs(v.b - W_FRONT_L_IN) < 1e-6) { v.a = fIn.a;  v.b = fIn.b; }
         else if (Math.abs(v.b - W_ROLE.R_IN) < 1e-6) { v.a = fInR.a; v.b = fInR.b; }
         continue;
       }
@@ -904,25 +966,51 @@
     return { V, F, w0: p.w0, widths: p.widths, rearSet: new Set(), steps: [] };
   }
 
-  let WHITE_BASE = null, WHITE_BASE_2 = null;
-  const DERIVED_WHITE = {};
+  let WHITE_BASE = null;
+  const WHITE_BASE_2 = {};              // by the right step planes it was split at
+  let DERIVED_WHITE = {}, DERIVED_WHITE_N = 0;
   /**
-   * The white for a given pair of neighbours.  `halfL` / `halfR` are half
-   * the neighbouring class's width as a ratio of this white's — 0 for an
-   * empty gap — so a design that gives its blacks and its splits different
-   * widths gets a different white beside each.  Everything is still a pure
-   * ratio, so one profile per pair of ratios holds at every size; they are
-   * built on demand and cached by that pair.
+   * The white for a given pair of neighbours.  `cL` / `cR` are neighbour
+   * contexts (see ctxKey): how much of this white's width the gap on that
+   * side takes, and how deep the deepest key in it reaches.  The width
+   * decides how far the rear is cut back, the depth how far forward the
+   * cut runs — so a white beside a Full Sized Gray keeps the 10 mm of
+   * rear a white beside a Full Sized Black has to give up.  The width is
+   * a pure ratio, so one profile per (ratio, depth) pair holds at every
+   * size; they are built on demand and cached by that pair.
    */
-  function whiteProfile(halfL, halfR) {
-    const q = v => (Math.round((v || 0) * 1e5) / 1e5).toFixed(5);
-    const k = q(halfL) + '|' + q(halfR);
+  function whiteProfile(cL, cR) {
+    const halfL = ctxHalf(cL), halfR = ctxHalf(cR);
+    /* each side's step follows the depth of what stands on that side */
+    const stepL = stepPlanes(ctxDepth(cL)), stepR = stepPlanes(ctxDepth(cR));
+    /* THE KEY IS THE WHOLE RATIO.  It used to be rounded to 1e-5 while the
+     * profile was derived on the raw value, so two whites whose ratios
+     * agree to 1e-5 shared whichever profile was asked for first.  That
+     * was invisible while every white was the class width and every ratio
+     * was therefore the same number; once whites are resized key by key it
+     * made a joint's clearance depend on the order the cache filled.  The
+     * key carries the full ratio instead, so a profile is only ever handed
+     * back for the ratio it was actually built on.
+     *
+     * Dragging a key sweeps the ratio continuously and would otherwise
+     * pile up an entry per frame for ever, so the cache is emptied once it
+     * grows past what a keyboard can use at one time — 64 whites, two
+     * sides.  Re-deriving is cheap; the profiles are pure ratios and the
+     * live ones come straight back.                                    */
+    const k = halfL + '|' + halfR + '|' + stepL.outer + '|' + stepR.outer;
     if (!DERIVED_WHITE[k]) {
+      if (DERIVED_WHITE_N > 512) { DERIVED_WHITE = {}; DERIVED_WHITE_N = 0; }
       const src = KP.P[KP.INDEX['Full Sized White']['n|n']];
-      const base = halfR > 0
-        ? (WHITE_BASE_2 || (WHITE_BASE_2 = twoSidedWhiteBase(src)))
-        : (WHITE_BASE   || (WHITE_BASE   = plainWhiteBase(src)));
-      DERIVED_WHITE[k] = deriveWhiteProfile(base, halfL, halfR);
+      let base;
+      if (halfR > 0) {
+        const bk = stepR.outer + '|' + stepR.inner;
+        base = WHITE_BASE_2[bk] ||
+              (WHITE_BASE_2[bk] = twoSidedWhiteBase(src, stepR.outer, stepR.inner));
+      } else {
+        base = WHITE_BASE || (WHITE_BASE = plainWhiteBase(src));
+      }
+      DERIVED_WHITE[k] = deriveWhiteProfile(base, halfL, halfR, stepL);
+      DERIVED_WHITE_N++;
     }
     return DERIVED_WHITE[k];
   }

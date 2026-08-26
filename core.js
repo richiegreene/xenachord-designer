@@ -139,7 +139,35 @@
     const b = (w2 - w1) / (s2 - s1);
     if (!isFinite(b) || Math.abs(b) < 1e-9) return design.scale || 19;
     const a = w1 - b * s1;
-    return Math.max(1, (target - a) / b);
+    let s = Math.max(1, (target - a) / b);
+
+    /* TWO PROBES PIN IT ONLY WHILE ONE KEY STAYS THE EXTREME ONE.
+     *
+     * Every x is affine in s, so the extent is a MAXIMUM of affine
+     * functions — one per key — and that is only itself affine while the
+     * same key is winning it.  For every keyboard the sheets draw, it is:
+     * the two probes and the solve are exact, and the loop below sees the
+     * answer is already right and returns it untouched.
+     *
+     * Put a lone Split Black in an end gap on a cleared 32-white keyboard
+     * and it stops being true.  That key is shallow and narrow, the white
+     * beside it grows out over it, and which of the two reaches furthest
+     * swaps over somewhere between the probes and the answer — so the
+     * solve landed on the wrong straight line and the keyboard came out
+     * 0.8 mm long.  Where that happens the secant below walks onto the
+     * right one; it costs one extra layout on the designs that never
+     * needed it, and it does not move their answer by a bit.          */
+    for (let it = 0; it < 40 && Math.abs(span(s) - target) > 1e-9; it++) {
+      const t = s * 1.001 + 1e-3;
+      const ws = span(s), k = (span(t) - ws) / (t - s);
+      if (!isFinite(k) || Math.abs(k) < 1e-9) break;
+      const next = Math.max(1, s + (target - ws) / k);
+      if (!isFinite(next)) break;
+      const done = Math.abs(next - s) < 1e-12;
+      s = next;
+      if (done) break;
+    }
+    return s;
   }
 
   /** how many notes one seven-white period holds */
@@ -181,7 +209,10 @@
   function slotAt(design, i, rot) {
     const src = design.slots || design.overrides || {};
     let names = Object.prototype.hasOwnProperty.call(src, i) ? src[i] : undefined;
-    if (names === undefined && design.template)
+    /* gap -1 is the one before white 0.  A seven-slot template describes a
+     * repeating period BETWEEN whites and has nothing to say about it, so
+     * the fallback is skipped rather than wrapped round to slot 6. */
+    if (names === undefined && i >= 0 && design.template)
       names = design.template[(i + rot) % 7];
     if (!names) return null;
     const out = names.map(XM.canonType).filter(n => XM.KEY_TYPES[n]);
@@ -221,6 +252,17 @@
     const NOTES = XM.NOTES;
     const whites = [], slots = [];
     let placed = 0, cut = null;
+
+    /* ---- A KEYBOARD MAY BEGIN ON AN ACCIDENTAL ----
+     * Gap -1 is the gap BEFORE white 0.  Like the gap after the last white
+     * it has a white on one side only, and its keys are notes like any
+     * others — so they are counted here, before the whites are laid down,
+     * and the 32-note limit takes whites off the right-hand end to pay for
+     * them exactly as it does for a gap in the middle.  The geometry waits
+     * until white 0 exists to be measured from.  At least one white has to
+     * survive for the gap to stand beside, hence NOTES - 1.           */
+    const leadWanted = (slotAt(design, -1, rot) || []).slice(0, NOTES - 1);
+    placed += leadWanted.length;
 
     /* THE PITCH IS STILL A PITCH, PLUS WHAT RESIZING HAS PUSHED.  Every
      * white used to sit at i * wP because every white was the same width;
@@ -283,9 +325,41 @@
         placed: true
       });
     }
-    // a trailing empty slot carries no notes and no geometry — drop it
-    while (slots.length && slots[slots.length - 1].i >= whites.length - 1 &&
-           !slots[slots.length - 1].members.length) slots.pop();
+    /* ---- THE TWO END GAPS ----
+     * Every gap between two whites is already here, the empty ones
+     * included, because an empty gap is where the next key gets dropped.
+     * The ends are gaps too — one before white 0, one after the last white
+     * — and they are the only two the walk cannot produce, so they are put
+     * in by hand.  Until something is dropped into them they are the two
+     * empty targets at the ends of the strip; once something is, the
+     * keyboard begins or finishes on an accidental.                   */
+    const endGap = (i, cx, names, wanted) => {
+      const members = [];
+      for (let k = 0; k < wanted.length; k++) {
+        const spec = XM.KEY_TYPES[wanted[k]];
+        if (!spec) throw new Error('unknown key type: ' + wanted[k]);
+        const mw = cw(spec.widthClass) * XM.keyScale(design, XM.slotScaleId(i));
+        members.push({
+          type: wanted[k], spec, cx, w: mw, cls: spec.widthClass,
+          x0: cx - mw / 2, x1: cx + mw / 2, slot: i, ord: k
+        });
+      }
+      return { i, period: ((i % 7) + 7 + rot) % 7, cx,
+               w: members.reduce((m, k) => Math.max(m, k.w), 0) || aW,
+               names: names && names.length ? names.slice() : null,
+               members, end: true, placed: true };
+    };
+    if (whites.length) {
+      const w0 = whites[0], wL = whites[whites.length - 1];
+      slots.unshift(endGap(-1, w0.x0 - XM.SIZE.whiteGap / 2,
+                           leadWanted, leadWanted));
+      if (!slots.some(sl => sl.i === wL.i))
+        slots.push(endGap(wL.i, wL.cx + (wL.w + XM.SIZE.whiteGap) / 2, null, []));
+      else slots[slots.length - 1].end = true;
+    }
+    /* gap index -> gap.  It used to be enough that `slots[i]` WAS gap i,
+     * which stopped being true the moment a gap could sit before white 0. */
+    const slotOf = new Map(slots.map(sl => [sl.i, sl]));
 
     /* ---- the accidental ceiling, applied gap by gap ----
      * ACC_RATIO_MAX says an accidental may not be wider than 0.86x the
@@ -294,29 +368,98 @@
      * for the CLASS against the class white; once a design resizes single
      * keys the statement has to be made about the two whites this gap
      * actually stands between, and the narrower of them is the binding
-     * one.  This is a limit, not a warning — the gap simply stops there. */
+     * one.  This is a limit, not a warning — the gap simply stops there.
+     *
+     * AN END GAP IS PAID FOR BY ONE WHITE ALONE.  An interior gap is
+     * straddled, so each of its two whites gives up half of it and the
+     * 0.86 ceiling is what makes those two halves add up to the whole rear
+     * a white can spare.  At an end there is no second white: the one
+     * beside it stands under the entire accidental and gives up its full
+     * width plus the half gap, so the same "half the rear per gap" law
+     * solves to a lower ceiling.  See endRatio below for where the
+     * (a + g/2) / W it is solving comes from.                         */
+    const ROOM = XM.ACC_RATIO_MAX / 2;      // what one gap may take of a rear
     for (const sl of slots) {
       if (!sl.members.length) continue;
       const a = whites[sl.i], b = whites[sl.i + 1];
-      const lim = XM.ACC_RATIO_MAX *
-        Math.min(a ? a.w : Infinity, b ? b.w : Infinity);
-      if (isFinite(lim)) for (const m of sl.members) if (m.w > lim) {
+      let lim;
+      if (a && b) lim = XM.ACC_RATIO_MAX * Math.min(a.w, b.w);
+      else {
+        const w = (a || b).w, g = XM.SIZE.whiteGap;
+        lim = (ROOM * w + g * (ROOM - 1) / 2) / (1 - ROOM / 2);
+      }
+      if (isFinite(lim) && lim > 0) for (const m of sl.members) if (m.w > lim) {
         m.w = lim; m.x0 = m.cx - lim / 2; m.x1 = m.cx + lim / 2;
       }
       sl.w = sl.members.reduce((n, k) => Math.max(n, k.w), 0) || aW;
     }
 
+    /* ---- THE WHITE BESIDE AN END GAP REACHES OUT UNDER IT ----
+     * An accidental between two whites has their two fronts meeting
+     * beneath it, so the keyboard reads as continuous deck with the
+     * accidental standing on it.  One at an END has nothing on its outer
+     * side, and the keyboard finishes on a key with bare mount beside it.
+     *
+     * The accidental keeps its place in the pitch — moving it would break
+     * the spacing it shares with every other accidental — and the WHITE
+     * grows outward to its outer edge instead, which is precisely the job
+     * the two whites either side of an interior gap do between them.  The
+     * white's x on the inner side does not move, so nothing else in the
+     * row shifts; the size solve refits the small amount it added.    */
+    for (const sl of slots) {
+      if (!sl.members.length) continue;
+      const grow = XM.SIZE.whiteGap / 2 + sl.w / 2;
+      const w = sl.i === -1 ? whites[0]
+              : sl.i === whites.length - 1 ? whites[sl.i] : null;
+      if (!w) continue;
+      if (sl.i === -1) { w.x0 -= grow; w.endL = true; }
+      else             { w.x1 += grow; w.endR = true; }
+      w.w += grow; w.cx = (w.x0 + w.x1) / 2;
+    }
+
     /* ---- neighbour context + the clearance the accidentals cut out ----
      * A white's rear is derived from what actually stands beside it: the
-     * context is HALF the neighbouring gap's width as a ratio of this
-     * white's, or null for an empty gap.  With one accidental width that
-     * was the same number everywhere; now a white beside a wide split and
-     * a narrow black is cut back further on the split side.            */
-    const halfRatio = sl => (sl.w / 2) / wW;
+     * context is HALF the neighbouring gap's width AS A RATIO OF THIS
+     * WHITE'S OWN WIDTH, or null for an empty gap.  With one accidental
+     * width that was the same number everywhere; now a white beside a wide
+     * split and a narrow black is cut back further on the split side.
+     *
+     * IT IS THIS WHITE'S WIDTH THE RATIO IS AGAINST, NOT THE CLASS'S.
+     * deriveWhiteProfile places the rear edge at (1 - half) * w, so the
+     * inset it cuts is `half * w` — measured on the key being built.  Take
+     * the ratio against the class white instead and the two only agree
+     * while every white IS the class width: a white widened by hand gets
+     * an inset scaled up with it and pulls its rear away from the
+     * accidental, leaving the gap open; a narrowed one gets too little and
+     * its rear runs into the accidental's side.  Against its own width the
+     * inset lands on the accidental's edge less FIT.gap at any size, which
+     * is the fill-in the drafted whites have.                          */
+    /* THE CONTEXT IS A WIDTH AND A DEPTH.  How much of this white's width
+     * the gap takes decides how far its rear is cut back; how deep the
+     * deepest key in that gap reaches decides how far FORWARD the cut
+     * runs.  Passing only the width made every white give up its rear all
+     * the way to the drafted plane, which is the front of a deep
+     * accidental — so a white beside a Full Sized Gray, 10 mm shallower,
+     * was cut back past where the gray ends and left bare mount showing
+     * in front of it.  See stepPlanes in model.js.                    */
+    const depthOf = sl => sl.members.reduce((m, k) => Math.max(m, k.spec.depth), 0);
+    const halfRatio = (sl, w) => (sl.w / 2) / w.w;
+    /* AN END GAP IS NOT STRADDLED, so its white gives up the whole of it.
+     * deriveWhiteProfile puts the rear edge at back + (1 - b) * w, where
+     * back = whiteGap/2 - FIT.gap is the clearance an interior gap already
+     * provides.  At an end that clearance is not there to be counted, and
+     * the white has grown out to the accidental's outer edge, so landing
+     * the rear on the accidental's inner edge less FIT.gap wants
+     * b = (accidental + whiteGap/2) / width.  Same profile machinery, one
+     * side just gives up twice as much.                               */
+    const endRatio = (sl, w) => (sl.w + XM.SIZE.whiteGap / 2) / w.w;
+    const ctxOf = (sl, w, end) => (sl && sl.members.length)
+      ? { h: end ? endRatio(sl, w) : halfRatio(sl, w), d: depthOf(sl) }
+      : null;
     for (const w of whites) {
-      const gl = slots[w.i - 1], gr = slots[w.i];
-      w.ctxL = (gl && gl.members.length) ? halfRatio(gl) : null;
-      w.ctxR = (gr && gr.members.length) ? halfRatio(gr) : null;
+      const gl = slotOf.get(w.i - 1), gr = slotOf.get(w.i);
+      w.ctxL = ctxOf(gl, w, w.endL);
+      w.ctxR = ctxOf(gr, w, w.endR);
       w.profileExact = XM.profileFor(w.type, w.ctxL, w.ctxR).exact;
       w.shL = w.x0;
       w.shR = w.x1;
@@ -358,9 +501,12 @@
 
     /* ---- one note per foot, left to right ---- */
     const notes = [];
+    const leadSlot = slotOf.get(-1);
+    if (leadSlot) for (const m of leadSlot.members)
+      notes.push({ kind: 'acc', ref: m, cx: m.cx, type: m.type });
     for (const w of whites) {
       notes.push({ kind: 'white', ref: w, cx: w.cx, type: w.type });
-      const sl = slots.find(q => q.i === w.i);
+      const sl = slotOf.get(w.i);
       if (sl) for (const m of sl.members) notes.push({ kind: 'acc', ref: m, cx: m.cx, type: m.type });
     }
     /* Left to right — and when two keys share an x, the order has to be
@@ -865,10 +1011,14 @@
     p('WORLD_Z0 = ', pn(O.z0), '      # Z_world = z + WORLD_Z0');
     p('ORIGIN   = "', O.mode, '"        # ', ORIGIN_MODES[O.mode]);
     p('');
-    p('# --- what stands in each gap between the whites -------------------------');
+    p('# --- what stands in each gap ---------------------------------------------');
     p('# There is no repeating pattern behind this and no lean on any gap: each');
     p('# one sits at the plain midpoint between its two whites, so every white');
     p('# key is the same key and every waist is the same width.');
+    p('# Gap i is the gap AFTER white i. The two END gaps have a white on one');
+    p('# side only -- gap -1 comes before white 0, and the gap after the last');
+    p('# white finishes the keyboard -- and the white beside an end gap is');
+    p('# widened outward to its far edge, so it stands under the whole of it.');
     p('GAPS = {');
     for (const k of Object.keys(L.design.slots || {}).sort((a, b) => a - b)) {
       const t = (L.design.slots || {})[k];

@@ -133,8 +133,6 @@
   #wtable .sw{width:9px;height:9px;border-radius:2px;align-self:center}
   #wtable b{color:var(--text);font-weight:600}
   #wtable .n{color:var(--dim);text-align:right}
-  #wreset{color:var(--accent);text-decoration:none}
-  #wreset:hover{text-decoration:underline}
 
   /* ---------- derived size readout ---------- */
   #sizeread{font-size:10.5px;color:var(--dim);line-height:1.6;margin-top:8px;
@@ -160,6 +158,12 @@
   .kb-slot{position:absolute;border-radius:3px;
     outline:1px dashed transparent;outline-offset:-1px}
   .kb-slot.empty{outline-color:#3a3b45;background:rgba(255,255,255,.03)}
+  /* THE TWO ENDS ARE GAPS TOO.  One before the first white and one after
+     the last, so a keyboard can be begun or finished on an accidental.
+     Drawn a shade stronger than an interior empty gap because they sit
+     outside the run of keys, where a faint dashed box reads as nothing. */
+  .kb-slot.end.empty{outline-color:#4b5568;outline-style:dashed;
+    background:rgba(126,180,255,.05)}
   .kb-slot.over{outline-color:var(--accent);background:#2a3a4c}
   .kb-m{position:absolute;border-radius:2px;cursor:pointer;border:1px solid rgba(0,0,0,.5)}
   .kb-m.b{background:var(--kb)} .kb-m.g{background:var(--kg)}
@@ -230,27 +234,27 @@
       <p class="hint">Every chip is drawn at one width; the real width comes from
         the keyboard when it lands. A <b>split pair</b> is one component — it
         drops both halves, and clicking either half removes both.</p>
+      <p class="hint"><b>The ends are gaps too.</b> There is a target before the
+        first white and one after the last, so a keyboard can <i>begin</i> or
+        <i>end</i> on an accidental. An end gap has a white on one side only,
+        so that white grows outward to stand under it — the accidental keeps
+        its place in the pitch and the deck runs unbroken to the edge of the
+        mount instead of finishing on a floating key.</p>
     </fieldset>
 
     <fieldset>
       <legend>Key widths — drag the dividers</legend>
       <div id="wbar"></div>
       <div id="wtable"></div>
-      <p class="hint">The bar is the four classes drawn to scale against one
-        another. Drag a divider to trade width between two of them; the size
-        solve then re-fits the whole keyboard, so widening one class narrows
-        the others rather than running off the spine. An accidental stops at
-        0.86× a white — past that the white has no rear left to cut away for
-        it. <a href="#" id="wreset">reset to the sheet's law</a></p>
-      <p class="hint"><b>One key at a time.</b> The bar sets the law; a single
-        key can still break it. Hover a key's edge down in the strip and it
-        becomes a divider you can drag, the way a window's edge is. Between
-        two whites the drag trades width between exactly those two — one
-        widens, its neighbour pays — so the keyboard still ends at the spine.
-        On an accidental's own two sides it grows or shrinks about its
-        centre, eating into the rear of the whites either side until they
-        have no rear left to give. <a href="#" id="kreset">reset every key to
-        its class</a></p>
+      <button class="primary wide" id="optpress" style="width:100%;margin-top:9px"
+        title="The 32 sensor feet sit at a fixed 11.3 mm pitch and never move; the keys sit on the white pitch, which is a different number — so each key's connector has to lean across the offset between its own centre and the centre of the foot it drives, and the sharper that lean the more of the press twists instead of pushing straight down. This sets each white's width case by case so every key stands as nearly as possible directly over its own foot: a white with an accidental after it carries two notes across its pitch and widens, one with nothing after it narrows. Both halves of a split pair share one centre and still drive two feet 11.3 mm apart — that gap is aimed at the midpoint of the two, which is the best a shared centre can do.">
+        ⤓ Optimize for Sensor Press</button>
+      <button class="primary wide" id="wreset" style="width:100%;margin-top:6px"
+        title="The bar is the four classes drawn to scale against one another. Drag a divider to trade width between two of them; the size solve then re-fits the whole keyboard, so widening one class narrows the others rather than running off the spine. An accidental stops at 0.86× a white — past that the white has no rear left to cut away for it.">
+        ↺ Reset to Standard Scaling</button>
+      <button class="primary wide" id="kreset" style="width:100%;margin-top:6px"
+        title="One key at a time. The bar sets the law; a single key can still break it. Hover a key's edge down in the strip and it becomes a divider you can drag, the way a window's edge is. Between two whites the drag trades width between exactly those two — one widens, its neighbour pays — so the keyboard still ends at the spine. On an accidental's own two sides it grows or shrinks about its centre, eating into the rear of the whites either side until they have no rear left to give.">
+        ↺ Clear Ad Hoc Adjustments</button>
     </fieldset>
 
     <fieldset>
@@ -720,8 +724,17 @@ function buildStrip(){
     d.className = 'kb-slot' + (sl.members.length ? '' : ' empty');
     d.style.left = X(sl.cx-sl.w/2-1)+'px'; d.style.width=((sl.w+2)*PX)+'px';
     d.style.top = Y(0)+'px'; d.style.height = (54*1.5)+'px';
+    if (sl.end) d.classList.add('end');
     const held = XM.pairOfSlot(sl.names);
-    d.title = `gap ${sl.i}  x ${sl.cx.toFixed(3)}` +
+    /* the two ends are gaps like any other, but "gap -1" is not what they
+     * are to the person reading the strip */
+    const name = sl.i === -1 ? 'the gap before the first white'
+               : sl.end     ? 'the gap after the last white'
+               : `gap ${sl.i}`;
+    d.title = `${name}  x ${sl.cx.toFixed(3)}` +
+              (sl.end && !sl.members.length
+                ? ' — drop a key here to begin the keyboard on an accidental;'
+                  + ' the white beside it grows out to stand under it' : '') +
               (held ? '  ·  ' + held : '');
     const ordered = sl.members.slice().sort((a,b)=>b.spec.depth-a.spec.depth);
     for (const m of ordered){
@@ -876,6 +889,126 @@ $('kreset').onclick = e => {
   refresh();
   toast('every key back to its class width');
 };
+
+/* ===================== optimize for sensor press =====================
+ *
+ * THE PRESS WANTS TO GO STRAIGHT DOWN.  Every key reaches down to its own
+ * sensor foot, and the feet do not move: 32 of them at a fixed 11.30005 mm
+ * pitch, seated on the AKM320.  The keys, though, sit on the WHITE PITCH,
+ * which is a different number — so a key's centre and the centre of the
+ * foot it drives are generally not the same x, and the connector between
+ * them has to lean across that offset.  The bigger the offset the sharper
+ * the angle, the more the press wants to twist rather than push, and the
+ * less of the dome's travel goes into the sensor.
+ *
+ * The offset is not fixed by the sheet: it falls out of the widths.  A
+ * white's x0 is the previous white's x0 plus that white's own width plus
+ * the 1.5 mm gap, and the accidental in a gap sits at the plain midpoint
+ * between its two whites.  So the whole row is a cursor driven by the
+ * white widths alone, and `keyScale` already lets a single white be wider
+ * than its class says.  Those multipliers are therefore the free
+ * variables, and the feet are the targets.
+ *
+ * A white followed by an accidental has to carry TWO notes across its
+ * pitch and wants to be about twice as wide as a white followed by
+ * nothing — which is exactly the variation the drafted sheets do not
+ * have, and exactly why their connectors lean.
+ *
+ * WHAT CANNOT BE FIXED.  Both halves of a split pair stand on one slot
+ * centre and still drive two feet 11.3 mm apart; no width closes that.
+ * Such a gap is aimed at the midpoint of its two feet, which is the best
+ * a shared centre can do, and the residual is reported rather than
+ * chased.
+ *
+ * WHY IT ITERATES.  Changing the widths changes the keyboard's measured
+ * extent, so the size solve picks a new s and the whole row is re-seated
+ * against the spine.  One pass of the cursor solve is exact for a given s
+ * and starting x; the loop is there to let s and that starting x settle.
+ * Slot multipliers are left alone — an accidental's width does not move
+ * its centre, so it is not a lever here, and a hand-set accidental width
+ * survives the optimization.
+ */
+
+/** where each note would ideally stand: its own foot, or — for a shared
+ *  slot — the midpoint of the feet its members drive */
+function pressTargets(L2){
+  const foot = new Map();
+  for (const n of L2.notes) foot.set(n.ref, n.foot);
+  const white = new Map(), gap = new Map();
+  for (const w of L2.whites) if (foot.has(w)) white.set(w.i, foot.get(w));
+  for (const sl of L2.slots){
+    const fs = sl.members.map(m => foot.get(m)).filter(v => v != null);
+    if (fs.length) gap.set(sl.i, fs.reduce((a, v) => a + v, 0) / fs.length);
+  }
+  return { white, gap, foot };
+}
+
+/** how far the row stands from what the feet want, in mm */
+function pressError(L2){
+  const t = pressTargets(L2);
+  let sum = 0, n = 0, max = 0;
+  const eat = (cx, target) => {
+    if (target == null) return;
+    const d = Math.abs(cx - target);
+    sum += d * d; n++; if (d > max) max = d;
+  };
+  for (const w of L2.whites) eat(w.cx, t.white.get(w.i));
+  for (const sl of L2.slots) if (sl.members.length) eat(sl.cx, t.gap.get(sl.i));
+  return { rms: n ? Math.sqrt(sum / n) : 0, max, n };
+}
+
+function optimizeSensorPress(){
+  const g = XM.SIZE.whiteGap;
+  const clamp = v => Math.min(XM.KEY_SCALE_MAX, Math.max(XM.KEY_SCALE_MIN, v));
+  const snapshot = () => JSON.parse(JSON.stringify(design.keyScale || {}));
+  const before = (() => { try { return pressError(XD.computeLayout(design)); }
+                          catch(e){ return null; } })();
+  if (!before) return toast('the keyboard does not lay out — nothing to optimize');
+
+  let best = { err: before, keyScale: snapshot() };
+
+  for (let pass = 0; pass < 60; pass++){
+    let L2; try { L2 = XD.computeLayout(design); } catch(e){ break; }
+    if (!L2.whites.length) break;
+    const t = pressTargets(L2), wW = L2.wW;
+
+    /* one exact sweep of the cursor.  Each white is chosen against the two
+     * things that hang off it — its own centre and the centre of the gap
+     * that follows — and the cursor then advances on the width actually
+     * taken, so a clamped key is paid for by the ones after it rather than
+     * throwing the rest of the row off. */
+    let x0 = L2.whites[0].x0;
+    for (const w of L2.whites){
+      const T = t.white.get(w.i), G = t.gap.get(w.i);
+      let ww;
+      if (T == null) ww = w.w;
+      else if (G == null) ww = 2 * (T - x0);
+      /* least squares on (x0 + ww/2 - T) and (x0 + ww + g/2 - G) */
+      else ww = (T + 2 * G - 3 * x0 - g) / 2.5;
+      const sc = clamp(ww / wW);
+      setKeyScale(XM.whiteScaleId(w.i), sc);
+      x0 += wW * sc + g;
+    }
+
+    let L3; try { L3 = XD.computeLayout(design); } catch(e){ break; }
+    const err = pressError(L3);
+    if (err.rms < best.err.rms - 1e-9) best = { err, keyScale: snapshot() };
+    if (Math.abs(err.rms - before.rms) < 1e-9 && pass > 2) break;
+    if (err.rms < 1e-4) break;
+  }
+
+  design.keyScale = best.keyScale;
+  if (!Object.keys(design.keyScale).length) delete design.keyScale;
+  design.preset = null;
+  refresh();
+
+  const b = before, a = best.err;
+  toast(`sensor press: worst key-to-foot offset ` +
+        `${b.max.toFixed(2)} → ${a.max.toFixed(2)} mm, ` +
+        `typical ${b.rms.toFixed(2)} → ${a.rms.toFixed(2)} mm`);
+}
+
+$('optpress').onclick = e => { e.preventDefault(); optimizeSensorPress(); };
 
 /* ===================== rebuild ===================== */
 function refresh(){ syncInputs(); rebuild(); }
