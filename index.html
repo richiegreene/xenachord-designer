@@ -298,8 +298,6 @@
   .wave-ticks{display:flex;justify-content:space-between;
     color:var(--dim);font-size:10px;margin-top:3px;padding:0 2px}
   .wave-ticks span{font-variant-numeric:tabular-nums}
-  #play-synth .hint{color:var(--dim);font-size:11px;line-height:1.5}
-  #play-synth .hint b{color:var(--text);font-weight:600}
   #play-synth input[type=range]{width:100%;margin:5px 0 0;accent-color:var(--accent)}
 
   /* ---------- a key you can sound ----------
@@ -573,7 +571,8 @@
                    createTimbrePicker rather than spelled out here, so the two
                    apps cannot come to offer different shapes. -->
               <label class="tune-inline" for="s-family">Wave</label>
-              <select id="s-family"></select>
+              <select id="s-family"
+                title="Wavetable reads a fixed waveform at pitch, so how it sounds does not depend on how loud it is. Filtered wavetable is a sine phase-modulated by a low-passed copy of its own output — driven by the signal itself, so a quiet note is very nearly a sine and a loud one folds into a bright buzz, off the envelope below."></select>
               <canvas id="s-wave" class="scope" style="margin-top:9px"></canvas>
               <div class="pressrow" style="margin-top:7px">
                 <label for="s-timbre" id="s-label" style="margin:0;font-weight:600;
@@ -581,30 +580,14 @@
               </div>
               <input id="s-timbre" type="range" min="1000" max="1300" step="1" value="1200">
               <div class="wave-ticks" id="s-ticks"></div>
-              <p class="hint" style="margin:7px 0 0">
-                Two ways of making the same four shapes.
-                <b>Wavetable</b> reads a fixed waveform at pitch: what it sounds
-                like does not depend on how loud it is.
-                <b>Filtered wavetable</b> is a sine phase-modulated by a
-                low-passed copy of its own output — a resonator driven hard
-                enough to fold, rather than a shape looked up. Because the fold
-                is driven by the signal itself, a quiet note comes out very
-                nearly a pure sine and a loud one comes out a bright buzz, off
-                the one envelope below.
-              </p>
 
               <div class="tune-h" style="margin-top:12px">Envelope</div>
-              <canvas id="s-adsr" class="scope"></canvas>
+              <canvas id="s-adsr" class="scope"
+                title="Drag the corners: the first is the attack, the second the decay and the level it falls to, the last the release."></canvas>
               <div class="wave-ticks" id="s-adsr-ticks">
                 <span id="s-a">A</span><span id="s-d">D</span>
                 <span id="s-s">S</span><span id="s-r">R</span>
               </div>
-              <p class="hint" style="margin:7px 0 0">
-                Drag the corners. The first is the attack, the second is the
-                decay and the level it falls to, and the last is the release.
-                Because the fold is driven by amplitude, the envelope is the
-                timbre too: a slow attack opens the note up as it arrives.
-              </p>
             </div>
           </fieldset>
 
@@ -2123,6 +2106,8 @@ function meshToBuffer(tris){
   return {buf:b, n:n*3};
 }
 function uploadMeshes(){
+  clearSounding();
+  keyTriCache = new Map();
   if(!gl) return;
   for(const k of Object.keys(buffers)) gl.deleteBuffer(buffers[k].buf);
   buffers={};
@@ -2414,6 +2399,64 @@ if(navCanvas){
   window.addEventListener('resize', ()=>{ layoutGizmo(); drawGizmo(); });
 }
 
+/* --accent, as the shader wants it. The inspector's highlight and a sounding
+ * key are the same blue as the strip's, and they are the same blue as each
+ * other, because there is one number rather than three roundings of it. */
+const ACCENT = [111/255, 183/255, 255/255];
+
+/* ---- A KEY'S OWN TRIANGLES ----
+ * The one place a single key's geometry is built, and it is built the way
+ * buildMeshes builds it: at the key's OWN width, not its class's.
+ *
+ * That distinction is the whole of a bug worth naming. A white's width is
+ * solved per key — the size solve narrows them to fit the spine, and a
+ * dragged divider trades width between two of them — so L.wW is the class,
+ * not the key. A highlight built at L.wW is therefore a DIFFERENT key from
+ * the one it is meant to be highlighting: narrower or wider, with the real
+ * key showing along whichever edge it missed. Reading the width off the key
+ * is what makes the highlight cover the key however that key is sized.
+ *
+ * Cached, because picking now tests triangles rather than boxes and the same
+ * key is asked for on every pointer move; cleared with the meshes, since a
+ * rebuild is exactly when these stop describing anything.
+ */
+let keyTriCache = new Map();
+
+function keyTris(b){
+  const n = b.ref ? b.ref.noteIndex : null;
+  if(n == null) return null;
+  let t = keyTriCache.get(n);
+  if(t !== undefined) return t;
+  t = b.kind === 'white'
+    ? XM.buildKey(b.ref.cx, b.ref.w || L.wW, b.type, b.ref.ctxL, b.ref.ctxR, null)
+    : XM.buildKey(b.ref.cx, b.ref.w || L.aW, b.type, null, null, null);
+  if(!t || !t.length) t = null;
+  keyTriCache.set(n, t);
+  return t;
+}
+
+/* ---- the keys that are sounding ----
+ * Their own buffers, off the same geometry the inspector's highlight uses —
+ * so a split pair lights as the two keys it is, each half on its own, rather
+ * than as the one slot they share. */
+let soundBufs = [];
+
+function clearSounding(){
+  if(gl) for(const s of soundBufs) gl.deleteBuffer(s.buf.buf);
+  soundBufs = [];
+}
+
+function setSounding(notes){
+  clearSounding();
+  if(gl && L && notes && notes.size) for(const b of keyBoxes()){
+    const n = b.ref ? b.ref.noteIndex : null;
+    if(n == null || !notes.has(n)) continue;
+    const tris = keyTris(b);
+    if(tris) soundBufs.push({ buf: meshToBuffer(tris), part: b.part });
+  }
+  draw();
+}
+
 function drawPart(b, colour, ofs){
   gl.bindBuffer(gl.ARRAY_BUFFER,b.buf);
   gl.enableVertexAttribArray(locPos); gl.vertexAttribPointer(locPos,3,gl.FLOAT,false,24,0);
@@ -2442,10 +2485,17 @@ function draw(){
     drawPart(b, colorOf(k), [0,0,(EXPLODE_ORDER[explodeGroupOf(k)]||0)*explode]);
   }
   // highlight pass: nudged toward the camera so it always wins the depth test
+  const lift = mul(norm(sub(B.eye,B.tgt)), Math.max(0.25, cam.dist*0.0016));
   if(picked && pickBuf && visible[picked.part]){
     const z=(EXPLODE_ORDER[picked.part]||0)*explode;
-    const n=mul(norm(sub(B.eye,B.tgt)), Math.max(0.25, cam.dist*0.0016));
-    drawPart(pickBuf, [0.44,0.72,1.0], [n[0],n[1],z+n[2]]);
+    drawPart(pickBuf, ACCENT, [lift[0],lift[1],z+lift[2]]);
+  }
+  /* A key that is sounding, lit the same way and in the same blue as the one
+   * the strip lights — the two displays are one keyboard seen twice. */
+  for(const sb of soundBufs){
+    if(!visible[sb.part]) continue;
+    const z=(EXPLODE_ORDER[sb.part]||0)*explode;
+    drawPart(sb.buf, ACCENT, [lift[0],lift[1],z+lift[2]]);
   }
   $('camread').textContent =
     `az ${(cam.yaw*180/Math.PI).toFixed(0).padStart(4)}°  ` +
@@ -2459,12 +2509,17 @@ let drag=null;
 canvas.addEventListener('pointerdown',e=>{
   /* In Play a press that lands on a key is that key going down, not the start
    * of an orbit — see the note in play.js. Anywhere else still orbits. */
-  if(window.XPlay && window.XPlay.press(e)){ canvas.setPointerCapture(e.pointerId); return; }
+  if(window.XPlay && window.XPlay.press(e)){
+    try { canvas.setPointerCapture(e.pointerId); } catch(err) {}
+    return;
+  }
   drag={x:e.clientX,y:e.clientY,x0:e.clientX,y0:e.clientY,
         pan:e.shiftKey||e.button===1||e.button===2,moved:false};
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointermove',e=>{
+  /* A key being held is dragged from key to key, not orbited with. */
+  if(window.XPlay && window.XPlay.move(e)) return;
   if(!drag)return;
   const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
   drag.x=e.clientX; drag.y=e.clientY;
@@ -2526,6 +2581,41 @@ function rayBox(o,d,b,zo){
  * a different answer: Design wants the box so it can describe it, Play wants
  * the key so it can sound it. One cast, so the two can never disagree about
  * which key is under the pointer. */
+/* ---- WHERE A RAY MEETS A KEY, NOT THE BOX IT FITS IN ----
+ * Möller-Trumbore over the key's own triangles.
+ *
+ * A bounding box is the wrong question to ask about a split pair. Both halves
+ * are drawn across the whole slot — one arm running back at one depth, the
+ * other at another — so their boxes very nearly coincide, and whichever
+ * happened to be nearer along the ray took every click in the slot. The
+ * front half could not be reached at all. The two halves have quite distinct
+ * SURFACES, though, so testing the surface answers correctly for both, and
+ * a click lands on the half actually under the pointer.
+ */
+function rayTris(o,d,tris,zo){
+  let best=Infinity;
+  for(let i=0;i<tris.length;i+=9){
+    const ax=tris[i],   ay=tris[i+1], az=tris[i+2]+zo;
+    const bx=tris[i+3], by=tris[i+4], bz=tris[i+5]+zo;
+    const cx=tris[i+6], cy=tris[i+7], cz=tris[i+8]+zo;
+    const e1x=bx-ax, e1y=by-ay, e1z=bz-az;
+    const e2x=cx-ax, e2y=cy-ay, e2z=cz-az;
+    const px=d[1]*e2z-d[2]*e2y, py=d[2]*e2x-d[0]*e2z, pz=d[0]*e2y-d[1]*e2x;
+    const det=e1x*px+e1y*py+e1z*pz;
+    if(det>-1e-12 && det<1e-12) continue;          // ray parallel to the face
+    const inv=1/det;
+    const tx=o[0]-ax, ty=o[1]-ay, tz=o[2]-az;
+    const u=(tx*px+ty*py+tz*pz)*inv;
+    if(u<0||u>1) continue;
+    const qx=ty*e1z-tz*e1y, qy=tz*e1x-tx*e1z, qz=tx*e1y-ty*e1x;
+    const v=(d[0]*qx+d[1]*qy+d[2]*qz)*inv;
+    if(v<0||u+v>1) continue;
+    const t=(e2x*qx+e2y*qy+e2z*qz)*inv;
+    if(t>1e-6 && t<best) best=t;
+  }
+  return best===Infinity ? null : best;
+}
+
 function rayPick(e){
   if(!gl||!L) return null;
   const r=canvas.getBoundingClientRect();
@@ -2537,7 +2627,10 @@ function rayPick(e){
   for(const b of keyBoxes()){
     if(!visible[b.part]) continue;
     const zo=(EXPLODE_ORDER[b.part]||0)*explode;
-    const t=rayBox(B.eye,dir,b,zo);
+    // The box is the cull; the triangles are the answer.
+    if(rayBox(B.eye,dir,b,zo)==null) continue;
+    const tris=keyTris(b);
+    const t = tris ? rayTris(B.eye,dir,tris,zo) : rayBox(B.eye,dir,b,zo);
     if(t!=null && t<bt){ bt=t; best=b; }
   }
   return best;
@@ -2549,12 +2642,13 @@ function pickAt(e){
   picked=best;
   if(pickBuf){ gl.deleteBuffer(pickBuf.buf); pickBuf=null; }
   if(best){
-    let tris=null;
-    if(best.kind==='white') tris=XM.buildKey(best.ref.cx,L.wW,best.type,
-      best.ref.ctxL,best.ref.ctxR);
-    else if(best.kind==='acc') tris=XM.buildKey(best.ref.cx,best.ref.w||L.aW,best.type,null,null);
-    else { tris=[]; XM.pushBox(tris,best.x0,best.x1,best.y0,best.y1,best.z0,best.z1); }
-    if(tris.length) pickBuf=meshToBuffer(tris);
+    /* A key gets its own geometry; anything else that can be picked is only
+     * ever the box it was hit as. */
+    let tris = best.ref ? keyTris(best) : null;
+    if(!tris && !best.ref){
+      tris=[]; XM.pushBox(tris,best.x0,best.x1,best.y0,best.y1,best.z0,best.z1);
+    }
+    if(tris && tris.length) pickBuf=meshToBuffer(tris);
   }
   showInspect(best);
   draw();

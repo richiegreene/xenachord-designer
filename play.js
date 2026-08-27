@@ -39,7 +39,7 @@ const inPlay = () => document.body.classList.contains('mode-play');
 const STORE = 'xenachord.synth.v1';
 const S = {
   timbre: FILTERED_MIN + 200,          // filtered saw, the default
-  adsr: { a: 0.008, d: 0.12, s: 0.7, r: 0.25 },
+  adsr: { a: 0.016, d: 0.067, s: 0.38, r: 0.544 },
 };
 try { Object.assign(S, JSON.parse(localStorage.getItem(STORE) || '{}')); } catch (e) {}
 const save = () => { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) {} };
@@ -93,11 +93,52 @@ ro.observe($('s-adsr'));
  *  Sounding a key
  * ------------------------------------------------------------------ */
 
+/* ---------------------------------------------------------------------
+ *  What is sounding
+ *
+ *  Three things can hold a note down, and they are kept apart because they
+ *  come and go independently: a finger, the pedal, and — between them — what
+ *  the synth has actually been told. A note stops only when nothing wants it
+ *  any more, which is the one rule that makes a pedal a pedal.
+ * ------------------------------------------------------------------ */
+
 /** Which pointer is holding which key, so a release lets go of the right one. */
 const held = new Map();
 
+/** Notes the pedal caught: let go of by hand, still ringing. */
+const sustained = new Set();
+
+/** What the synth currently has on, so it is told only about changes. */
+let ringing = new Set();
+
+let pedal = false;
+
 function keyEls(note) {
   return document.querySelectorAll(`#stripInner [data-note="${note}"]`);
+}
+
+/**
+ * Bring the sound and both displays into line with what is being asked for.
+ *
+ * Every path goes through here rather than stopping notes itself: with a
+ * finger, a pedal and several pointers all able to want the same note, "is
+ * anything still asking for this?" is a question about the whole state and
+ * cannot be answered from inside one release.
+ */
+function settle() {
+  const want = new Set([...held.values(), ...sustained]);
+
+  for (const n of ringing) if (!want.has(n)) voice.noteOff(n);
+  ringing = want;
+
+  for (const el of document.querySelectorAll('#stripInner .sounding')) {
+    el.classList.remove('sounding');
+  }
+  for (const n of want) for (const el of keyEls(n)) el.classList.add('sounding');
+  /* The strip takes a class and the 3D view is handed the set to build
+   * highlight geometry from — different mechanisms, one list, so a key
+   * cannot be blue in one view and not the other. */
+  if (typeof window.setSounding === 'function') window.setSounding(want);
 }
 
 function press(pointerId, note) {
@@ -105,29 +146,59 @@ function press(pointerId, note) {
   release(pointerId);
   const hz = window.XTuning?.freqs?.[note];
   if (!(hz > 0)) return;
+  // Struck again while the pedal was holding it: the finger takes it back,
+  // and the note is re-struck rather than left ringing from before.
+  sustained.delete(note);
   held.set(pointerId, note);
   voice.noteOn(note, hz);
-  for (const el of keyEls(note)) el.classList.add('sounding');
+  settle();
 }
 
 function release(pointerId) {
   const note = held.get(pointerId);
   if (note == null) return;
   held.delete(pointerId);
-  // Only stop the note if no other finger is still on that same key.
-  if (![...held.values()].includes(note)) {
-    voice.noteOff(note);
-    for (const el of keyEls(note)) el.classList.remove('sounding');
-  }
+  if (pedal) sustained.add(note);
+  settle();
 }
 
 function releaseAll() {
-  for (const id of [...held.keys()]) release(id);
+  held.clear();
+  sustained.clear();
+  pedal = false;
+  settle();
   voice.allOff();
-  for (const el of document.querySelectorAll('#stripInner .sounding')) {
-    el.classList.remove('sounding');
-  }
+  ringing = new Set();
 }
+
+/* ---------------------------------------------------------------------
+ *  Shift is the sustain pedal
+ *
+ *  Held down, letting go of a key leaves it ringing; let it up and everything
+ *  the pedal was holding stops together, exactly as lifting a damper pedal
+ *  does. Keys still under a finger are untouched — they are not the pedal's
+ *  to release.
+ *
+ *  Only in Play. In Design, shift is the 3D view's pan modifier and nothing
+ *  is sounding for it to hold.
+ * ------------------------------------------------------------------ */
+
+function setPedal(down) {
+  if (pedal === down) return;
+  pedal = down;
+  if (!pedal) { sustained.clear(); settle(); }
+}
+
+window.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Shift' && inPlay()) setPedal(true);
+});
+window.addEventListener('keyup', (ev) => {
+  if (ev.key === 'Shift') setPedal(false);
+});
+/* A pedal cannot be let up on a window that is not listening: leaving the
+ * page with it down would come back to a keyboard holding notes with nothing
+ * pressing them. */
+window.addEventListener('blur', () => setPedal(false));
 
 /* ---------------------------------------------------------------------
  *  The strip, in Play
@@ -135,11 +206,37 @@ function releaseAll() {
 
 const strip = $('strip');
 
-/** The key under a point — the accidental wins, being drawn on top. */
+/**
+ * The key under a point.
+ *
+ * TWO THINGS, IN ORDER. First whatever key the point is actually on, taken
+ * off the whole stack rather than off the topmost element — a gap is drawn as
+ * a box over the keys and would otherwise swallow every press aimed at what
+ * is inside it. The accidental still wins where there is one, being nearest
+ * the top of that stack.
+ *
+ * Then, if the point is on no key at all: the nearest white. The strip draws
+ * a gap as a space between two whites, but on the instrument that space is
+ * the raised rear the whites weave through and the accidental stands on —
+ * there is no hole in the keyboard there, so there should be no dead ground
+ * here either. An empty gap, and the margins either side of a key in a filled
+ * one, sound the white they are nearer to, which is the key a finger landing
+ * there would actually be on.
+ */
 function noteAt(ev) {
-  const el = document.elementFromPoint(ev.clientX, ev.clientY);
-  const key = el && el.closest('[data-note]');
-  return key ? +key.dataset.note : null;
+  for (const el of document.elementsFromPoint(ev.clientX, ev.clientY)) {
+    if (el.dataset && el.dataset.note != null) return +el.dataset.note;
+    if (el.id === 'strip' || el === document.body) break;
+  }
+  let best = null, bd = Infinity;
+  for (const el of document.querySelectorAll('#stripInner .kb-white[data-note]')) {
+    const r = el.getBoundingClientRect();
+    if (ev.clientY < r.top || ev.clientY > r.bottom) continue;
+    const d = ev.clientX < r.left ? r.left - ev.clientX
+            : ev.clientX > r.right ? ev.clientX - r.right : 0;
+    if (d < bd) { bd = d; best = +el.dataset.note; }
+  }
+  return best;
 }
 
 /* Capture phase, and the event is consumed: in Play nothing downstream of
@@ -198,6 +295,16 @@ window.XPlay = {
     const note = hit && hit.ref ? hit.ref.noteIndex : null;
     if (note == null) return false;
     press(ev.pointerId, note);
+    return true;
+  },
+  /** A held press dragged onto another key changes to that key. */
+  move(ev) {
+    if (!held.has(ev.pointerId) || typeof window.rayPick !== 'function') return false;
+    const hit = window.rayPick(ev);
+    const note = hit && hit.ref ? hit.ref.noteIndex : null;
+    // Dragged off the keyboard: the note it was on holds, rather than
+    // cutting out over the background and coming back on the far side.
+    if (note != null) press(ev.pointerId, note);
     return true;
   },
   release(ev) {
