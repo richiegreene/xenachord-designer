@@ -7,13 +7,15 @@
  * measured off the first seven whites and the gaps among them, and nothing in
  * it knows a frequency.  Here that run is handed a scale — an equal division
  * or a list of ratios — and every key comes away with a pitch, a name, and
- * the enumeration it already had to hang them on.
+ * the enumeration it already had to hang them on. A key shows one of the two
+ * at a time: its position while you are in Design, its pitch while you are in
+ * Play, because both at once is two numbers in twenty pixels.
  *
  * THE NOTATION IS NOT REIMPLEMENTED.  The spellers under ./notation are the
  * Notation app's own engines, copied across whole: the same Ups-and-Downs
- * table, the same C-anchored HEJI speller, the same Sagittal calculator and
- * the same Johnston decomposition, drawing the same glyphs out of the same
- * fonts.  A name spelled here is the name that app would spell.
+ * table, the same C-anchored HEJI speller and the same Sagittal calculator,
+ * drawing the same glyphs out of the same fonts at the same sizes the Tuner
+ * draws them.  A name spelled here is the name that app would spell.
  *
  * WHAT A ROTATION IS.  Not a transposition and not a re-ordering: the scale
  * keeps its degrees in their order and keeps their frequencies, and the whole
@@ -28,7 +30,7 @@
  */
 
 import {
-  buildJiScale, edoName, hejiName, johnstonName, sagittalSpellings, ratioMonzo,
+  buildJiScale, edoName, hejiName, sagittalSpellings, ratioMonzo,
 } from './notation/tuner-notation.js';
 
 const $ = (id) => document.getElementById(id);
@@ -41,6 +43,7 @@ const T = {
   hz: 261.6256,                   // ... and sounds here
   system: 'edo',
   edoRead: 'updown',
+  edoHalves: 'exclude',
   edoRot: 0,
   jiRead: 'heji',
   sagPrecision: 'medium',
@@ -50,6 +53,9 @@ const T = {
 };
 
 try { Object.assign(T, JSON.parse(localStorage.getItem(STORE) || '{}')); } catch (e) {}
+// Johnston was offered once and is not any more; a session that chose it comes
+// back to the default rather than to a toggle with nothing pressed.
+if (T.jiRead === 'johnston') T.jiRead = 'heji';
 const save = () => { try { localStorage.setItem(STORE, JSON.stringify(T)); } catch (e) {} };
 
 const NOMINALS = ['F', 'C', 'G', 'D', 'A', 'E', 'B'];
@@ -109,7 +115,10 @@ function nameHtml(p) {
   if (!p) return '';
   if (p.kind === 'edo') {
     if (T.edoRead === 'step') return String(p.step);
-    const sp = edoName(p.step, p.edo, { showEnh: false, excludeHalves: true }).spellings[0];
+    const sp = edoName(p.step, p.edo, {
+      showEnh: false,
+      excludeHalves: T.edoHalves === 'exclude',
+    }).spellings[0];
     if (!sp) return '';
     return `<span class="edo-name">${esc(sp.base)}${esc(sp.acc)}</span>`;
   }
@@ -118,12 +127,7 @@ function nameHtml(p) {
   const monzo = ratioMonzo(p.num, p.den);
   if (T.jiRead === 'heji') {
     const n = hejiName(monzo);
-    return n ? `${esc(n.letter)}${n.html}` : `${p.num}/${p.den}`;
-  }
-  if (T.jiRead === 'johnston') {
-    const n = johnstonName(monzo);
-    return n ? `<span class="johnston-letter">${esc(n.letter)}</span>${n.html}`
-             : `${p.num}/${p.den}`;
+    return n ? `${letter(n.letter)}${n.html}` : `${p.num}/${p.den}`;
   }
   const sp = sagittalSpellings(p.num, p.den, {
     precision: T.sagPrecision,
@@ -132,7 +136,7 @@ function nameHtml(p) {
     showEnh: false,
   })[0];
   if (!sp) return `${p.num}/${p.den}`;
-  return `${esc(sp.letter)}<span class="sag-symbol">${sp.symbol}</span>`;
+  return `${letter(sp.letter)}<span class="sag-symbol">${sp.symbol}</span>`;
 }
 
 /** Plain text for a tooltip, where the glyph fonts cannot reach. */
@@ -145,6 +149,10 @@ function nameText(p) {
 }
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+/* The nominal is set in Inter beside the glyph fonts, as it is in the Tuner —
+ * not in whatever the strip happens to be set in. */
+const letter = (s) => `<span class="tune-letter">${esc(s)}</span>`;
 
 /* ---------------------------------------------------------------------
  *  Writing it onto the keyboard
@@ -224,6 +232,9 @@ function syncUI(ji) {
   $('t-edo').style.display = T.system === 'edo' ? '' : 'none';
   $('t-ji').style.display = T.system === 'ji' ? '' : 'none';
   $('t-sag').style.display = (T.system === 'ji' && T.jiRead === 'sagittal') ? '' : 'none';
+  // The halves are a question about ups-and-downs spelling; a bare step number
+  // has no accidental for the answer to land on.
+  $('t-edo-halves').style.display = (T.edoRead === 'updown') ? '' : 'none';
 
   $('t-edo-n').textContent = equaveNotes();
   $('t-edo-rot-v').textContent = T.edoRot;
@@ -257,6 +268,7 @@ function bind() {
   scale.oninput = () => { T.scale = scale.value; refresh(); };
 
   seg('t-edo-seg', 'edoRead');
+  seg('t-edo-halves', 'edoHalves');
   seg('t-ji-seg', 'jiRead');
   seg('t-sag-flavour', 'sagFlavour');
 

@@ -1,7 +1,6 @@
 
 import * as C from './constants.js';
 import * as U from './utils.js';
-import { decomposeJohnston, renderJohnstonAccidentals } from './johnston.js';
 import { getEnharmonicVariants } from './sagittal-Calculator.js';
 import { calculateEdoNotation } from './edo.js';
 
@@ -9,9 +8,8 @@ import { calculateEdoNotation } from './edo.js';
  * Notation engine for the Tuner window.
  *
  * The tuner anchors 1/1 = C, matching the natural anchor of every notation
- * engine it drives (Johnston's decomposeJohnston re-anchors A->C, the Sagittal
- * Calculator's NOMINALS table is C-based, and the HEJI speller below is written
- * C-anchored). The Hz / cents readouts use the app-wide 1/1 frequency; that
+ * engine it drives (the Sagittal Calculator's NOMINALS table is C-based, and
+ * the HEJI speller below is written C-anchored). The Hz / cents readouts use the app-wide 1/1 frequency; that
  * reference is applied by the render layer, not here.
  *
  * A "scale" is a set of ratios folded into one octave [1, 2). The incoming mic
@@ -252,18 +250,8 @@ function padMonzo(monzo) {
 }
 
 // ---------------------------------------------------------------------------
-// Johnston / Sagittal / EDO names
+// Sagittal / EDO names
 // ---------------------------------------------------------------------------
-
-/** Johnston name for a 1/1 = C monzo. */
-export function johnstonName(monzo) {
-    const a = padMonzo(monzo);
-    a[0] += 4;   // A-anchored C ...
-    a[1] += -3;  // ... = 16/27 relative to A, so decomposeJohnston re-anchors to C
-    const decomp = decomposeJohnston(a);
-    if (!decomp) return null;
-    return { letter: decomp.letter, html: renderJohnstonAccidentals(decomp) };
-}
 
 /**
  * Sagittal spellings for num/den (1/1 = C).
@@ -321,14 +309,13 @@ function splitEdoSpelling(part) {
 /**
  * Attach a notation name to each JI degree for the given language.
  * @param {{num,den,cents,supported}[]} degrees
- * @param {string} language  'heji' | 'sagittal' | 'johnston'
+ * @param {string} language  'heji' | 'sagittal'
  */
 export function nameJiDegrees(degrees, language, opts = {}) {
     return degrees.map((deg) => {
         let name = null;
         if (deg.supported) {
             if (language === 'heji') name = hejiName(ratioMonzo(deg.num, deg.den), opts);
-            else if (language === 'johnston') name = johnstonName(ratioMonzo(deg.num, deg.den));
             else if (language === 'sagittal') name = { spellings: sagittalSpellings(deg.num, deg.den, opts) };
         }
         return { ...deg, name };

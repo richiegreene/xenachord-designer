@@ -237,23 +237,15 @@
   @font-face{font-family:"HEJI2";src:url("fonts/HEJI2.otf") format("opentype")}
   @font-face{font-family:"HEJIExtensions2022";src:url("fonts/HEJIExtensions2025-Text.ttf") format("opentype")}
 
-  /* The engines emit these class names; only the sizing is ours, and it is
-     in em so a label scales with whatever key it is standing in. */
+  /* The engines emit these class names, and the Tuner's own metrics for them
+     are reproduced exactly — 1em Inter nominal, 1.5em HEJI with no letter-
+     spacing and no rise, 1.333em Bravura for Sagittal — so a name sits on a
+     key the way it sits in the Tuner's readout. Everything is in em, so the
+     whole assembly scales with whatever font-size the key gives it. */
+  .tune-letter{font-family:"Inter",sans-serif;font-size:1em}
   .heji-extensions{font-family:"HEJIExtensions2022","HEJI2",sans-serif;
-    letter-spacing:.05em;font-size:1.5em;position:relative;top:-.25em}
-  .heji2{font-family:"HEJI2",sans-serif;font-size:1.5em;position:relative}
-  .johnston-letter{font-family:"Inter",sans-serif}
-  .johnston-symbols{display:inline-flex;align-items:center}
-  .johnston-accidental{font-family:"Bravura",serif;font-size:1.333em;
-    letter-spacing:.15em;margin-left:.1em;display:inline-flex;align-items:center;line-height:1}
-  .johnston-numeral{font-family:"EdoAccidentals",sans-serif;font-size:.5em;
-    display:inline-block;line-height:1}
-  .johnston-numeral.inverted{transform:rotate(180deg)}
-  .johnston-stack{position:relative;display:inline-flex;align-items:center}
-  .johnston-numerals{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);
-    display:flex;align-items:flex-end;gap:.22em;white-space:nowrap;line-height:1;margin-bottom:.05em}
-  .johnston-numerals-inline{position:static;transform:none;display:inline-flex;
-    align-self:flex-start}
+    font-size:1.5em;letter-spacing:0;position:relative;top:0}
+  .heji2{font-family:"HEJI2",sans-serif;font-size:1.5em;letter-spacing:0;position:relative}
   .sag-symbol{font-family:"Bravura",serif;font-size:1.333em;
     display:inline-flex;align-items:center}
   .edo-name{font-family:"EdoAccidentals",sans-serif}
@@ -264,10 +256,18 @@
    * left to overhang, rather than clipped or made unreadably small.
    */
   .kb-tune{position:absolute;left:50%;transform:translateX(-50%);
+    display:flex;align-items:center;justify-content:center;
     white-space:nowrap;pointer-events:none;line-height:1;text-align:center}
-  .kb-white .kb-tune{bottom:13px;color:#26272c;font-size:10px}
+  /* In Play the enumeration is not drawn, so the name takes the foot of the
+     key it used to share — the same seat, and the whole of it. */
+  .kb-white .kb-tune{bottom:4px;color:#26272c;font-size:10px}
   .kb-m .kb-tune{bottom:4px;color:#f0f0f2;font-size:9px}
   .kb-m.g .kb-tune{color:#141419}
+  /* A key answers one question at a time: in Design it is the position it
+     holds in the arrangement, in Play the pitch it carries. Both at once is
+     two numbers in a 20px box and neither of them reads. */
+  body:not(.mode-play) .kb-tune{display:none}
+  body.mode-play .kb-white .nm{display:none}
 
   /* ---------- Play: tuning controls ---------- */
   .tune-h{color:var(--text);font-weight:600;font-size:11.5px;margin:10px 0 5px}
@@ -476,6 +476,17 @@
                   <button data-v="step"
                     title="The step's own number, 0 through one less than the notes in the scale">EDO step</button>
                 </div>
+                <!-- Ups and Downs only: an EDO with an even number of steps to
+                     the apotome can spell a step on a half-sharp, and whether
+                     that spelling is offered is a reading of the notation, not
+                     of the tuning. Same pair of buttons as Sagittal's
+                     revo/evo, and for the same reason. -->
+                <div class="seg" id="t-edo-halves">
+                  <button data-v="exclude" class="on"
+                    title="Leave half-sharp and half-flat spellings out — every step is written with ups and downs against a whole accidental">exclude halves</button>
+                  <button data-v="show"
+                    title="Allow half-sharp and half-flat spellings where the division has them">show halves</button>
+                </div>
                 <div class="presswrap"
                   title="Which step of the EDO the first key carries. The steps keep their order and their frequencies; rotating slides the whole run along the keyboard, so a different degree comes to rest under key 0.">
                   <div class="pressrow">
@@ -494,7 +505,6 @@
                 <div class="seg" id="t-ji-seg">
                   <button data-v="heji" class="on" title="Helmholtz-Ellis Just Intonation">HEJI</button>
                   <button data-v="sagittal" title="Sagittal">Sagittal</button>
-                  <button data-v="johnston" title="Johnston">Johnston</button>
                   <button data-v="ratio" title="The ratio itself">ratio</button>
                 </div>
 
@@ -2553,12 +2563,23 @@ function openDrawer(name){
   panelEl.classList.toggle('open', !!name);
 }
 
+/* WHICH MODE YOU ARE IN IS NOT WHETHER THE DRAWER IS OPEN.
+ * Collapsing the rail gives the viewport its width back; it does not put you
+ * back in Design. So the mode is set by the button you last pressed and
+ * survives shutting its drawer — which is what the strip reads to decide
+ * whether a key shows its position or its pitch. */
+function setMode(name){
+  document.body.classList.toggle('mode-play', name === 'play');
+}
+
 for(const btn of railPane.querySelectorAll('.rail-btn')){
   btn.onclick = ()=>{
     const open = btn.getAttribute('aria-expanded')==='true';
+    setMode(btn.dataset.drawer);
     openDrawer(open ? null : btn.dataset.drawer);
   };
 }
+setMode(railPane.querySelector('.rail-btn[aria-expanded="true"]')?.dataset.drawer);
 
 /* The viewport is what the panel gives back, and it is measured rather than
  * computed — the width animates, so one redraw at the end would show a
