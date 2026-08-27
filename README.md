@@ -228,6 +228,25 @@ The 17 and 19 sheets are drawn starting on F; the 15 sheet starts on C. The
 
 ---
 
+## Undo
+
+**⌘Z** steps back, **⇧⌘Z** (or **^Y**) steps forward — up to 100 steps, for the
+session. There is no button and no history list: the keyboard on screen is what
+tells you it worked, and the only thing said out loud is that there is nothing
+left to undo.
+
+A step is a *gesture*, not a redraw. A width drag or a slider rebuilds the model
+several times a second, and all of it — from the pointer going down to it coming
+up — undoes as one. So does a run of arrow-key nudges on the same control. A
+click is its own step.
+
+It covers the design: the arrangement, the widths, keys resized by hand, the
+press blend, the scale length and the origin — everything saved under
+`xenachord-designer-v2`. It does not cover the tuning, the synth or the view
+(explode, part visibility), none of which an edit can lose.
+
+---
+
 ## The keys are the drafted keys
 
 Key geometry is not modelled analytically and never was worth modelling

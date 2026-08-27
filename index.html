@@ -1932,6 +1932,7 @@ function applyPeriod(){
 function rebuild(){
   applyPeriod();
   save();
+  noteHistory();
   let err = null;
   try { L = XD.computeLayout(design); meshes = XD.buildMeshes(L); }
   catch(e){ err = e; }
@@ -1966,6 +1967,117 @@ function rebuild(){
   buildStrip(); showSize(); buildWidths(); showOrigin(); uploadMeshes(); buildVisToggles();
   if (rebuild._w !== L.width) { rebuild._w = L.width; fit(); } else draw();
 }
+
+/* ===================== undo / redo =====================
+ *
+ * The design is one plain object, written whole on every rebuild, so its
+ * history is simply that object's own past: rebuild() hands each finished
+ * state over as it saves it, and a step back is an older one put back in its
+ * place.  Nothing else has to be unwound — the layout, the strip, the widths
+ * bar and the meshes are all read off the design, so restoring it restores
+ * them.
+ *
+ * NO SURFACE.  There is no button and no list: ⌘Z and ⇧⌘Z (^Z and ^Y away
+ * from a Mac), and the keyboard on screen is the feedback.  The only thing
+ * said out loud is that there is nothing left to undo, which is the one case
+ * where a key that does nothing would otherwise look broken.
+ *
+ * ONE STEP IS A GESTURE, NOT A REBUILD.  A width drag rebuilds about five
+ * times a second and a slider rebuilds on every notch; undoing those one
+ * frame at a time would be no use at all.  So everything that happens between
+ * a pointer going down and coming up again collapses into a single entry, and
+ * so do consecutive keyboard nudges of the same control.  A click is still
+ * its own step, because its gesture ends when the pointer comes up.
+ *
+ * WHAT IS NOT HERE: the tuning, the synth and the view (explode, part
+ * visibility).  None of them is the design — they are how it is being looked
+ * at and listened to — and none of them is a thing an edit can lose.
+ */
+const HIST_MAX = 100;     // steps kept; a design is small, but not free
+const HIST_MERGE = 700;   // ms within which the same control's nudges are one
+
+let histUndo = [], histRedo = [], histAt = null;
+let histApplying = false, histPointer = false, histKey = null, histTime = 0;
+
+const histSnap = () => JSON.stringify(design);
+
+/** what the current edit belongs to: a gesture, a control, or nothing */
+function histSource(){
+  if (histPointer) return 'pointer';
+  const el = document.activeElement;
+  return el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName) ? (el.id || 'field') : null;
+}
+
+function noteHistory(){
+  if (histApplying) return;
+  const now = histSnap();
+  if (histAt === null){ histAt = now; return; }   // the boot rebuild is the floor
+  if (now === histAt) return;                     // a rebuild that changed nothing
+  const t = Date.now(), src = histSource();
+  /* a gesture merges for as long as it lasts; a control's own nudges merge
+   * only while they keep coming */
+  const merge = src !== null && src === histKey &&
+                (histPointer || t - histTime < HIST_MERGE);
+  if (!merge){
+    histUndo.push(histAt);
+    if (histUndo.length > HIST_MAX) histUndo.shift();
+  }
+  histRedo.length = 0;
+  histAt = now; histKey = src; histTime = t;
+}
+
+/* pressCache is deliberately left alone: it is keyed by the arrangement it
+ * was solved for, so a restored design either finds its own solve waiting or
+ * misses and solves again. */
+function histApply(json){
+  histApplying = true;
+  try { design = JSON.parse(json); syncInputs(); rebuild(); }
+  finally { histApplying = false; }
+  /* what is on screen is what a redo has to come back to, and rebuild may
+   * have stamped a period out across it */
+  histAt = histSnap();
+  histKey = null;
+}
+
+function undo(){
+  if (!histUndo.length) return toast('nothing to undo');
+  histRedo.push(histAt);
+  histApply(histUndo.pop());
+}
+
+function redo(){
+  if (!histRedo.length) return toast('nothing to redo');
+  const next = histRedo.pop();
+  histUndo.push(histAt);
+  histApply(next);
+}
+
+/* A gesture ends one turn of the loop after the pointer comes up, so the
+ * final rebuild the app does on release — the one in every drag's stop() —
+ * still lands inside the step it finished.  dragend and drop end it too: a
+ * chip dragged out of the palette is an HTML drag, and those swallow the
+ * pointerup that would otherwise close it. */
+window.addEventListener('pointerdown', ()=>{ histPointer = true; histKey = null; }, true);
+for (const ev of ['pointerup','pointercancel','drop','dragend'])
+  window.addEventListener(ev, ()=>{
+    if (!histPointer) return;
+    setTimeout(()=>{ histPointer = false; histKey = null; }, 0);
+  }, true);
+
+window.addEventListener('keydown', e=>{
+  if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+  const k = e.key.toLowerCase();
+  const isUndo = k === 'z' && !e.shiftKey;
+  const isRedo = (k === 'z' && e.shiftKey) || (k === 'y' && !e.metaKey);
+  if (!isUndo && !isRedo) return;
+  /* inside something being typed in — the custom scale, a frequency — the
+   * browser's own text undo is the more useful of the two */
+  const el = document.activeElement;
+  if (el && (el.tagName === 'TEXTAREA' ||
+             (el.tagName === 'INPUT' && /^(text|number|search)$/.test(el.type)))) return;
+  e.preventDefault();
+  if (isUndo) undo(); else redo();
+}, true);
 
 /* ===================== export ===================== */
 function download(name, buf, mime){
