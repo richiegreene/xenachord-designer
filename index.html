@@ -288,6 +288,29 @@
   .seg button:last-child{border-radius:0 6px 6px 0}
   .seg button.on{background:var(--panel-bright);color:var(--text);
     box-shadow:inset 0 -2px 0 var(--accent)}
+
+  /* ---------- synth: the wave and the envelope ----------
+     One idiom for both — a dark box, an axis, one glowing stroke — because
+     they answer the same question about the same note. Engrave's scheme. */
+  .scope{display:block;width:100%;height:74px;background:#12161c;
+    border:1px solid var(--line);border-radius:6px}
+  #s-adsr{height:92px;cursor:pointer;touch-action:none}
+  .wave-ticks{display:flex;justify-content:space-between;
+    color:var(--dim);font-size:10px;margin-top:3px;padding:0 2px}
+  .wave-ticks span{font-variant-numeric:tabular-nums}
+  #play-synth .hint{color:var(--dim);font-size:11px;line-height:1.5}
+  #play-synth .hint b{color:var(--text);font-weight:600}
+  #play-synth input[type=range]{width:100%;margin:5px 0 0;accent-color:var(--accent)}
+
+  /* ---------- a key you can sound ----------
+     In Play the strip is an instrument, so it takes the pointer the way one
+     does — no drag-to-remove, no width grips, and a key lights while it is
+     down. In Design it is a drawing you edit, and none of this applies. */
+  body.mode-play .kb-grip{display:none}
+  body.mode-play .kb-white,
+  body.mode-play .kb-m{cursor:pointer}
+  body.mode-play .kb-white.sounding{background:var(--accent)}
+  body.mode-play .kb-m.sounding{outline:2px solid var(--accent);outline-offset:-1px}
   .rotbtns{display:flex;gap:5px}
   .rotbtns button{padding:2px 12px;font-size:12px;line-height:1.4}
 </style>
@@ -544,7 +567,45 @@
 
           <fieldset>
             <legend>Synth</legend>
-            <div id="play-synth"></div>
+            <div id="play-synth">
+              <!-- Engrave's Playback timbre area, on the same terms: the
+                   family list and the slider's range are written in by
+                   createTimbrePicker rather than spelled out here, so the two
+                   apps cannot come to offer different shapes. -->
+              <label class="tune-inline" for="s-family">Wave</label>
+              <select id="s-family"></select>
+              <canvas id="s-wave" class="scope" style="margin-top:9px"></canvas>
+              <div class="pressrow" style="margin-top:7px">
+                <label for="s-timbre" id="s-label" style="margin:0;font-weight:600;
+                  color:var(--text);font-size:11.5px">Filtered saw</label>
+              </div>
+              <input id="s-timbre" type="range" min="1000" max="1300" step="1" value="1200">
+              <div class="wave-ticks" id="s-ticks"></div>
+              <p class="hint" style="margin:7px 0 0">
+                Two ways of making the same four shapes.
+                <b>Wavetable</b> reads a fixed waveform at pitch: what it sounds
+                like does not depend on how loud it is.
+                <b>Filtered wavetable</b> is a sine phase-modulated by a
+                low-passed copy of its own output — a resonator driven hard
+                enough to fold, rather than a shape looked up. Because the fold
+                is driven by the signal itself, a quiet note comes out very
+                nearly a pure sine and a loud one comes out a bright buzz, off
+                the one envelope below.
+              </p>
+
+              <div class="tune-h" style="margin-top:12px">Envelope</div>
+              <canvas id="s-adsr" class="scope"></canvas>
+              <div class="wave-ticks" id="s-adsr-ticks">
+                <span id="s-a">A</span><span id="s-d">D</span>
+                <span id="s-s">S</span><span id="s-r">R</span>
+              </div>
+              <p class="hint" style="margin:7px 0 0">
+                Drag the corners. The first is the attack, the second is the
+                decay and the level it falls to, and the last is the release.
+                Because the fold is driven by amplitude, the envelope is the
+                timbre too: a slow attack opens the note up as it arrives.
+              </p>
+            </div>
           </fieldset>
 
           <fieldset>
@@ -586,6 +647,7 @@
 <div id="toast"></div>
 
 <script type="module" src="tuning.js"></script>
+<script type="module" src="play.js"></script>
 <script src="profiles.js"></script>
 <script src="model.js"></script>
 <script src="core.js"></script>
@@ -2395,6 +2457,9 @@ function draw(){
 /* ---- orbit / pan / zoom : screen-space pan works from any angle ---- */
 let drag=null;
 canvas.addEventListener('pointerdown',e=>{
+  /* In Play a press that lands on a key is that key going down, not the start
+   * of an orbit — see the note in play.js. Anywhere else still orbits. */
+  if(window.XPlay && window.XPlay.press(e)){ canvas.setPointerCapture(e.pointerId); return; }
   drag={x:e.clientX,y:e.clientY,x0:e.clientX,y0:e.clientY,
         pan:e.shiftKey||e.button===1||e.button===2,moved:false};
   canvas.setPointerCapture(e.pointerId);
@@ -2417,10 +2482,15 @@ canvas.addEventListener('pointermove',e=>{
   draw();
 });
 canvas.addEventListener('pointerup',e=>{
+  if(window.XPlay && window.XPlay.release(e)){ drag=null; return; }
   const wasDrag=drag;
   drag=null;
-  if(wasDrag && !wasDrag.moved && e.button===0) pickAt(e);
+  /* The inspector is a Design readout — in Play a click on a key has already
+   * been spent sounding it, and there is nothing to inspect. */
+  if(wasDrag && !wasDrag.moved && e.button===0 &&
+     !document.body.classList.contains('mode-play')) pickAt(e);
 });
+canvas.addEventListener('pointercancel',e=>{ if(window.XPlay) window.XPlay.release(e); });
 canvas.addEventListener('wheel',e=>{e.preventDefault();
   cam.dist=Math.max(8,Math.min(20000,cam.dist*Math.exp(e.deltaY*0.0012))); draw();},{passive:false});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
@@ -2452,8 +2522,12 @@ function rayBox(o,d,b,zo){
   }
   return tmax<0?null:(tmin>=0?tmin:tmax);
 }
-function pickAt(e){
-  if(!gl||!L) return;
+/* The ray cast is its own function because Play asks it the same question for
+ * a different answer: Design wants the box so it can describe it, Play wants
+ * the key so it can sound it. One cast, so the two can never disagree about
+ * which key is under the pointer. */
+function rayPick(e){
+  if(!gl||!L) return null;
   const r=canvas.getBoundingClientRect();
   const px=e.clientX-r.left, py=e.clientY-r.top;
   const ndx=(2*px/r.width-1), ndy=(1-2*py/r.height);
@@ -2466,6 +2540,12 @@ function pickAt(e){
     const t=rayBox(B.eye,dir,b,zo);
     if(t!=null && t<bt){ bt=t; best=b; }
   }
+  return best;
+}
+
+function pickAt(e){
+  if(!gl||!L) return;
+  const best=rayPick(e);
   picked=best;
   if(pickBuf){ gl.deleteBuffer(pickBuf.buf); pickBuf=null; }
   if(best){
@@ -2570,6 +2650,9 @@ function openDrawer(name){
  * whether a key shows its position or its pitch. */
 function setMode(name){
   document.body.classList.toggle('mode-play', name === 'play');
+  // Nothing may be left ringing on the way out — a note that outlived the
+  // mode that could stop it would have no key to let go of.
+  if(name !== 'play' && window.XPlay) window.XPlay.releaseAll();
 }
 
 for(const btn of railPane.querySelectorAll('.rail-btn')){
