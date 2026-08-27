@@ -754,7 +754,7 @@
     const out = L.notes.map(n => {
       const r = n.ref, white = n.kind === 'white';
       return {
-        name: n.name, index: n.index, type: n.type,
+        index: n.index, type: n.type,
         layer: XM.KEY_TYPES[n.type].layer,
         cx: r.cx, w: r.w || (white ? L.wW : L.aW),
         lb: white ? r.ctxL : null, rb: white ? r.ctxR : null,
@@ -977,7 +977,8 @@
     p('# =========================================================================');
     p('');
     p('DESIGN = {');
-    p('    "scale":        ', d.scale, ',            # every width is linear in this');
+    p('    "scale":        ', f(L.s), ',      # every width is linear in this',
+      L.autoScale ? ' — solved against the spine' : ' — pinned by hand');
     p('    "notes_equave": ', L.notesEq, ',');
     p('    "whites":       ', L.whites.length, ',            # derived, not a free parameter');
     p('    "rotation":     ', ((d.rotation | 0) % 7 + 7) % 7, ',            # white #0 sits on period slot this index');
@@ -1045,7 +1046,7 @@
       const w = r.w || (white ? L.wW : L.aW);
       const e = XM.keyExtent(r.cx, w, n.type, white ? r.ctxL : null, white ? r.ctxR : null);
       const nm = 'K' + String(n.index).padStart(2, '0') + '_' +
-        (n.kind === 'white' ? 'W' + r.i + '_' + r.name
+        (n.kind === 'white' ? 'W' + r.i
                             : 'A' + r.slot + '_' + (r.ord + 1));
       p('    ("', nm, '", "', n.type, '", ',
         pn(r.cx), ', ', pn(w), ', ', f(e.y1 - e.y0), ', "', n.profileKey, '", ',
