@@ -226,6 +226,68 @@
     font-size:11.5px}
   .presswrap input[type=range]{width:100%;margin:7px 0 0;accent-color:var(--accent)}
   .presswrap .hint{margin:5px 0 0}
+
+  /* ================= tuning: notation fonts =================
+   * Lifted with the notation engines out of the Notation app, so a name
+   * spelled here is drawn from the same glyphs it is drawn from there.
+   */
+  @font-face{font-family:"Bravura";src:url("fonts/Bravura.woff2") format("woff2");font-display:block}
+  @font-face{font-family:"EdoAccidentals";src:url("fonts/notes.otf") format("opentype")}
+  @font-face{font-family:"Inter";src:url("fonts/inter.ttf") format("opentype")}
+  @font-face{font-family:"HEJI2";src:url("fonts/HEJI2.otf") format("opentype")}
+  @font-face{font-family:"HEJIExtensions2022";src:url("fonts/HEJIExtensions2025-Text.ttf") format("opentype")}
+
+  /* The engines emit these class names; only the sizing is ours, and it is
+     in em so a label scales with whatever key it is standing in. */
+  .heji-extensions{font-family:"HEJIExtensions2022","HEJI2",sans-serif;
+    letter-spacing:.05em;font-size:1.5em;position:relative;top:-.25em}
+  .heji2{font-family:"HEJI2",sans-serif;font-size:1.5em;position:relative}
+  .johnston-letter{font-family:"Inter",sans-serif}
+  .johnston-symbols{display:inline-flex;align-items:center}
+  .johnston-accidental{font-family:"Bravura",serif;font-size:1.333em;
+    letter-spacing:.15em;margin-left:.1em;display:inline-flex;align-items:center;line-height:1}
+  .johnston-numeral{font-family:"EdoAccidentals",sans-serif;font-size:.5em;
+    display:inline-block;line-height:1}
+  .johnston-numeral.inverted{transform:rotate(180deg)}
+  .johnston-stack{position:relative;display:inline-flex;align-items:center}
+  .johnston-numerals{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);
+    display:flex;align-items:flex-end;gap:.22em;white-space:nowrap;line-height:1;margin-bottom:.05em}
+  .johnston-numerals-inline{position:static;transform:none;display:inline-flex;
+    align-self:flex-start}
+  .sag-symbol{font-family:"Bravura",serif;font-size:1.333em;
+    display:inline-flex;align-items:center}
+  .edo-name{font-family:"EdoAccidentals",sans-serif}
+
+  /* ---------- the label a tuning writes onto a key ----------
+   * The strip is a measurement and a key is only ~20px of it, so a name has
+   * to be allowed out of its box: it is centred on the key's own centre and
+   * left to overhang, rather than clipped or made unreadably small.
+   */
+  .kb-tune{position:absolute;left:50%;transform:translateX(-50%);
+    white-space:nowrap;pointer-events:none;line-height:1;text-align:center}
+  .kb-white .kb-tune{bottom:13px;color:#26272c;font-size:10px}
+  .kb-m .kb-tune{bottom:4px;color:#f0f0f2;font-size:9px}
+  .kb-m.g .kb-tune{color:#141419}
+
+  /* ---------- Play: tuning controls ---------- */
+  .tune-h{color:var(--text);font-weight:600;font-size:11.5px;margin:10px 0 5px}
+  .tune-h:first-child{margin-top:0}
+  .tune-ref{display:flex;gap:5px}
+  .tune-inline{margin:0;white-space:nowrap;color:var(--dim)}
+  .tune-read{color:var(--dim);font-size:11px;margin:0 0 7px}
+  .tune-read b{color:var(--text);font-weight:600}
+  #play-tuning textarea{width:100%;background:var(--panel2);color:var(--text);
+    border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-size:11.5px;
+    font-family:ui-monospace,Menlo,monospace;resize:vertical}
+  /* A segmented pair (or four) of buttons: one of them is on, and which one
+     is the whole of what the control says. */
+  .seg{display:flex;gap:0;margin:0 0 9px;flex-wrap:wrap}
+  .seg button{flex:1 1 0;min-width:0;border-radius:0;padding:4px 6px;font-size:11px;
+    border-left-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .seg button:first-child{border-radius:6px 0 0 6px;border-left-width:1px}
+  .seg button:last-child{border-radius:0 6px 6px 0}
+  .seg button.on{background:var(--panel-bright);color:var(--text);
+    box-shadow:inset 0 -2px 0 var(--accent)}
   .rotbtns{display:flex;gap:5px}
   .rotbtns button{padding:2px 12px;font-size:12px;line-height:1.4}
 </style>
@@ -351,7 +413,123 @@
 
           <fieldset>
             <legend>Scale/Tuning</legend>
-            <div id="play-tuning"></div>
+            <div id="play-tuning">
+
+              <!-- ---- what 1/1 is, and where it sounds ----
+                   Straight from the Notation app's Tuning Settings: a
+                   nominal, an accidental and an octave name the pitch, and
+                   the Hz field says what that name is worth. -->
+              <div class="tune-h">Defining 1/1 <span id="t-ref" class="pressval">C&#9838;4</span></div>
+              <div class="row tune-ref">
+                <select id="t-nominal" title="The nominal 1/1 is written on">
+                  <option value="0">F</option>
+                  <option value="1" selected>C</option>
+                  <option value="2">G</option>
+                  <option value="3">D</option>
+                  <option value="4">A</option>
+                  <option value="5">E</option>
+                  <option value="6">B</option>
+                </select>
+                <select id="t-acc" title="The accidental on that nominal">
+                  <option value="0">&#9837;</option>
+                  <option value="1" selected>&#9838;</option>
+                  <option value="2">&#9839;</option>
+                </select>
+                <select id="t-oct" title="Which octave that nominal is in">
+                  <option value="-4">-4</option>
+                  <option value="-3">-3</option>
+                  <option value="-2">-2</option>
+                  <option value="-1">-1</option>
+                  <option value="0">0</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4" selected>4</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
+                </select>
+              </div>
+              <div class="row" style="align-items:center;gap:8px;margin-top:7px">
+                <label class="tune-inline" for="t-hz">1/1 (Hz)</label>
+                <input type="number" id="t-hz" value="261.6256" step="0.0001" min="1">
+              </div>
+
+              <!-- ---- which kind of scale the keys carry ---- -->
+              <div class="tune-h">Tuning System</div>
+              <select id="t-system" title="EDO divides the equave into equal steps; JI spells it as ratios">
+                <option value="edo" selected>EDO</option>
+                <option value="ji">JI</option>
+              </select>
+
+              <!-- ============ EDO ============ -->
+              <div id="t-edo" style="margin-top:10px">
+                <!-- The division is not asked for twice: the keyboard already
+                     knows how many notes there are in an equave, so the EDO is
+                     read off Design rather than typed in beside it. -->
+                <div class="tune-read">
+                  <b id="t-edo-n">32</b>-EDO &mdash; read from Design&rsquo;s <b>Notes in Scale</b>
+                </div>
+                <div class="seg" id="t-edo-seg">
+                  <button data-v="updown" class="on"
+                    title="Ups and Downs: the nominal, plus the arrows and sharps that say how far from it the step lies">Ups and Downs</button>
+                  <button data-v="step"
+                    title="The step's own number, 0 through one less than the notes in the scale">EDO step</button>
+                </div>
+                <div class="presswrap"
+                  title="Which step of the EDO the first key carries. The steps keep their order and their frequencies; rotating slides the whole run along the keyboard, so a different degree comes to rest under key 0.">
+                  <div class="pressrow">
+                    <label>&#8597; Rotate by EDO Step</label>
+                    <span class="rotbtns">
+                      <button id="t-edo-rot-dn" title="Rotate one step down">&#9664;</button>
+                      <span id="t-edo-rot-v" class="pressval">0</span>
+                      <button id="t-edo-rot-up" title="Rotate one step up">&#9654;</button>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ============ JI ============ -->
+              <div id="t-ji" style="margin-top:10px;display:none">
+                <div class="seg" id="t-ji-seg">
+                  <button data-v="heji" class="on" title="Helmholtz-Ellis Just Intonation">HEJI</button>
+                  <button data-v="sagittal" title="Sagittal">Sagittal</button>
+                  <button data-v="johnston" title="Johnston">Johnston</button>
+                  <button data-v="ratio" title="The ratio itself">ratio</button>
+                </div>
+
+                <div id="t-sag" style="display:none">
+                  <select id="t-sag-precision" title="How finely Sagittal spells the comma">
+                    <option value="medium" selected>Athenian</option>
+                    <option value="high">Promethean</option>
+                    <option value="ultra">Herculean</option>
+                    <option value="extreme">Olympian</option>
+                  </select>
+                  <div class="seg" id="t-sag-flavour" style="margin-top:6px">
+                    <button data-v="revo" class="on" title="Pure Sagittal: the symbol carries the whole alteration">revo</button>
+                    <button data-v="evo" title="Sagittal beside a conventional sharp or flat">evo</button>
+                  </div>
+                </div>
+
+                <div class="tune-h">Custom Scale</div>
+                <textarea id="t-scale" rows="3" spellcheck="false"
+                  title="One octave of ratios, separated by spaces, commas or newlines. They are folded into [1, 2) and sorted, so the order you type them in does not matter; 1/1 is always included."
+                  placeholder="e.g. 1/1 9/8 5/4 4/3 3/2 5/3 15/8">1/1 9/8 5/4 4/3 3/2 5/3 15/8</textarea>
+                <div class="tune-read" id="t-scale-read" style="margin-top:6px"></div>
+
+                <div class="presswrap"
+                  title="Which degree of the scale the first key carries. The ratios keep their order; rotating slides the scale along the keyboard, so a different degree comes to rest under key 0 as 1/1.">
+                  <div class="pressrow">
+                    <label>&#8597; Rotate 1/1 by Step</label>
+                    <span class="rotbtns">
+                      <button id="t-ji-rot-dn" title="Rotate one degree down">&#9664;</button>
+                      <span id="t-ji-rot-v" class="pressval">0</span>
+                      <button id="t-ji-rot-up" title="Rotate one degree up">&#9654;</button>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </fieldset>
 
           <fieldset>
@@ -397,6 +575,7 @@
 </div>
 <div id="toast"></div>
 
+<script type="module" src="tuning.js"></script>
 <script src="profiles.js"></script>
 <script src="model.js"></script>
 <script src="core.js"></script>
@@ -857,6 +1036,7 @@ function buildStrip(){
     const d = document.createElement('div'); d.className='kb-white';
     d.style.left = X(w.x0)+'px'; d.style.width=(w.w*PX)+'px';
     d.style.top = Y(0)+'px'; d.style.height = (85.0688*1.5)+'px';
+    if (w.noteIndex != null) d.dataset.note = w.noteIndex;
     d.innerHTML = `<div class="nm">${w.noteIndex != null ? w.noteIndex : w.i}</div>`;
     d.title = `white ${w.i} · key ${w.noteIndex}  x ${w.cx.toFixed(3)}  w ${w.w.toFixed(4)}`;
     inner.appendChild(d);
@@ -899,6 +1079,7 @@ function buildStrip(){
     for (const m of ordered){
       const k = document.createElement('div');
       k.className = 'kb-m ' + cssOf(m.type);
+      if (m.noteIndex != null) k.dataset.note = m.noteIndex;
       k.style.left = ((sl.w/2 - m.w/2 + 1)*PX)+'px';
       k.style.width = (m.w*PX)+'px';
       k.style.top = '0px';
@@ -932,6 +1113,9 @@ function buildStrip(){
     });
     inner.appendChild(d);
   }
+  /* The strip is torn down and rebuilt whole every time, so the names a
+   * tuning writes on it are put back here rather than kept alive across it. */
+  if (window.XTuning) window.XTuning.label(L);
 }
 
 /* ===================== resizing one key =====================
