@@ -984,6 +984,28 @@
     p('    "rotation":     ', ((d.rotation | 0) % 7 + 7) % 7, ',            # white #0 sits on period slot this index');
     p('    "total_keys":   ', L.total, ',            # ALWAYS 32 — one per sensor foot');
     p('    "akm320_units": 1,            # always one: spine half A + half B');
+    /* ---- more than one of them on the desk ----
+     * A rig does not change a single part: it is N of the SAME printed
+     * keyboard, so everything below still describes one unit and one set of
+     * STLs makes any of them.  What it adds is where the other units stand
+     * and how the run of notes is read across them — written down here
+     * because the .py is the design's own record, and a log that said
+     * nothing about it would be describing a different instrument from the
+     * one on screen. */
+    const rigCfg = XM.rigConfig(d.devices), rigU = XM.rigUnits(L, rigCfg);
+    if (rigU.length > 1) {
+      p('    "rig_units":    ', rigU.length, ',            # ',
+        rigCfg.side && rigCfg.stack ? 'stacked, side by side'
+        : rigCfg.side ? 'side by side' : 'stacked',
+        ' — the same printed keyboard, ', rigU.length, ' of them');
+      p('    "rig_note":     "rows*(i + 32*col) + row",   # what a unit\'s key i',
+        ' is called in the run the rig is read as');
+      p('    "rig_offsets":  [   # (dx, dy, dz) mm in the design frame, then col, row');
+      for (const u of rigU)
+        p('        (', pn(u.dx), ', ', pn(u.dy), ', ', pn(u.dz), ', ',
+          u.col, ', ', u.row, '),   # ', XM.rigLabel(u));
+      p('    ],');
+    }
     p('    "key_colours":  ', L.spineColours.length, ',            # ',
       L.spineColours.join(' + '));
     p('    "spine_type":   "', L.spineKind, ' type",   # ', L.layers,

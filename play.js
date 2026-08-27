@@ -287,12 +287,25 @@ for (const type of ['click', 'dragover', 'drop', 'dragstart']) {
  *  not an instrument.
  * ------------------------------------------------------------------ */
 
+/**
+ * What a hit in the 3D view sounds.
+ *
+ * On a rig the answer is not the key's number on its own device: the same key
+ * is note 6 on the lower keyboard and note 7 on the upper one, and the cast
+ * knows which unit it landed on. `hit.note` is that reading; the key's own
+ * index is the fallback for a single keyboard, where the two are equal.
+ */
+function noteOfHit(hit) {
+  if (!hit) return null;
+  if (hit.note != null) return hit.note;
+  return hit.ref ? hit.ref.noteIndex : null;
+}
+
 window.XPlay = {
   /** @returns true when this press has been taken as a note. */
   press(ev) {
     if (!inPlay() || typeof window.rayPick !== 'function') return false;
-    const hit = window.rayPick(ev);
-    const note = hit && hit.ref ? hit.ref.noteIndex : null;
+    const note = noteOfHit(window.rayPick(ev));
     if (note == null) return false;
     press(ev.pointerId, note);
     return true;
@@ -300,8 +313,7 @@ window.XPlay = {
   /** A held press dragged onto another key changes to that key. */
   move(ev) {
     if (!held.has(ev.pointerId) || typeof window.rayPick !== 'function') return false;
-    const hit = window.rayPick(ev);
-    const note = hit && hit.ref ? hit.ref.noteIndex : null;
+    const note = noteOfHit(window.rayPick(ev));
     // Dragged off the keyboard: the note it was on holds, rather than
     // cutting out over the background and coming back on the far side.
     if (note != null) press(ev.pointerId, note);

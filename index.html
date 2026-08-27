@@ -156,8 +156,11 @@
   #sizeread .auto{color:var(--accent)}
 
   /* ---------- keyboard strip ---------- */
+  /* Height is set from the strip's own content — one band per AKM320 in the
+     rig — so overflow-y is auto rather than hidden: a rig too tall for the
+     window scrolls instead of losing its upper keyboard. */
   #strip{height:190px;border-top:1px solid var(--line);background:#101116;
-    overflow-x:auto;overflow-y:hidden;position:relative}
+    overflow:auto;position:relative}
   #stripInner{position:relative;height:170px;margin:10px 0}
   /* THE STRIP IS A MEASUREMENT, NOT A PICTURE.  Every box is placed at a
      millimetre position, so a border must not add to its width (border-box)
@@ -380,6 +383,24 @@
       </div>
     </fieldset>
 
+    <!-- ---- how many of them you are sitting at ----
+         The register of one AKM320 is small, and the archicembalo's answer to
+         a register too small for the tuning was a second manual. Side-by-side
+         and stacked are two separate questions, so both can be on at once and
+         the rig becomes 2 x 2; "single" is neither of them. -->
+    <fieldset>
+      <legend>Devices</legend>
+      <div class="seg" id="rig-seg">
+        <button data-v="single" class="on"
+          title="One AKM320 on its own — the keyboard as designed, and the default.">single</button>
+        <button data-v="side"
+          title="A second AKM320 set to the right of the first, with clear air between the two cases. Its 32 keys carry on where the first keyboard's stopped, so the rig extends the register rather than repeating it.">side-by-side</button>
+        <button data-v="stack"
+          title="A second AKM320 standing over the first like an upper manual, lifted by half the length of a white key. The two are read as one scale interleaved: every step of the lower keyboard is doubled and the upper one falls in the odd steps between them, so two 17-note layouts stacked are a 34-note scale.">stacked</button>
+      </div>
+      <p class="hint" id="rig-read"></p>
+    </fieldset>
+
     <fieldset>
       <legend>Key widths: drag dividers</legend>
       <div id="wbar"></div>
@@ -489,7 +510,7 @@
                      knows how many notes there are in an equave, so the EDO is
                      read off Design rather than typed in beside it. -->
                 <div class="tune-read">
-                  <b id="t-edo-n">32</b>-EDO &mdash; read from Design&rsquo;s <b>Notes in Scale</b>
+                  <b id="t-edo-n">32</b>-EDO &mdash; read from Design&rsquo;s <b>Notes in Scale</b><span id="t-edo-rig"></span>
                 </div>
                 <div class="seg" id="t-edo-seg">
                   <button data-v="updown" class="on"
@@ -668,6 +689,9 @@ function migrate(s){
    * repeat existed was */
   const per = s.period | 0;
   s.period = (per >= 2 && per <= XM.NOTES) ? per : XM.NOTES;
+  /* how many of these you are sitting at.  A design saved before the rig
+   * existed was one keyboard, which is what the default says. */
+  s.devices = XM.rigConfig(s.devices);
   return s;
 }
 
@@ -712,8 +736,10 @@ presetSel.onchange = () => {
     /* a drafted sheet is written out as 32 individual keys, so it opens as
      * the whole keyboard said once; a SAVED preset keeps the scale length
      * it was saved with */
+    const rig = XM.rigConfig(design.devices);
     design = XD.presetDesign(+presetSel.value);
     design.period = XM.NOTES;
+    design.devices = rig;      // a drafted sheet says nothing about the rig
   }
   forgetPressBlend();
   syncInputs(); rebuild();
@@ -757,13 +783,72 @@ $('clear-all').onclick = () => {
    * on a single key denies */
   design = Object.assign(XD.clearedDesign(design.rotation),
                          { origin: design.origin, widths: design.widths,
-                           period: periodNow() });
+                           period: periodNow(),
+                           /* how many AKM320s are on the desk is not
+                            * something clearing the keys can answer */
+                           devices: XM.rigConfig(design.devices) });
   forgetPressBlend();
   syncInputs(); rebuild();
   toast(`cleared — 32 white keys, ${L ? L.wW.toFixed(2) : ''} mm each, spanning the spine`);
 };
 
+/* ===================== how many devices =====================
+ *
+ * NOT A RADIO GROUP, THOUGH IT LOOKS LIKE ONE.  Side-by-side and stacked are
+ * answers to two different questions — how wide the rig is and how deep the
+ * stack is — so they are independent switches and both can be lit, which is
+ * the 2 x 2 rig.  "single" is the absence of both rather than a third state,
+ * so pressing it clears them and turning the last one off lights it again;
+ * there is never a moment with nothing pressed.
+ *
+ * The rig lives on the design rather than beside it: it is a statement about
+ * the instrument being designed, it belongs in a saved preset, and it comes
+ * back with ⌘Z like every other edit.
+ */
+const rigSeg = $('rig-seg');
+function setRig(v){
+  const d = design.devices = XM.rigConfig(design.devices);
+  if (v === 'single'){ d.side = false; d.stack = false; }
+  else d[v === 'side' ? 'side' : 'stack'] = !d[v === 'side' ? 'side' : 'stack'];
+  design.preset = null;
+  syncInputs();
+  rebuild();
+  const n = XM.rigCount(d);
+  toast(n === 1 ? 'one AKM320'
+      : `${n} AKM320s · ` + (d.side && d.stack ? 'stacked, side by side'
+                            : d.side ? 'side by side' : 'stacked'));
+}
+for (const b of rigSeg.querySelectorAll('button')) b.onclick = () => setRig(b.dataset.v);
+
+/** What the rig reads as, in the terms the toggle was pressed in. */
+function showRig(){
+  const d = XM.rigConfig(design.devices), n = XM.rigCount(d);
+  for (const b of rigSeg.querySelectorAll('button'))
+    b.classList.toggle('on', b.dataset.v === 'single' ? (!d.side && !d.stack)
+                           : b.dataset.v === 'side'   ? d.side : d.stack);
+  const per = periodNow(), read = $('rig-read');
+  if (n === 1){
+    read.innerHTML = 'One AKM320 — 32 keys, the keyboard as drafted.';
+    return;
+  }
+  const gap = XM.RIG.gapX.toFixed(0), lift = XM.RIG.dz.toFixed(1);
+  const notes = n * XM.NOTES;
+  read.innerHTML =
+    `<b>${n}</b> AKM320s · <b>${notes}</b> keys. ` +
+    (d.side ? `The right-hand unit stands ${gap} mm clear of the left and its ` +
+              `keys carry on 32 notes above it. ` : '') +
+    (d.stack ? `The upper unit sits over the lower one's spine, ${lift} mm up ` +
+               `— half a white key — and the two interleave: ` +
+               (per < XM.NOTES
+                 ? `two ${per}-note layouts stacked read as <b>${per*2}</b> notes ` +
+                   `to the equave.`
+                 : `every step of the lower keyboard is doubled and the upper ` +
+                   `one falls between them.`)
+             : '');
+}
+
 function syncInputs(){
+  showRig();
   presetSel.value = design.preset || '';
   const pr = $('period');
   if (pr){
@@ -1049,14 +1134,85 @@ function mkGrip(gid, title){
   return g;
 }
 
+/* ---- the strip is a plan view, and a rig is not flat ----
+ * Along x the strip is literal: two units really are XM.rigPitchX apart, and
+ * that is what is drawn, at the strip's own scale.
+ *
+ * Up the stack it cannot be.  The upper manual stands one white key back and
+ * half a white key up, so in a true plan its front edge would land flush on
+ * the lower unit's spine and the one thing that separates the two — the lift
+ * — would be the one thing a plan cannot show.  Two devices drawn touching
+ * is a lie about what you can build.  So each row gets its own band with a
+ * plain gap between them, the upper manual above the lower one the way it
+ * stands; the lift is stated as air rather than pretended away.  The 3D view
+ * is where the rig is measured, and it draws the offsets as they are.
+ */
+const ROW_H = 170;    // px one unit's band is — unchanged from the single strip
+const ROW_GAP = 12;   // px between two bands — the stack, said in a plan
+
+/** The rig as it currently stands: one entry per AKM320 on the desk. */
+function rigUnits(){ return XM.rigUnits(L, design.devices); }
+
+/* How many keyboards deep the stack is.  Read by Scale/Tuning, which has to
+ * know: stacking INTERLEAVES, so it is the one thing about a rig that changes
+ * what the keys sound rather than only where they stand.  Two units deep is
+ * two steps where the design has one, which is the same statement as an
+ * equave twice as finely divided — see XM's rig header. */
+function rigStack(){ return XM.rigRows(design.devices); }
+
+/* What a unit is when nothing says otherwise — a single keyboard, at the
+ * origin, which is exactly what unit 0 of any rig also is. */
+const ORIGIN_UNIT = { index:0, row:0, col:0, rows:1, cols:1,
+                      primary:true, dx:0, dy:0, dz:0 };
+
+/* The strip grows to hold the rig rather than clipping it — but never past
+ * half the window, because a rig two units deep would otherwise take the 3D
+ * view's space with it.  Past that it scrolls, which is the honest failure:
+ * the second keyboard is still there and still reachable. */
+let stripH = ROW_H;
+function fitStripHeight(){
+  $('strip').style.height =
+    Math.min(stripH + 20, Math.max(190, innerHeight*0.5)) + 'px';
+}
+addEventListener('resize', fitStripHeight);
+
 function buildStrip(){
   const inner = $('stripInner'); inner.innerHTML='';
-  const H = 170;
-  const totalW = L.width + 40;
-  inner.style.width = (totalW*PX) + 'px';
-  const X = mm => (mm+12)*PX;
+  const units = rigUnits();
+  const rows = XM.rigRows(design.devices), cols = XM.rigCols(design.devices);
+  const pitchX = XM.rigPitchX(L);
+  inner.style.width = ((pitchX*(cols-1) + L.width + 40)*PX) + 'px';
+  stripH = rows*ROW_H + (rows-1)*ROW_GAP;
+  inner.style.height = stripH + 'px';
+  fitStripHeight();
+  for (const u of units) buildUnit(u, inner, rows);
+  /* The strip is torn down and rebuilt whole every time, so the names a
+   * tuning writes on it are put back here rather than kept alive across it. */
+  if (window.XTuning) window.XTuning.label(L);
+}
+
+/**
+ * One AKM320, drawn where the rig puts it.
+ *
+ * Unit 0 is the design: it takes the grips, the drops and the clicks, and it
+ * is the only one that does. The others are the SAME keyboard seen again
+ * somewhere else — there is one design here, not two or four — so they are
+ * drawn inert. Editing a copy would have to mean editing the original, and a
+ * handle that quietly edits something else is worse than no handle.
+ *
+ * What they do carry is their own note numbers, off XM.rigNote, because that
+ * is the whole reason for standing them together: the numbers ARE the reading
+ * of the rig, and the tuning and Play both find them here.
+ */
+function buildUnit(u, inner, rows){
+  const live = u.primary;
+  const top = (rows-1-u.row)*(ROW_H+ROW_GAP);
+  const X = mm => (mm+12+u.dx)*PX;
   // y in mm from the spine front; the strip draws y downward from the top
-  const Y = mm => 14 + mm*1.5;
+  const Y = mm => top + 14 + mm*1.5;
+  const note = i => XM.rigNote(u, i);
+  const who = XM.rigLabel(u);
+  const of = rows*u.cols > 1 ? ` · ${who} keyboard` : '';
 
   // spine — half A and half B, and only ever these two
   for (const [nm,h] of [['A',XM.SPINE.halfA],['B',XM.SPINE.halfB]]){
@@ -1065,11 +1221,11 @@ function buildStrip(){
     d.style.top = Y(XM.SPINE.yBack)+'px';
     d.style.height = (XM.SPINE.depth*1.5)+'px';
     // seen from above, so the strip takes the top band's drafted colour
-    const top = XM.SPINE.layers[L.spineKind].A.slice(-1)[0].name;
-    const c = XM.spineLayerColor(L.spineKind, top);
+    const topLayer = XM.SPINE.layers[L.spineKind].A.slice(-1)[0].name;
+    const c = XM.spineLayerColor(L.spineKind, topLayer);
     d.style.background = 'rgb('+c.map(v=>Math.round(v*255)).join(',')+')';
-    d.title = `spine half ${nm} — ${(h.x1-h.x0).toFixed(3)} mm, 16 feet · `+
-              `${L.spineKind} type Spine - ${nm}, ${top} layer on top`;
+    d.title = `spine half ${nm}${of} — ${(h.x1-h.x0).toFixed(3)} mm, 16 feet · `+
+              `${L.spineKind} type Spine - ${nm}, ${topLayer} layer on top`;
     inner.appendChild(d);
   }
   // the 32 feet
@@ -1079,7 +1235,7 @@ function buildStrip(){
     d.style.left = X(fx-XM.FOOT.w/2)+'px'; d.style.width=(XM.FOOT.w*PX)+'px';
     d.style.top = Y(XM.FOOT.yCentre-XM.FOOT.d/2)+'px';
     d.style.height = (XM.FOOT.d*1.5)+'px';
-    d.title = `foot ${i} (half ${i<XM.FEET_PER_HALF?'A':'B'}) @ x ${fx.toFixed(5)}`;
+    d.title = `foot ${i} (half ${i<XM.FEET_PER_HALF?'A':'B'})${of} @ x ${fx.toFixed(5)}`;
     inner.appendChild(d);
   });
   /* the front band of a white — below everything an accidental reaches —
@@ -1091,9 +1247,10 @@ function buildStrip(){
     const d = document.createElement('div'); d.className='kb-white';
     d.style.left = X(w.x0)+'px'; d.style.width=(w.w*PX)+'px';
     d.style.top = Y(0)+'px'; d.style.height = (85.0688*1.5)+'px';
-    if (w.noteIndex != null) d.dataset.note = w.noteIndex;
-    d.innerHTML = `<div class="nm">${w.noteIndex != null ? w.noteIndex : w.i}</div>`;
-    d.title = `white ${w.i} · key ${w.noteIndex}  x ${w.cx.toFixed(3)}  w ${w.w.toFixed(4)}`;
+    const n = w.noteIndex != null ? note(w.noteIndex) : null;
+    if (n != null) d.dataset.note = n;
+    d.innerHTML = `<div class="nm">${n != null ? n : w.i}</div>`;
+    d.title = `white ${w.i}${of} · key ${n}  x ${w.cx.toFixed(3)}  w ${w.w.toFixed(4)}`;
     inner.appendChild(d);
   }
   /* ---- the boundary between two whites ----
@@ -1102,7 +1259,7 @@ function buildStrip(){
    * Dragging it hands width from one white to the other and leaves the
    * sum alone, so the keyboard neither grows nor shrinks and the size
    * solve has nothing to undo — the neighbour simply pays for it.     */
-  for (let i = 0; i + 1 < L.whites.length; i++){
+  if (live) for (let i = 0; i + 1 < L.whites.length; i++){
     const a = L.whites[i], b = L.whites[i+1];
     const g = mkGrip('white:' + i,
       `drag to trade width between white ${a.i} (${a.w.toFixed(2)} mm) ` +
@@ -1125,7 +1282,7 @@ function buildStrip(){
     const name = sl.i === -1 ? 'the gap before the first white'
                : sl.end     ? 'the gap after the last white'
                : `gap ${sl.i}`;
-    d.title = `${name}  x ${sl.cx.toFixed(3)}` +
+    d.title = `${name}${of}  x ${sl.cx.toFixed(3)}` +
               (sl.end && !sl.members.length
                 ? ' — drop a key here to begin the keyboard on an accidental;'
                   + ' the white beside it grows out to stand under it' : '') +
@@ -1134,14 +1291,16 @@ function buildStrip(){
     for (const m of ordered){
       const k = document.createElement('div');
       k.className = 'kb-m ' + cssOf(m.type);
-      if (m.noteIndex != null) k.dataset.note = m.noteIndex;
+      if (m.noteIndex != null) k.dataset.note = note(m.noteIndex);
       k.style.left = ((sl.w/2 - m.w/2 + 1)*PX)+'px';
       k.style.width = (m.w*PX)+'px';
       k.style.top = '0px';
       k.style.height = (m.spec.depth*1.5)+'px';
-      k.title = held ? `${held} (${m.type}) — click to remove the pair`
-                     : `${m.type} — click to remove`;
-      k.onclick = ev => { ev.stopPropagation(); setSlot(sl.i, removeFrom(sl.names, m.type)); };
+      k.title = live ? (held ? `${held} (${m.type}) — click to remove the pair`
+                             : `${m.type} — click to remove`)
+                     : `${m.type}${of}`;
+      if (live) k.onclick = ev => { ev.stopPropagation(); setSlot(sl.i, removeFrom(sl.names, m.type)); };
+      else k.style.cursor = 'default';
       d.appendChild(k);
     }
     /* ---- an accidental's own two edges ----
@@ -1150,7 +1309,7 @@ function buildStrip(){
      * other mirrors it and the key grows or shrinks about its centre.  It
      * takes nothing from its neighbours' pitch — it eats into the rear of
      * the whites either side, which is what the 0.86x ceiling bounds.  */
-    if (sl.members.length) for (const side of [-1, 1]){
+    if (live && sl.members.length) for (const side of [-1, 1]){
       const g = mkGrip('slot:' + sl.i + ':' + side,
         `drag to resize the keys in gap ${sl.i} ` +
         `(${sl.w.toFixed(2)} mm) — the whites either side give way`);
@@ -1158,19 +1317,18 @@ function buildStrip(){
       g.style.top = '0px'; g.style.height = (54*1.5) + 'px';
       d.appendChild(g);
     }
-    d.addEventListener('dragover', e=>{ e.preventDefault(); d.classList.add('over'); });
-    d.addEventListener('dragleave', ()=>d.classList.remove('over'));
-    d.addEventListener('drop', e=>{
-      e.preventDefault(); d.classList.remove('over');
-      const n = e.dataTransfer.getData('text/plain') || dragType;
-      if (!n || (!XM.KEY_TYPES[XM.canonType(n)] && !XM.KEY_PAIRS[n])) return;
-      setSlot(sl.i, placeInto(sl.names, n));
-    });
+    if (live){
+      d.addEventListener('dragover', e=>{ e.preventDefault(); d.classList.add('over'); });
+      d.addEventListener('dragleave', ()=>d.classList.remove('over'));
+      d.addEventListener('drop', e=>{
+        e.preventDefault(); d.classList.remove('over');
+        const n = e.dataTransfer.getData('text/plain') || dragType;
+        if (!n || (!XM.KEY_TYPES[XM.canonType(n)] && !XM.KEY_PAIRS[n])) return;
+        setSlot(sl.i, placeInto(sl.names, n));
+      });
+    }
     inner.appendChild(d);
   }
-  /* The strip is torn down and rebuilt whole every time, so the names a
-   * tuning writes on it are put back here rather than kept alive across it. */
-  if (window.XTuning) window.XTuning.label(L);
 }
 
 /* ===================== resizing one key =====================
@@ -1965,7 +2123,10 @@ function rebuild(){
 
   picked=null; $('inspect').classList.remove('on');
   buildStrip(); showSize(); buildWidths(); showOrigin(); uploadMeshes(); buildVisToggles();
-  if (rebuild._w !== L.width) { rebuild._w = L.width; fit(); } else draw();
+  /* Refit on anything that changes how much there is to look at — the
+   * keyboard's own width, and how many of them are standing there. */
+  const frame = L.width + ' ' + XM.rigCount(design.devices);
+  if (rebuild._w !== frame) { rebuild._w = frame; fit(); } else draw();
 }
 
 /* ===================== undo / redo =====================
@@ -2379,8 +2540,16 @@ function camBasis(){
 function fit(){ if(!L) return;
   const w = canvas.clientWidth||1200, h = canvas.clientHeight||700;
   const aspect = w/h, tn = Math.tan(FOV/2);
-  cam.tx = L.width/2; cam.ty = 38; cam.tz = 4;
-  const halfW = (L.width + 60)/2, halfH = (95 + 40)/2;
+  /* The frame is the RIG, not the design: a second unit set beside or above
+   * the first is part of what there is to look at, so fit walks the units
+   * rather than assuming there is one at the origin. */
+  const units = rigUnits(), last = units[units.length-1];
+  const rigW = L.width + last.dx;
+  /* y runs from the deepest spine — the upper manual's, set back behind the
+   * lower one — to the front edge of the lower manual's whites. */
+  const yBack = XM.SPINE.yBack + last.dy, yFront = 85.0688;
+  cam.tx = rigW/2; cam.ty = (yFront + yBack)/2; cam.tz = 4 + last.dz/2;
+  const halfW = (rigW + 60)/2, halfH = ((yFront - yBack) + last.dz + 40)/2;
   cam.dist = Math.max(halfW/(aspect*tn), halfH/tn, 60);
   draw(); }
 
@@ -2560,12 +2729,16 @@ function clearSounding(){
 
 function setSounding(notes){
   clearSounding();
-  if(gl && L && notes && notes.size) for(const b of keyBoxes()){
-    const n = b.ref ? b.ref.noteIndex : null;
-    if(n == null || !notes.has(n)) continue;
-    const tris = keyTris(b);
-    if(tris) soundBufs.push({ buf: meshToBuffer(tris), part: b.part });
-  }
+  /* Asked once per unit, because the same key is a different note on each of
+   * them: on a stacked rig the lower keyboard's key 3 is note 6 and the upper
+   * keyboard's is note 7, so a note lights on ONE unit, not on all of them. */
+  if(gl && L && notes && notes.size) for(const u of rigUnits())
+    for(const b of keyBoxes()){
+      const i = b.ref ? b.ref.noteIndex : null;
+      if(i == null || !notes.has(XM.rigNote(u, i))) continue;
+      const tris = keyTris(b);
+      if(tris) soundBufs.push({ buf: meshToBuffer(tris), part: b.part, unit: u });
+    }
   draw();
 }
 
@@ -2592,22 +2765,31 @@ function draw(){
   const mvp=mat4mul(proj,lookAtBasis(B.eye,B.right,B.up,B.fwd));
   gl.uniformMatrix4fv(locMVP,false,mvp);
   gl.uniform3fv(locEye, B.eye);
+  /* ONE DESIGN, DRAWN AGAIN PER UNIT.  Every AKM320 in the rig is the same
+   * keyboard, so nothing is re-meshed and nothing is re-uploaded — the same
+   * buffers are drawn once per unit with the unit's translation added to the
+   * offset the explode slider is already using.  A four-unit rig therefore
+   * costs four draw calls per part and not one byte of extra geometry. */
+  const units = rigUnits();
   for(const [k,b] of Object.entries(buffers)){
     if(!visible[partOf(k)]) continue;
-    drawPart(b, colorOf(k), [0,0,(EXPLODE_ORDER[explodeGroupOf(k)]||0)*explode]);
+    const z=(EXPLODE_ORDER[explodeGroupOf(k)]||0)*explode;
+    for(const u of units) drawPart(b, colorOf(k), [u.dx, u.dy, z+u.dz]);
   }
   // highlight pass: nudged toward the camera so it always wins the depth test
   const lift = mul(norm(sub(B.eye,B.tgt)), Math.max(0.25, cam.dist*0.0016));
   if(picked && pickBuf && visible[picked.part]){
     const z=(EXPLODE_ORDER[picked.part]||0)*explode;
-    drawPart(pickBuf, ACCENT, [lift[0],lift[1],z+lift[2]]);
+    const u=picked.unit||ORIGIN_UNIT;
+    drawPart(pickBuf, ACCENT, [u.dx+lift[0], u.dy+lift[1], z+u.dz+lift[2]]);
   }
   /* A key that is sounding, lit the same way and in the same blue as the one
    * the strip lights — the two displays are one keyboard seen twice. */
   for(const sb of soundBufs){
     if(!visible[sb.part]) continue;
     const z=(EXPLODE_ORDER[sb.part]||0)*explode;
-    drawPart(sb.buf, ACCENT, [lift[0],lift[1],z+lift[2]]);
+    const u=sb.unit||ORIGIN_UNIT;
+    drawPart(sb.buf, ACCENT, [u.dx+lift[0], u.dy+lift[1], z+u.dz+lift[2]]);
   }
   $('camread').textContent =
     `az ${(cam.yaw*180/Math.PI).toFixed(0).padStart(4)}°  ` +
@@ -2735,15 +2917,24 @@ function rayPick(e){
   const ndx=(2*px/r.width-1), ndy=(1-2*py/r.height);
   const B=camBasis(), tn=Math.tan(FOV/2), aspect=r.width/r.height;
   const dir=norm(add(B.fwd, add(mul(B.right,ndx*tn*aspect), mul(B.up,ndy*tn))));
+  const boxes=keyBoxes();
   let best=null, bt=Infinity;
-  for(const b of keyBoxes()){
-    if(!visible[b.part]) continue;
-    const zo=(EXPLODE_ORDER[b.part]||0)*explode;
-    // The box is the cull; the triangles are the answer.
-    if(rayBox(B.eye,dir,b,zo)==null) continue;
-    const tris=keyTris(b);
-    const t = tris ? rayTris(B.eye,dir,tris,zo) : rayBox(B.eye,dir,b,zo);
-    if(t!=null && t<bt){ bt=t; best=b; }
+  /* A unit is a TRANSLATION of the one design, so the cast is not repeated
+   * against moved geometry — the eye is moved back by the unit's offset
+   * instead, which is the same question asked of the same triangles.  It
+   * also keeps keyTris' cache keyed on the note it was built for. */
+  for(const u of rigUnits()){
+    const eye=[B.eye[0]-u.dx, B.eye[1]-u.dy, B.eye[2]-u.dz];
+    for(const b of boxes){
+      if(!visible[b.part]) continue;
+      const zo=(EXPLODE_ORDER[b.part]||0)*explode;
+      // The box is the cull; the triangles are the answer.
+      if(rayBox(eye,dir,b,zo)==null) continue;
+      const tris=keyTris(b);
+      const t = tris ? rayTris(eye,dir,tris,zo) : rayBox(eye,dir,b,zo);
+      if(t!=null && t<bt){ bt=t; best=Object.assign({}, b, { unit: u,
+        note: b.ref && b.ref.noteIndex!=null ? XM.rigNote(u, b.ref.noteIndex) : null }); }
+    }
   }
   return best;
 }
@@ -2788,9 +2979,11 @@ function showInspect(b){
     R('world z', mm(XM.FOOT.z+W.z0,4));
   } else {
     const r=b.ref, spec=XM.KEY_TYPES[b.type];
+    const u=b.unit||ORIGIN_UNIT, many=u.rows*u.cols>1;
     title=b.type;
-    sub = b.kind==='white' ? `white ${r.i} · key ${r.noteIndex}`
-                           : `gap ${b.slot.i} · key ${r.noteIndex}`;
+    sub = (b.kind==='white' ? `white ${r.i} · key ${r.noteIndex}`
+                            : `gap ${b.slot.i} · key ${r.noteIndex}`)
+        + (many ? ` · ${XM.rigLabel(u)} keyboard` : '');
     R('centre x', mm(r.cx,5));
     R('width', mm(r.w,5));
     R('depth (y)', mm(spec.depth,4));
@@ -2798,13 +2991,18 @@ function showInspect(b){
     R('spine layer', spec.layer);
     if(b.kind==='acc' && spec.pairRole) R('pair role', spec.pairRole);
     R('note #', r.noteIndex);
+    /* On a rig the key's number on its own device and its number in the run
+     * the rig is read as are two different numbers, and the second is the
+     * one that sounds — so both are stated rather than one silently
+     * standing for the other. */
+    if(many) R('note # in rig', b.note);
     if(r.foot!=null){
       R('sensor foot x', mm(r.foot,5));
       R('key − foot', mm(r.cx-r.foot,4));
     } else R('sensor foot', '<span style="color:var(--warn)">none</span>');
-    R('world x', mm(r.cx+W.x0,4));
-    R('world y back', mm(W.y0,4));
-    R('world z bottom', mm(b.z0+W.z0,5));
+    R('world x', mm(r.cx+W.x0+u.dx,4));
+    R('world y back', mm(W.y0-u.dy,4));
+    R('world z bottom', mm(b.z0+W.z0+u.dz,5));
     R('origin mode', W.mode);
   }
   box.innerHTML = `<h4><b>${title}</b><span class="x" title="close">✕</span></h4>` +

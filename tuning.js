@@ -74,7 +74,27 @@ const ACCS = ['♭', '♮', '♯'];
  */
 function equaveNotes() {
   const n = (typeof window.periodNow === 'function') ? window.periodNow() : 32;
-  return (n > 1) ? n : 32;
+  return ((n > 1) ? n : 32) * stackDepth();
+}
+
+/**
+ * How many AKM320s deep the rig is stacked — 1, or 2.
+ *
+ * A stacked rig is not a second copy of the scale, it is the same equave read
+ * twice as finely: the lower unit takes the even steps and the upper one the
+ * odd steps between them, so two 17-note layouts standing one above the other
+ * ARE 34-EDO. That has to be settled here rather than in the rig's geometry,
+ * because it is the one thing about standing two devices together that
+ * changes what the keys SOUND. Without it the interleaved numbering would
+ * fold back into the design's own 17 and every key on the lower keyboard
+ * would change pitch, which is precisely the reading the stack denies.
+ *
+ * Side-by-side is deliberately not here: setting a second unit beside the
+ * first extends the register 32 notes higher and leaves the division alone.
+ */
+function stackDepth() {
+  const d = (typeof window.rigStack === 'function') ? window.rigStack() : 1;
+  return d > 1 ? d : 1;
 }
 
 /** The JI degrees, folded into one octave and sorted, as the Tuner builds them. */
@@ -237,6 +257,11 @@ function syncUI(ji) {
   $('t-edo-halves').style.display = (T.edoRead === 'updown') ? '' : 'none';
 
   $('t-edo-n').textContent = equaveNotes();
+  /* Where the number came from, when it is no longer just Design's own: the
+   * stack doubled it, and that is worth saying beside it. */
+  const rows = stackDepth(), base = equaveNotes() / rows;
+  $('t-edo-rig').innerHTML = rows > 1
+    ? `, <b>${base}</b> &times; <b>${rows}</b> stacked keyboards` : '';
   $('t-edo-rot-v').textContent = T.edoRot;
   $('t-ji-rot-v').textContent = T.jiRot;
   $('t-scale-read').innerHTML = ji.length

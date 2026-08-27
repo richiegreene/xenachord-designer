@@ -2666,11 +2666,132 @@
   }
 
   /* ==================================================================== *
+   *  MORE THAN ONE OF THEM                                               *
+   *                                                                      *
+   *  The instrument is one AKM320 and that is not going to change: 32     *
+   *  keys, 32 feet, one spine.  What CAN change is how many of them you   *
+   *  are sitting at.  The archicembalo answered a register too small for  *
+   *  the tuning by growing a second manual, and two of these answer it    *
+   *  the same way — set side by side the second carries on where the      *
+   *  first stopped, stacked it sits over the first like an upper manual.  *
+   *                                                                      *
+   *  THE TWO ARE NOT ALTERNATIVES.  Side-by-side and stacked are separate *
+   *  questions — how wide, and how deep — so both can be answered at      *
+   *  once, and four units stand in a 2 x 2 rig.  "single" is simply       *
+   *  neither being answered.                                             *
+   *                                                                      *
+   *  NOTHING IS FLUSH.  Each unit is its own MIDI device with its own     *
+   *  spine, its own board and its own case; they are set NEAR each other, *
+   *  never joined.  So a rig is drawn with the air between the units      *
+   *  actually in it — gapX along x, and a stacked unit lifted clear by    *
+   *  half a white key's length — and never as one long keyboard.  A       *
+   *  reading that hid the seam would be a lie about what you can build.   *
+   *                                                                      *
+   *  WHAT A UNIT'S KEYS ARE CALLED.  This is the whole point of the rig,  *
+   *  and it is one line: `rigNote`.  A unit's key i is not key i of the   *
+   *  rig — the rig is read as ONE run of notes distributed across the     *
+   *  devices, so                                                         *
+   *                                                                      *
+   *      note(unit, i) = rows * (i + 32 * col) + row                      *
+   *                                                                      *
+   *  Along x that is plain continuation: the right-hand unit picks up 32  *
+   *  notes above the left, extending the register.                       *
+   *                                                                      *
+   *  Up the stack it is INTERLEAVING, which is the interesting one.  With *
+   *  two rows every step of the lower unit is doubled and the upper unit  *
+   *  falls in the odd steps between them, so two 17-note layouts stacked  *
+   *  read as one 34-note scale: the lower keyboard's 1 has become 2       *
+   *  because the upper keyboard's 0 is being read as 1.  Neither layout   *
+   *  was edited to make that happen — the same two designs, stood one     *
+   *  above the other, ARE the finer division.                            *
+   * ==================================================================== */
+
+  const RIG = {
+    /* Clear air along x between two units.  Wide enough to read as two
+     * instruments at a glance at any zoom the strip offers, narrow enough
+     * that the right-hand unit is still plainly a continuation of the
+     * left rather than a second keyboard across the room. */
+    gapX: 20.0,
+    /* A stacked unit is an upper MANUAL, and a manual you cannot reach past
+     * is not one: it stands over the spine of the keyboard below — set back
+     * by exactly one white key, so its front edge lands on that spine's
+     * front face, y = 0, the datum every other measurement here is taken
+     * from — and lifted by half a white key's length.
+     *
+     * Half a white is the lift because it is the only distance on the
+     * instrument that reads as a manual rather than as a shelf: enough to
+     * get a hand under, and taken from the keyboard's own dimensions rather
+     * than invented.  Set the two to 0 and the upper unit sits dead on top
+     * of the lower one, which hides it completely from above and is not a
+     * rig anybody could play. */
+    dy: -85.0688,
+    dz: 85.0688 / 2
+  };
+
+  /** {side, stack} — anything else a saved design carries is ignored. */
+  function rigConfig(cfg) {
+    const c = cfg || {};
+    return { side: !!c.side, stack: !!c.stack };
+  }
+  const rigCols = cfg => (rigConfig(cfg).side ? 2 : 1);
+  const rigRows = cfg => (rigConfig(cfg).stack ? 2 : 1);
+  const rigCount = cfg => rigCols(cfg) * rigRows(cfg);
+
+  /**
+   * How far apart two units stand along x, centre of case to centre of case.
+   *
+   * Measured over the WIDER of the key run and the spine, not over the spine
+   * alone: 32 keys can hang up to ~10 mm off the end of half B, and a pitch
+   * that ignored the overhang would have the two units' keys overlapping in
+   * the air even though their spines cleared.
+   */
+  function rigPitchX(L) {
+    const x1 = Math.max(L && L.keyX1 != null ? L.keyX1 : -Infinity, SPINE.halfB.x1);
+    return (x1 - SPINE.halfA.x0) + RIG.gapX;
+  }
+
+  /**
+   * The units of a rig, bottom row first and left to right within a row, so
+   * unit 0 is always the one the design is actually being edited on.
+   *
+   * dx/dy/dz translate a unit's geometry out of the single-unit design frame
+   * into the rig.  Nothing else is transformed: every unit is the same
+   * keyboard, drawn again somewhere else.
+   */
+  function rigUnits(L, cfg) {
+    const rows = rigRows(cfg), cols = rigCols(cfg), px = rigPitchX(L);
+    const out = [];
+    for (let row = 0; row < rows; row++)
+      for (let col = 0; col < cols; col++)
+        out.push({
+          index: out.length, row, col, rows, cols,
+          primary: row === 0 && col === 0,
+          dx: col * px, dy: row * RIG.dy, dz: row * RIG.dz
+        });
+    return out;
+  }
+
+  /** The note unit `u`'s key `i` carries — see the header. */
+  function rigNote(u, i) {
+    return u.rows * (i + NOTES * u.col) + u.row;
+  }
+
+  /** What to call a unit out loud. */
+  function rigLabel(u) {
+    if (u.rows === 1 && u.cols === 1) return 'the keyboard';
+    const v = u.rows > 1 ? (u.row ? 'upper' : 'lower') : '';
+    const h = u.cols > 1 ? (u.col ? 'right' : 'left') : '';
+    return (v && h) ? `${v} ${h}` : (v || h);
+  }
+
+  /* ==================================================================== *
    *  EXPORT                                                              *
    * ==================================================================== */
   const api = {
     WORLD, SPINE, FOOT, SIZE, Z, COLORS, DRAFT, WALL, TONGUE_Y,
     NOTES, UNITS, FEET_PER_HALF,
+    RIG, rigConfig, rigCols, rigRows, rigCount, rigPitchX, rigUnits,
+    rigNote, rigLabel,
     KEY_TYPES, TYPE_ORDER, LAYOUTS,
     whiteProfile, twoSidedWhiteBase, deriveWhiteProfile,
     KEY_PAIRS, PAIR_ORDER, PALETTE_ORDER, TYPE_ALIASES,
