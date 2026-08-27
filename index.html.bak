@@ -13,33 +13,9 @@
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
     font:13px/1.45 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
-  #shell{display:flex;flex-direction:column;height:100%;min-height:0}
-  #app{display:flex;flex:1;min-height:0}
-
-  /* ----------  side rail + drawer  ----------
-   * The rail is the whole index of modes — Design, Play, whatever follows —
-   * so there is no bar above the panel saying the same thing twice. The
-   * drawer is the mode you are in.
-   * With the drawer shut the panel is the width of the rail and no more, so
-   * the viewport keeps what the collapsed panel gives back.
-   */
-  #panel{display:flex;overflow:hidden;padding:0;background:var(--panel);
-    border-right:1px solid var(--line);
-    width:61px;min-width:61px;flex:0 0 auto;transition:width .14s ease,min-width .14s ease}
-  #panel.open{width:433px;min-width:433px}
-  .rail-pane{display:flex;align-items:stretch;flex:1 1 auto;min-width:0;min-height:0}
-  .rail{width:60px;flex:0 0 auto;border-right:1px solid var(--line);
-    padding:10px 0;display:flex;flex-direction:column;align-items:center;gap:8px}
-  .rail-btn{position:relative;width:42px;height:42px;padding:0;display:grid;
-    place-items:center;color:var(--dim);border-radius:9px;
-    background:transparent;border:1px solid transparent}
-  .rail-btn>*{pointer-events:none}
-  .rail-btn:hover{color:var(--text);background:var(--panel2)}
-  .rail-btn[aria-expanded="true"]{color:var(--text);background:transparent;
-    box-shadow:inset 0 0 0 1px var(--accent)}
-  .rail-icon{width:24px;height:24px}
-  .drawer{flex:1;min-width:0;overflow-y:auto;padding:14px 16px 40px}
-  .drawer.hidden{display:none}
+  #app{display:flex;height:100%}
+  #panel{width:372px;min-width:372px;overflow-y:auto;background:var(--panel);
+    border-right:1px solid var(--line);padding:14px 16px 40px}
   #main{flex:1;display:flex;flex-direction:column;min-width:0}
   #glwrap{position:relative;flex:1;min-height:0;overflow:hidden}
   #gl{position:absolute;inset:0;width:100%;height:100%;display:block;
@@ -231,30 +207,8 @@
 </style>
 </head>
 <body>
-<div id="shell">
-  <div id="app">
-    <aside id="panel" class="open">
-      <div class="rail-pane">
-        <div class="rail">
-          <!-- Design: a keybed seen from above, which is what the drawer edits. -->
-          <button class="rail-btn" data-drawer="design" aria-expanded="true"
-            title="Design — the keyboard layout">
-            <svg class="rail-icon" viewBox="0 0 26 26" fill="none" stroke="currentColor"
-              stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="3" y="6" width="20" height="14" rx="1.5" />
-              <path d="M8 6v8M13 6v8M18 6v8" />
-            </svg>
-          </button>
-          <!-- Play: empty until there is something to put in it. -->
-          <button class="rail-btn" data-drawer="play" aria-expanded="false"
-            title="Play — sounding the keyboard">
-            <svg class="rail-icon" viewBox="0 0 26 26" fill="none" stroke="currentColor"
-              stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M9.5 6.5l9.5 6.5-9.5 6.5z" />
-            </svg>
-          </button>
-        </div>
-        <div class="drawer" data-drawer="design">
+<div id="app">
+  <div id="panel">
     <h1>Xenachord Designer <small>· Cimbalo Cromatico</small></h1>
 
     <fieldset>
@@ -338,34 +292,7 @@
       <div id="stats"></div>
       <div id="warnings"></div>
     </fieldset>
-        </div>
-
-        <!--
-          The families Play grows into. Each one is its own fieldset, on the
-          same terms as Design's, so a group arriving later lands in a place
-          that is already the right shape for it — and the drawer reads as a
-          plan rather than a blank.
-        -->
-        <div class="drawer hidden" data-drawer="play">
-          <h1>Xenachord Player <small>· Cimbalo Cromatico</small></h1>
-
-          <fieldset>
-            <legend>Scale/Tuning</legend>
-            <div id="play-tuning"></div>
-          </fieldset>
-
-          <fieldset>
-            <legend>Synth</legend>
-            <div id="play-synth"></div>
-          </fieldset>
-
-          <fieldset>
-            <legend>MIDI I/O</legend>
-            <div id="play-midi"></div>
-          </fieldset>
-        </div>
-      </div>
-    </aside>
+  </div>
 
   <div id="main">
     <div id="glwrap">
@@ -392,7 +319,6 @@
       <div id="inspect"></div>
     </div>
     <div id="strip"><div id="stripInner"></div></div>
-  </div>
   </div>
 </div>
 <div id="toast"></div>
@@ -2349,37 +2275,6 @@ window.addEventListener('keydown',e=>{
   else return;
   e.preventDefault();
 });
-
-/* ===================== modes: rail + drawer =====================
- * The rail is the index of modes and the drawer is the one you are in.
- * Pressing a rail button opens its drawer immediately to the right of the
- * button, in the space the panel was already using; pressing the same button
- * again shuts it and the panel collapses leftwards to the width of the rail.
- * Only one drawer is ever open, so the panel shows the mode you asked for and
- * nothing else.
- */
-const panelEl = $('panel');
-const railPane = document.querySelector('.rail-pane');
-
-function openDrawer(name){
-  for(const d of railPane.querySelectorAll('.drawer'))
-    d.classList.toggle('hidden', d.dataset.drawer !== name);
-  for(const b of railPane.querySelectorAll('.rail-btn'))
-    b.setAttribute('aria-expanded', String(b.dataset.drawer === name));
-  panelEl.classList.toggle('open', !!name);
-}
-
-for(const btn of railPane.querySelectorAll('.rail-btn')){
-  btn.onclick = ()=>{
-    const open = btn.getAttribute('aria-expanded')==='true';
-    openDrawer(open ? null : btn.dataset.drawer);
-  };
-}
-
-/* The viewport is what the panel gives back, and it is measured rather than
- * computed — the width animates, so one redraw at the end would show a
- * stretched frame all the way through it. */
-new ResizeObserver(()=>{ layoutGizmo(); drawGizmo(); draw(); }).observe($('glwrap'));
 
 /* ===================== boot ===================== */
 buildPalette(); buildVisToggles(); syncInputs(); rebuild();
