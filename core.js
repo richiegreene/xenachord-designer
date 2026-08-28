@@ -992,18 +992,26 @@
      * because the .py is the design's own record, and a log that said
      * nothing about it would be describing a different instrument from the
      * one on screen. */
-    const rigCfg = XM.rigConfig(d.devices), rigU = XM.rigUnits(L, rigCfg);
-    if (rigU.length > 1) {
+    /* ---- the rig this keyboard is one device of ----
+     * The log describes ONE device — its keys, its spine, its feet — because
+     * one device is what gets printed.  What it adds here is the desk that
+     * device stands on: where the others are, and what each one's keys are
+     * called in the run the rig is read as.  The devices may be different
+     * keyboards, so the offsets and the numbering are stated for all of them
+     * while the geometry below is stated for this one. */
+    const rigU = (opts && opts.rig) || null;
+    if (rigU && rigU.length > 1) {
+      const me = rigU.find(u => u.slot === (opts.slot | 0)) || rigU[0];
       p('    "rig_units":    ', rigU.length, ',            # ',
-        rigCfg.side && rigCfg.stack ? 'stacked, side by side'
-        : rigCfg.side ? 'side by side' : 'stacked',
-        ' — the same printed keyboard, ', rigU.length, ' of them');
-      p('    "rig_note":     "rows*(i + 32*col) + row",   # what a unit\'s key i',
-        ' is called in the run the rig is read as');
-      p('    "rig_offsets":  [   # (dx, dy, dz) mm in the design frame, then col, row');
+        opts.shape || '', ' — this file is the ', XM.rigLabel(me), ' device');
+      p('    "rig_note":     "base + step*i",   # what a device\'s key i is',
+        ' called in the run the rig is read as');
+      p('    "rig_devices":  [   # (dx, dy, dz) mm in the design frame, col, row, base, step');
       for (const u of rigU)
         p('        (', pn(u.dx), ', ', pn(u.dy), ', ', pn(u.dz), ', ',
-          u.col, ', ', u.row, '),   # ', XM.rigLabel(u));
+          u.col, ', ', u.row, ', ', u.base, ', ', u.step, '),   # ',
+          XM.rigLabel(u), u.slot === me.slot ? '  <- this one' : '',
+          u.auto ? '' : '  (numbering set by hand)');
       p('    ],');
     }
     p('    "key_colours":  ', L.spineColours.length, ',            # ',

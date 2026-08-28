@@ -2764,16 +2764,77 @@
     for (let row = 0; row < rows; row++)
       for (let col = 0; col < cols; col++)
         out.push({
-          index: out.length, row, col, rows, cols,
+          index: out.length, slot: rigSlot(col, row), row, col, rows, cols,
           primary: row === 0 && col === 0,
           dx: col * px, dy: row * RIG.dy, dz: row * RIG.dz
         });
     return out;
   }
 
-  /** The note unit `u`'s key `i` carries — see the header. */
-  function rigNote(u, i) {
-    return u.rows * (i + NOTES * u.col) + u.row;
+  /* WHERE A DEVICE'S OWN DESIGN IS KEPT.  Not the position in the list —
+   * that shifts the moment a toggle changes the rig's shape, and the
+   * keyboard you spent an hour on would come back as a different one.  The
+   * slot is the corner it stands in, so a device keeps its layout through
+   * every toggle: turn stacking off and on again and the upper manual is
+   * still the upper manual. */
+  const rigSlot = (col, row) => col + 2 * row;
+  const rigSlotCol = slot => slot & 1;
+  const rigSlotRow = slot => (slot >> 1) & 1;
+  /** The four corners, in the order the rig lists them. */
+  const RIG_SLOTS = [0, 1, 2, 3];
+
+  /* ------------------------------------------------------------------ *
+   *  WHAT A UNIT'S KEYS ARE CALLED — the default, and the override        *
+   *                                                                      *
+   *  Every mapping here is the same shape, and there is only one:         *
+   *                                                                      *
+   *      note(i) = base + step * i                                        *
+   *                                                                      *
+   *  `step` is how far one key of this device moves the rig, and `base`   *
+   *  is what its key 0 is called.  The two defaults are the two readings  *
+   *  the geometry already implies:                                        *
+   *                                                                      *
+   *    step = rows.  One row and a key is one note — the plain reading.   *
+   *      Two rows and every key of every device counts double, which is   *
+   *      what leaves the odd notes free for the device above to fall      *
+   *      into.  This is the INTERCHANGE: stacking does not add register,  *
+   *      it divides the register already there more finely.               *
+   *                                                                      *
+   *    base = rows * 32 * col + row.  Along x, 32 notes per column, so    *
+   *      the right-hand device CONTINUES the left in register — times     *
+   *      rows, so the continuation is stated in the rig's own steps and   *
+   *      not in the lower device's.  Up the stack, + row, which is the    *
+   *      one-note lift that lands the upper device between the lower      *
+   *      device's steps.                                                  *
+   *                                                                      *
+   *  A device may state either number for itself instead, on its own      *
+   *  design as `noteBase` / `noteStep`.  That is the whole of the         *
+   *  override: two integers, in the same terms the default is written in, *
+   *  so a hand-set rig is the same kind of object as an automatic one and *
+   *  nothing downstream has to know which it is looking at.               *
+   * ------------------------------------------------------------------ */
+
+  /** How far one key of this device moves the rig. Never 0 — that would
+   *  give all 32 keys of the device the same note. */
+  function rigStep(u, d) {
+    const s = d && d.noteStep;
+    return (Number.isFinite(s) && (s | 0) !== 0) ? (s | 0) : u.rows;
+  }
+
+  /** What this device's key 0 is called in the rig. */
+  function rigBase(u, d) {
+    const b = d && d.noteBase;
+    return Number.isFinite(b) ? (b | 0) : u.rows * NOTES * u.col + u.row;
+  }
+
+  /** Whether either number has been stated by hand rather than read off. */
+  function rigNoteAuto(u, d) {
+    return !(d && (Number.isFinite(d.noteBase) || Number.isFinite(d.noteStep)));
+  }
+
+  /** The note unit `u`'s key `i` carries — see above. */
+  function rigNote(u, i, d) {
+    return rigBase(u, d) + rigStep(u, d) * i;
   }
 
   /** What to call a unit out loud. */
@@ -2791,7 +2852,8 @@
     WORLD, SPINE, FOOT, SIZE, Z, COLORS, DRAFT, WALL, TONGUE_Y,
     NOTES, UNITS, FEET_PER_HALF,
     RIG, rigConfig, rigCols, rigRows, rigCount, rigPitchX, rigUnits,
-    rigNote, rigLabel,
+    rigNote, rigLabel, rigSlot, rigSlotCol, rigSlotRow, RIG_SLOTS,
+    rigStep, rigBase, rigNoteAuto,
     KEY_TYPES, TYPE_ORDER, LAYOUTS,
     whiteProfile, twoSidedWhiteBase, deriveWhiteProfile,
     KEY_PAIRS, PAIR_ORDER, PALETTE_ORDER, TYPE_ALIASES,

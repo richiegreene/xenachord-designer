@@ -72,29 +72,53 @@ const ACCS = ['♭', '♮', '♯'];
  * arrangement are the same number, and a keyboard that repeats every N notes
  * has nowhere to put an N+1th degree.
  */
+/**
+ * How many notes there are to the equave.
+ *
+ * Design settles this, not the panel here — and on a rig it is Design's own
+ * answer read in the RIG's steps rather than in one keyboard's. The anchor
+ * device's layout repeats every `period` keys, and each of its keys moves the
+ * rig `step` notes, so the repeat spans step x period notes.
+ *
+ * That is the whole of why a stacked rig sounds different rather than merely
+ * standing differently. Stacking is an INTERCHANGE: the lower device takes
+ * the even steps and the upper one the odd steps between them, so two 17-note
+ * layouts standing one above the other ARE 34-EDO. Without the equave
+ * following the step, the interleaved numbering would fold back into the
+ * design's own 17 and every key on the lower keyboard would change pitch —
+ * precisely the reading the stack denies.
+ *
+ * Side-by-side does not come into it: a second device beside the first is a
+ * CONTINUATION, 32 notes higher in the same division, and the division is
+ * untouched.
+ */
 function equaveNotes() {
+  if (typeof window.rigEquave === 'function') {
+    const n = window.rigEquave() | 0;
+    if (n > 1) return n;
+  }
   const n = (typeof window.periodNow === 'function') ? window.periodNow() : 32;
-  return ((n > 1) ? n : 32) * stackDepth();
+  return (n > 1) ? n : 32;
 }
 
-/**
- * How many AKM320s deep the rig is stacked — 1, or 2.
- *
- * A stacked rig is not a second copy of the scale, it is the same equave read
- * twice as finely: the lower unit takes the even steps and the upper one the
- * odd steps between them, so two 17-note layouts standing one above the other
- * ARE 34-EDO. That has to be settled here rather than in the rig's geometry,
- * because it is the one thing about standing two devices together that
- * changes what the keys SOUND. Without it the interleaved numbering would
- * fold back into the design's own 17 and every key on the lower keyboard
- * would change pitch, which is precisely the reading the stack denies.
- *
- * Side-by-side is deliberately not here: setting a second unit beside the
- * first extends the register 32 notes higher and leaves the division alone.
- */
+/** How much finer the rig reads the anchor device's own layout — 1 when the
+ *  two are the same, which is every single keyboard and every rig only set
+ *  side by side. */
 function stackDepth() {
-  const d = (typeof window.rigStack === 'function') ? window.rigStack() : 1;
-  return d > 1 ? d : 1;
+  const per = anchorPeriod();
+  const d = equaveNotes() / per;
+  return Number.isInteger(d) && d > 1 ? d : 1;
+}
+
+/** The device the equave is read off — the lower left, on a rig; the only
+ *  one there is, otherwise. */
+function anchorPeriod() {
+  if (typeof window.rigAnchorPeriod === 'function') {
+    const n = window.rigAnchorPeriod() | 0;
+    if (n > 1) return n;
+  }
+  const n = (typeof window.periodNow === 'function') ? window.periodNow() : 32;
+  return (n > 1) ? n : 32;
 }
 
 /** The JI degrees, folded into one octave and sorted, as the Tuner builds them. */
@@ -260,8 +284,12 @@ function syncUI(ji) {
   /* Where the number came from, when it is no longer just Design's own: the
    * stack doubled it, and that is worth saying beside it. */
   const rows = stackDepth(), base = equaveNotes() / rows;
+  /* On a rig, WHOSE Notes in Scale — because it is the anchor device's, and
+   * editing another device's period must not look like it did nothing. */
+  const who = (typeof window.rigAnchorLabel === 'function') ? window.rigAnchorLabel() : '';
+  $('t-edo-who').textContent = who ? ` (${who})` : '';
   $('t-edo-rig').innerHTML = rows > 1
-    ? `, <b>${base}</b> &times; <b>${rows}</b> stacked keyboards` : '';
+    ? `, <b>${base}</b> &times; <b>${rows}</b> interchanged keyboards` : '';
   $('t-edo-rot-v').textContent = T.edoRot;
   $('t-ji-rot-v').textContent = T.jiRot;
   $('t-scale-read').innerHTML = ji.length

@@ -86,6 +86,9 @@
   .sub{color:var(--dim);font-size:11.5px;margin:0 0 12px}
   fieldset{border:1px solid var(--line);border-radius:8px;margin:0 0 12px;padding:9px 11px}
   legend{color:var(--dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;padding:0 6px}
+  /* which device of the rig this fieldset is about, when there is more
+     than one — empty, and invisible, when there is not */
+  legend span{color:var(--accent);text-transform:none;letter-spacing:0}
   label{display:block;color:var(--dim);font-size:11px;margin:7px 0 3px}
   select,input[type=number]{width:100%;background:var(--panel2);color:var(--text);
     border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-size:12.5px}
@@ -189,6 +192,18 @@
   .kb-foot.half-b{box-shadow:-2px 0 0 var(--accent)}
   .kb-spine{position:absolute;background:#40414a;border-radius:2px}
   .kb-over{outline:2px solid var(--accent)}
+  /* ---------- which keyboard of the rig a band is ----------
+     Only ever drawn when there is more than one, because a name on the only
+     keyboard there is is just clutter. */
+  .kb-band-tag{position:absolute;z-index:7;font-size:9.5px;letter-spacing:.04em;
+    text-transform:uppercase;color:var(--dim);background:#101116;
+    padding:1px 5px;border-radius:3px;border:1px solid var(--line);
+    pointer-events:auto;cursor:pointer;white-space:nowrap}
+  .kb-band-tag.on{color:var(--accent);border-color:var(--accent);cursor:default}
+  .kb-band-veil{position:absolute;z-index:5;border-radius:4px;cursor:pointer;
+    background:rgba(16,17,22,.5);transition:background .12s}
+  .kb-band-veil:hover{background:rgba(16,17,22,.28);
+    box-shadow:inset 0 0 0 1px var(--accent)}
 
   /* ---------- per-key resize grips ----------
      An edge you can take hold of, drawn only once the pointer is on it —
@@ -312,6 +327,22 @@
   body.mode-play .kb-m{cursor:pointer}
   body.mode-play .kb-white.sounding{background:var(--accent)}
   body.mode-play .kb-m.sounding{outline:2px solid var(--accent);outline-offset:-1px}
+  /* ---------- the rig, as a map you can press ----------
+     Laid out the way the devices actually stand — upper row above lower,
+     left column left — so choosing one is pointing at it rather than
+     reading a list and translating. */
+  .rigmap{display:grid;gap:4px}
+  .rigmap button{display:flex;flex-direction:column;align-items:flex-start;
+    gap:1px;padding:5px 7px;font-size:11px;line-height:1.3;text-align:left;
+    border:1px solid var(--line);border-radius:6px;background:var(--panel);
+    color:var(--dim);cursor:pointer}
+  .rigmap button:hover{border-color:var(--accent)}
+  .rigmap button b{color:var(--text);font-weight:600;font-size:11px}
+  .rigmap button span{font-variant-numeric:tabular-nums;font-size:10px}
+  .rigmap button.on{border-color:var(--accent);background:var(--panel-bright)}
+  .rigmap button.on b{color:var(--accent)}
+  .rigmap button.hand span{color:var(--warn)}
+  #rig-base,#rig-step{flex:1;min-width:0;font-variant-numeric:tabular-nums}
   .rotbtns{display:flex;gap:5px}
   .rotbtns button{padding:2px 12px;font-size:12px;line-height:1.4}
 </style>
@@ -360,7 +391,7 @@
     </fieldset>
 
     <fieldset>
-      <legend>Key Type Categories: drag/drop to bottom</legend>
+      <legend>Key Type Categories: drag/drop to bottom<span id="palette-who"></span></legend>
       <div id="palette"></div>
     </fieldset>
 
@@ -394,11 +425,39 @@
         <button data-v="single" class="on"
           title="One AKM320 on its own — the keyboard as designed, and the default.">single</button>
         <button data-v="side"
-          title="A second AKM320 set to the right of the first, with clear air between the two cases. Its 32 keys carry on where the first keyboard's stopped, so the rig extends the register rather than repeating it.">side-by-side</button>
+          title="A second AKM320 set to the right of the first, with clear air between the two cases. By default its 32 keys carry on where the first keyboard's stopped, so the rig extends the register rather than repeating it.">side-by-side</button>
         <button data-v="stack"
-          title="A second AKM320 standing over the first like an upper manual, lifted by half the length of a white key. The two are read as one scale interleaved: every step of the lower keyboard is doubled and the upper one falls in the odd steps between them, so two 17-note layouts stacked are a 34-note scale.">stacked</button>
+          title="A second AKM320 standing over the first like an upper manual, lifted by half the length of a white key. By default the two are read as one scale interchanged: every step of the lower keyboard counts double and the upper one falls in the odd steps between them, so two 17-note layouts stacked are a 34-note scale.">stacked</button>
       </div>
       <p class="hint" id="rig-read"></p>
+
+      <!-- ---- each device is its own keyboard ----
+           Everything else in this drawer edits ONE device. Which one is
+           chosen here, and the panel below follows it: the palette, the
+           repeating layout, the widths and the export all belong to the
+           keyboard lit in this map. -->
+      <div id="rig-edit" style="display:none">
+        <div class="tune-h">Which device the panel edits</div>
+        <div id="rig-units" class="rigmap"></div>
+        <button class="wide" id="rig-copy" style="width:100%;margin-top:7px"
+          title="Give every other device the same layout as the one being edited — the same key types, widths and scale. Each device keeps its own numbering, because that is its relationship to the others rather than part of its keyboard.">⧉ Copy This Layout to the Others</button>
+
+        <!-- ---- and its relationship to the others ----
+             One line does all of it: note(i) = base + step x i. -->
+        <div class="tune-h" style="margin-top:12px">Numbering
+          <span id="rig-num-who" class="pressval"></span></div>
+        <div class="row" style="align-items:center;gap:7px">
+          <label class="tune-inline" for="rig-base">key 0 =</label>
+          <input type="number" id="rig-base" step="1"
+            title="What this device's first key is called in the run the whole rig is read as. Side by side the default continues the register — the right-hand device starts 32 notes above the left. Stacked, the upper device starts one note above the lower, which is what lands it between the lower device's steps.">
+          <label class="tune-inline" for="rig-step">step</label>
+          <input type="number" id="rig-step" step="1"
+            title="How far one key of this device moves the rig. 1 is the plain reading: key to key is note to note. 2 leaves every other note free for a device stacked with it — which is why stacking sets it to 2 by default, and how two 17-note keyboards become 34 notes to the equave. Negative runs the device backwards.">
+        </div>
+        <button class="wide" id="rig-auto" style="width:100%;margin-top:6px"
+          title="Give this device back the numbering the rig itself implies: continue in register along x, interchange up the stack.">↺ Read Numbering off the Rig</button>
+        <p class="hint" id="rig-num-read"></p>
+      </div>
     </fieldset>
 
     <fieldset>
@@ -424,7 +483,7 @@
     </fieldset>
 
     <fieldset>
-      <legend>Export</legend>
+      <legend>Export<span id="export-who"></span></legend>
       <div class="btns">
         <button class="wide" id="dl-zip">⬇ Save STL Files for All Parts (.zip)</button>
         <button data-part="white">white .stl</button>
@@ -510,7 +569,7 @@
                      knows how many notes there are in an equave, so the EDO is
                      read off Design rather than typed in beside it. -->
                 <div class="tune-read">
-                  <b id="t-edo-n">32</b>-EDO &mdash; read from Design&rsquo;s <b>Notes in Scale</b><span id="t-edo-rig"></span>
+                  <b id="t-edo-n">32</b>-EDO &mdash; read from Design&rsquo;s <b>Notes in Scale</b><span id="t-edo-who"></span><span id="t-edo-rig"></span>
                 </div>
                 <div class="seg" id="t-edo-seg">
                   <button data-v="updown" class="on"
@@ -660,9 +719,86 @@
 const $ = id => document.getElementById(id);
 const LS = 'xenachord-designer-v2';
 
-let design = load() || XD.clearedDesign(0);
-if (!design.origin) design.origin = 'centre';
+/* ===================== THE RIG =====================
+ *
+ * There is no longer "the design".  There is a RIG of up to four AKM320s,
+ * each with a design of its own, and `design` is a live pointer at the one
+ * being edited.  That is the whole trick: every control in the Design drawer
+ * still reads and writes `design`, still knows nothing about rigs, and now
+ * edits whichever device is selected.  Nothing had to be threaded through.
+ *
+ * WHERE A DEVICE LIVES.  Not at a position in a list — the list changes shape
+ * the moment a toggle does, and an hour's work would come back attached to a
+ * different keyboard.  Each device is kept at its CORNER, XM.rigSlot(col,row):
+ * 0 lower left, 1 lower right, 2 upper left, 3 upper right.  Turn stacking
+ * off and on again and the upper manual is still the upper manual.
+ *
+ * A CORNER THE RIG HAS NOT REACHED YET STILL HAS A DESIGN.  It is made the
+ * moment it is asked for, as a copy of the anchor — because a second device
+ * that arrived as 32 blank whites would throw away the reason you added it,
+ * which is nearly always "the same keyboard again, read differently".
+ * Diverging from there is one edit; starting from nothing is thirty-two.
+ */
+let rig = loadRig();
+let design;                      // === rig.units[rig.sel] — see selectUnit
 let L = null, meshes = null, dragType = null;
+
+/** The rig's shape, in the terms the geometry reads it in. */
+function rigCfg(){ return { side: !!rig.side, stack: !!rig.stack }; }
+
+/** Which corners the rig currently stands in, in the order it lists them. */
+function rigSlots(){
+  const cfg = rigCfg(), out = [];
+  for (let row = 0; row < XM.rigRows(cfg); row++)
+    for (let col = 0; col < XM.rigCols(cfg); col++) out.push(XM.rigSlot(col, row));
+  return out;
+}
+
+/* WHICH KEYBOARD A NEW DEVICE ARRIVES AS.  The one it continues, not simply
+ * the anchor: press side-by-side and the new right-hand device is a copy of
+ * the device on its own row, because that is the keyboard it is extending the
+ * register of.  Press stacked and the new upper device copies the one it is
+ * standing on.  Following the relationship rather than always reaching for
+ * device 0 means a rig grown one toggle at a time comes out the way you would
+ * have built it by hand. */
+const PARENT_SLOT = { 1: [0], 2: [0], 3: [2, 1, 0] };
+
+/** The design standing in a corner, made from what it continues if it is not
+ *  there yet.  A corner keeps its design through every toggle, so this only
+ *  ever runs the first time a device is reached for. */
+function unitDesign(slot){
+  let d = rig.units[slot];
+  if (!d){
+    let from = rig.units[0];
+    for (const q of (PARENT_SLOT[slot] || [])) if (rig.units[q]){ from = rig.units[q]; break; }
+    d = JSON.parse(JSON.stringify(from));
+    /* the copy is its own keyboard: it is not the preset its parent came
+     * from any more, and it takes the rig's own reading of its numbering
+     * until somebody says otherwise */
+    delete d.preset; delete d.noteBase; delete d.noteStep;
+    rig.units[slot] = d;
+  }
+  return d;
+}
+
+/* REPLACING THE DESIGN MEANS REPLACING THE DEVICE'S DESIGN.  `design` is a
+ * pointer into the rig, so anything that hands it a whole new object — a
+ * preset, Clear All, an undo — has to put that object back in the rig's hand
+ * as well, or the panel would go on editing a keyboard nothing draws. */
+function setDesign(d){
+  design = rig.units[rig.sel] = d;
+  if (!design.origin) design.origin = 'centre';
+  return design;
+}
+
+/** Point `design` — and with it the whole Design drawer — at one device. */
+function selectUnit(slot){
+  const here = rigSlots();
+  rig.sel = here.indexOf(slot) >= 0 ? slot : here[0];
+  design = unitDesign(rig.sel);
+  if (!design.origin) design.origin = 'centre';
+}
+selectUnit(rig.sel);
 
 /* A design saved before this rebuild carries `overrides` plus a live
  * seven-slot `template`.  Flatten both into the gap map, keeping every key
@@ -689,16 +825,48 @@ function migrate(s){
    * repeat existed was */
   const per = s.period | 0;
   s.period = (per >= 2 && per <= XM.NOTES) ? per : XM.NOTES;
-  /* how many of these you are sitting at.  A design saved before the rig
-   * existed was one keyboard, which is what the default says. */
-  s.devices = XM.rigConfig(s.devices);
+  /* WHAT THIS DEVICE'S KEYS ARE CALLED, when it is not the only one.  Absent
+   * is not the same as 0: absent means "read it off the rig", and 0 means
+   * "this device's key 0 is note 0, whatever the rig would have said". */
+  for (const k of ['noteBase', 'noteStep']){
+    if (Number.isFinite(s[k])) s[k] = s[k] | 0; else delete s[k];
+  }
+  if (s.noteStep === 0) delete s.noteStep;   // all 32 keys on one note
+  /* how many devices there are is a fact about the desk, not about any one
+   * keyboard on it — an early build kept it here, and it moves out */
+  delete s.devices;
   return s;
 }
 
-function load(){ try{
-  return migrate(JSON.parse(localStorage.getItem(LS)));
-}catch(e){} return null; }
-function save(){ try{ localStorage.setItem(LS, JSON.stringify(design)); }catch(e){} }
+/* ---- the rig, off disk ----
+ * Three shapes have been saved under this key: a bare design from before
+ * there were rigs at all, a design carrying `devices` from the build that
+ * first drew them, and the rig proper.  All three come back as a rig. */
+function migrateRig(r){
+  if (!r || typeof r !== 'object') return null;
+  if (!r.units){
+    const cfg = XM.rigConfig(r.devices);      // read before migrate drops it
+    const d = migrate(r);
+    return d ? { side: cfg.side, stack: cfg.stack, sel: 0, units: { 0: d } } : null;
+  }
+  const units = {};
+  for (const slot of XM.RIG_SLOTS){
+    const d = migrate(r.units[slot]);
+    if (d) units[slot] = d;
+  }
+  if (!units[0]) return null;
+  return { side: !!r.side, stack: !!r.stack, sel: r.sel | 0, units };
+}
+
+function blankRig(){
+  const d = XD.clearedDesign(0); d.origin = 'centre';
+  return { side: false, stack: false, sel: 0, units: { 0: d } };
+}
+function loadRig(){ try{
+  const r = migrateRig(JSON.parse(localStorage.getItem(LS)));
+  if (r) return r;
+}catch(e){} return blankRig(); }
+function save(){ try{ localStorage.setItem(LS, JSON.stringify(rig)); }catch(e){} }
 
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('on');
   clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('on'),1800); }
@@ -730,16 +898,14 @@ presetSel.onchange = () => {
     const name = presetSel.value.slice(CUSTOM_PREFIX.length);
     const custom = loadCustomPresets();
     if (!custom[name]) return;
-    design = migrate(JSON.parse(JSON.stringify(custom[name])));
+    setDesign(migrate(JSON.parse(JSON.stringify(custom[name]))));
     design.preset = presetSel.value;
   } else {
     /* a drafted sheet is written out as 32 individual keys, so it opens as
      * the whole keyboard said once; a SAVED preset keeps the scale length
      * it was saved with */
-    const rig = XM.rigConfig(design.devices);
-    design = XD.presetDesign(+presetSel.value);
+    setDesign(XD.presetDesign(+presetSel.value));
     design.period = XM.NOTES;
-    design.devices = rig;      // a drafted sheet says nothing about the rig
   }
   forgetPressBlend();
   syncInputs(); rebuild();
@@ -767,8 +933,14 @@ $('save-preset').onclick = () => {
   /* the scale length is part of the design, not of the session: a preset
    * that forgot it would come back as 32 loose keys that merely happen to
    * look periodic, and the next edit inside the period would not repeat */
-  custom[name] = Object.assign(JSON.parse(JSON.stringify(design)),
-                               { period: periodNow() });
+  /* A preset is a keyboard, not a rig.  The numbering is this device's
+   * relationship to the others and belongs to the desk it is standing on, so
+   * it stays behind — loading a saved layout into the upper manual must not
+   * quietly renumber it as though it were the lower one. */
+  const keep = Object.assign(JSON.parse(JSON.stringify(design)),
+                             { period: periodNow() });
+  delete keep.noteBase; delete keep.noteStep;
+  custom[name] = keep;
   saveCustomPresets(custom);
   buildPresetOptions();
   design.preset = CUSTOM_PREFIX + name;
@@ -781,12 +953,12 @@ $('clear-all').onclick = () => {
   /* keyScale is deliberately NOT carried: the cleared keyboard is the one
    * where every white is the same key, which is exactly what an exception
    * on a single key denies */
-  design = Object.assign(XD.clearedDesign(design.rotation),
-                         { origin: design.origin, widths: design.widths,
-                           period: periodNow(),
-                           /* how many AKM320s are on the desk is not
-                            * something clearing the keys can answer */
-                           devices: XM.rigConfig(design.devices) });
+  setDesign(Object.assign(XD.clearedDesign(design.rotation),
+                          { origin: design.origin, widths: design.widths,
+                            period: periodNow(),
+                            /* clearing the keys is not a statement about
+                             * where this device stands in the rig */
+                            noteBase: design.noteBase, noteStep: design.noteStep }));
   forgetPressBlend();
   syncInputs(); rebuild();
   toast(`cleared — 32 white keys, ${L ? L.wW.toFixed(2) : ''} mm each, spanning the spine`);
@@ -807,48 +979,164 @@ $('clear-all').onclick = () => {
  */
 const rigSeg = $('rig-seg');
 function setRig(v){
-  const d = design.devices = XM.rigConfig(design.devices);
-  if (v === 'single'){ d.side = false; d.stack = false; }
-  else d[v === 'side' ? 'side' : 'stack'] = !d[v === 'side' ? 'side' : 'stack'];
-  design.preset = null;
+  if (v === 'single'){ rig.side = false; rig.stack = false; }
+  else if (v === 'side') rig.side = !rig.side;
+  else rig.stack = !rig.stack;
+  /* the corner the panel was editing may have just left the rig */
+  selectUnit(rig.sel);
+  pressCache = null;
   syncInputs();
   rebuild();
-  const n = XM.rigCount(d);
+  const n = XM.rigCount(rigCfg());
   toast(n === 1 ? 'one AKM320'
-      : `${n} AKM320s · ` + (d.side && d.stack ? 'stacked, side by side'
-                            : d.side ? 'side by side' : 'stacked'));
+      : `${n} AKM320s · ` + (rig.side && rig.stack ? 'stacked, side by side'
+                            : rig.side ? 'side by side' : 'stacked'));
 }
 for (const b of rigSeg.querySelectorAll('button')) b.onclick = () => setRig(b.dataset.v);
 
+/* ---- choosing the device the drawer edits ----
+ * One click, from the map or from the strip's own bands.  Everything below
+ * Devices in this drawer then belongs to it. */
+function pickUnit(slot){
+  if (slot === rig.sel) return;
+  selectUnit(slot);
+  pressCache = null;          // the press solve was for the other keyboard
+  syncInputs();
+  rebuild();
+  toast(`editing the ${XM.rigLabel(rigShape().find(u => u.slot === slot))} keyboard`);
+}
+
 /** What the rig reads as, in the terms the toggle was pressed in. */
 function showRig(){
-  const d = XM.rigConfig(design.devices), n = XM.rigCount(d);
+  const n = XM.rigCount(rigCfg());
   for (const b of rigSeg.querySelectorAll('button'))
-    b.classList.toggle('on', b.dataset.v === 'single' ? (!d.side && !d.stack)
-                           : b.dataset.v === 'side'   ? d.side : d.stack);
-  const per = periodNow(), read = $('rig-read');
+    b.classList.toggle('on', b.dataset.v === 'single' ? (!rig.side && !rig.stack)
+                           : b.dataset.v === 'side'   ? rig.side : rig.stack);
+  /* the ANCHOR's period, not the selected device's: the equave is read off
+   * the lower left, and this sentence has to agree with the tuning panel */
+  const per = rigAnchorPeriod(), read = $('rig-read');
+  $('rig-edit').style.display = n > 1 ? '' : 'none';
   if (n === 1){
     read.innerHTML = 'One AKM320 — 32 keys, the keyboard as drafted.';
     return;
   }
   const gap = XM.RIG.gapX.toFixed(0), lift = XM.RIG.dz.toFixed(1);
-  const notes = n * XM.NOTES;
   read.innerHTML =
-    `<b>${n}</b> AKM320s · <b>${notes}</b> keys. ` +
-    (d.side ? `The right-hand unit stands ${gap} mm clear of the left and its ` +
-              `keys carry on 32 notes above it. ` : '') +
-    (d.stack ? `The upper unit sits over the lower one's spine, ${lift} mm up ` +
-               `— half a white key — and the two interleave: ` +
-               (per < XM.NOTES
-                 ? `two ${per}-note layouts stacked read as <b>${per*2}</b> notes ` +
-                   `to the equave.`
-                 : `every step of the lower keyboard is doubled and the upper ` +
-                   `one falls between them.`)
-             : '');
+    `<b>${n}</b> AKM320s · <b>${n * XM.NOTES}</b> keys. ` +
+    (rig.side ? `The right-hand device stands ${gap} mm clear of the left and ` +
+                `by default CONTINUES it — 32 notes higher, extending the ` +
+                `register. ` : '') +
+    (rig.stack ? `The upper device sits over the lower one's spine, ${lift} mm ` +
+                 `up — half a white key — and by default INTERCHANGES with ` +
+                 `it: ` +
+                 (per < XM.NOTES
+                   ? `a ${per}-note layout stacked reads as <b>${per*2}</b> ` +
+                     `notes to the equave.`
+                   : `every step of the lower keyboard counts double and the ` +
+                     `upper one falls between them.`)
+               : '') +
+    ' Each device below is its own keyboard, and its own numbering.';
+  buildUnitMap();
+  showNumbering();
 }
+
+/* WHICH KEYBOARD THE REST OF THE DRAWER IS ABOUT.  Said where the fieldsets
+ * are rather than only in the Devices map, because "drop a key onto the
+ * keyboard" and "save the .stl" are the two places it would cost you most to
+ * be wrong about which one you meant. */
+function showWhich(){
+  const many = XM.rigCount(rigCfg()) > 1;
+  const who = many ? ` · ${XM.rigLabel(rigShape().find(u => u.selected))}` : '';
+  for (const id of ['export-who','palette-who']){
+    const el = $(id); if (el) el.textContent = who;
+  }
+}
+
+/* ---- the rig as a map you can press ----
+ * Drawn the way the devices stand: upper row above lower, left column left.
+ * Each cell says what that device's 32 keys are called, which is the thing
+ * you are actually choosing between when you set a rig up. */
+function buildUnitMap(){
+  const box = $('rig-units'), us = rigShape();
+  box.innerHTML = '';
+  box.style.gridTemplateColumns = `repeat(${us[us.length-1].cols},1fr)`;
+  /* the rig lists bottom row first, because that is the order the geometry
+   * is generated in; a map has to be drawn the other way up */
+  for (const u of us.slice().sort((a,b) => (b.row - a.row) || (a.col - b.col))){
+    const b = document.createElement('button');
+    b.className = 'rigcell' + (u.selected ? ' on' : '') + (u.auto ? '' : ' hand');
+    const lo = u.note(0), hi = u.note(XM.NOTES - 1);
+    b.innerHTML = `<b>${u.label}</b><span>keys ${Math.min(lo,hi)} … ${Math.max(lo,hi)}` +
+                  `${u.auto ? '' : ' · by hand'}</span>`;
+    b.title = u.selected
+      ? `the ${u.label} keyboard — the one this drawer is editing`
+      : `edit the ${u.label} keyboard`;
+    b.onclick = () => pickUnit(u.slot);
+    box.appendChild(b);
+  }
+}
+
+/* ---- one device's relationship to the others ----
+ * note(i) = base + step x i, and that is the whole model.  The fields show
+ * what is in force whether or not it was typed; typing in one states it, and
+ * "read it off the rig" takes the statement back. */
+function showNumbering(){
+  const u = rigShape().find(q => q.selected) || rigShape()[0];
+  $('rig-num-who').textContent = u.label;
+  const base = $('rig-base'), step = $('rig-step');
+  if (document.activeElement !== base) base.value = u.base;
+  if (document.activeElement !== step) step.value = u.step;
+  $('rig-auto').disabled = u.auto;
+  const run = [0,1,2].map(i => u.note(i));
+  $('rig-num-read').innerHTML =
+    `${u.auto ? 'Read off the rig' : '<b>Set by hand</b>'} — this keyboard's ` +
+    `32 keys are notes ${run.join(', ')} … ${u.note(XM.NOTES-1)}.` +
+    (u.auto ? '' : ' The rig would say ' +
+      `${XM.rigBase(u, null)} + ${XM.rigStep(u, null)} × i.`);
+}
+
+/* Renumbering moves no geometry, so the build cache carries every keyboard
+ * straight through this — it is a rebuild only in the sense that the strip,
+ * the 3D note map and the tuning all have to be told. */
+function setNumber(key, v){
+  if (v === '' || !isFinite(+v)) delete design[key]; else design[key] = +v | 0;
+  if (design.noteStep === 0) delete design.noteStep;
+  syncInputs(); rebuild();
+}
+$('rig-base').oninput = e => setNumber('noteBase', e.target.value);
+$('rig-step').oninput = e => setNumber('noteStep', e.target.value);
+$('rig-auto').onclick = () => {
+  delete design.noteBase; delete design.noteStep;
+  syncInputs(); rebuild();
+  toast('numbering read off the rig');
+};
+
+/* ---- one keyboard, on every device ----
+ * The layout travels and the numbering stays: a rig is normally the same
+ * keyboard read several ways, and the reading is exactly the part that must
+ * not be overwritten by the copy. */
+$('rig-copy').onclick = () => {
+  const src = JSON.parse(JSON.stringify(design));
+  delete src.preset; delete src.noteBase; delete src.noteStep;
+  let n = 0;
+  for (const slot of rigSlots()){
+    if (slot === rig.sel) continue;
+    const was = rig.units[slot] || {};
+    const d = JSON.parse(JSON.stringify(src));
+    if (Number.isFinite(was.noteBase)) d.noteBase = was.noteBase;
+    if (Number.isFinite(was.noteStep)) d.noteStep = was.noteStep;
+    rig.units[slot] = d;
+    n++;
+  }
+  selectUnit(rig.sel);
+  syncInputs(); rebuild();
+  toast(n ? `layout copied to ${n} other device${n===1?'':'s'} — numbering kept`
+          : 'nothing to copy to');
+};
 
 function syncInputs(){
   showRig();
+  showWhich();
   presetSel.value = design.preset || '';
   const pr = $('period');
   if (pr){
@@ -1150,20 +1438,129 @@ function mkGrip(gid, title){
 const ROW_H = 170;    // px one unit's band is — unchanged from the single strip
 const ROW_GAP = 12;   // px between two bands — the stack, said in a plan
 
-/** The rig as it currently stands: one entry per AKM320 on the desk. */
-function rigUnits(){ return XM.rigUnits(L, design.devices); }
+/* ===================== building the rig =====================
+ *
+ * ONE BUILD PER DISTINCT KEYBOARD, NOT ONE PER DEVICE.  Four devices carrying
+ * the same design are one layout and one mesh set drawn four times; four
+ * different designs are four of each.  The cache is keyed on everything about
+ * a design that changes its geometry, so "are these the same keyboard?" is
+ * answered by the key rather than guessed at — and the ordinary case, a rig
+ * you have not diverged yet, costs exactly what a single keyboard cost.
+ *
+ * A device's NUMBERING is deliberately not in that key: what a keyboard's
+ * keys are called does not move a single vertex, and renumbering one device
+ * should not re-solve four.
+ */
+let buildStamp = 0;
+const unitCache = new Map();   // geometry key -> {L, meshes, bufs, tris, err}
 
-/* How many keyboards deep the stack is.  Read by Scale/Tuning, which has to
- * know: stacking INTERLEAVES, so it is the one thing about a rig that changes
- * what the keys sound rather than only where they stand.  Two units deep is
- * two steps where the design has one, which is the same statement as an
- * equave twice as finely divided — see XM's rig header. */
-function rigStack(){ return XM.rigRows(design.devices); }
+function geomKey(d){
+  const { noteBase, noteStep, preset, ...g } = d;
+  return JSON.stringify(g);
+}
+
+function unitBuild(d){
+  const k = geomKey(d);
+  let e = unitCache.get(k);
+  if (!e){
+    e = { key:k, L:null, meshes:null, bufs:null, tris:new Map(), err:null };
+    try { e.L = XD.computeLayout(d); e.meshes = XD.buildMeshes(e.L); }
+    catch(err){ e.err = err; }
+    unitCache.set(k, e);
+  }
+  e.used = buildStamp;
+  return e;
+}
+
+/** Whatever this rebuild did not ask for is gone, GL buffers and all. */
+function sweepUnitCache(){
+  for (const [k,e] of unitCache)
+    if (e.used !== buildStamp){ freeBufs(e); unitCache.delete(k); }
+}
+
+/* The rig, settled once per rebuild.  Every view asks for it — the strip on
+ * every keystroke, the 3D view on every frame of an orbit — so it is worked
+ * out when the design changes and read back after, rather than re-derived
+ * inside a draw call. */
+let RIG = [];
+function rigUnits(){ return RIG; }
+
+function computeRig(){
+  const cfg = rigCfg(), built = {};
+  /* The devices may be different keyboards now, so the pitch has to clear the
+   * WIDEST of them: taken off the selected one alone, a wider neighbour's
+   * keys would overlap it in the air. */
+  let x1 = XM.SPINE.halfB.x1;
+  for (const slot of rigSlots()){
+    const e = built[slot] = unitBuild(unitDesign(slot));
+    if (e.L) x1 = Math.max(x1, e.L.keyX1);
+  }
+  const us = XM.rigUnits({ keyX1: x1 }, cfg);
+  for (const u of us) decorate(u, built[u.slot]);
+  return us;
+}
+
+/** What a unit carries beyond its place in the rig: its own keyboard, and
+ *  what that keyboard's keys are called from here. */
+function decorate(u, e){
+  u.design = unitDesign(u.slot);
+  u.build = e || null;
+  u.L = e ? e.L : null;
+  u.err = e ? e.err : null;
+  u.selected = u.slot === rig.sel;
+  u.step = XM.rigStep(u, u.design);
+  u.base = XM.rigBase(u, u.design);
+  u.auto = XM.rigNoteAuto(u, u.design);
+  u.note = i => u.base + u.step * i;
+  u.label = XM.rigLabel(u);
+  return u;
+}
+
+/** The rig's SHAPE — where the devices are and what their keys are called —
+ *  without the layouts.  The panel needs this before a rebuild has run, and
+ *  it must never be the thing that triggers one. */
+function rigShape(){
+  const us = XM.rigUnits({ keyX1: XM.SPINE.halfB.x1 }, rigCfg());
+  for (const u of us) decorate(u, null);
+  return us;
+}
 
 /* What a unit is when nothing says otherwise — a single keyboard, at the
  * origin, which is exactly what unit 0 of any rig also is. */
-const ORIGIN_UNIT = { index:0, row:0, col:0, rows:1, cols:1,
-                      primary:true, dx:0, dy:0, dz:0 };
+const ORIGIN_UNIT = { index:0, slot:0, row:0, col:0, rows:1, cols:1,
+                      primary:true, selected:true, dx:0, dy:0, dz:0 };
+
+/* ---- what Scale/Tuning reads ----
+ * The equave is the anchor device's own repeat said in the RIG's steps: its
+ * layout repeats every `period` keys, and each of its keys moves the rig
+ * `step` notes, so the repeat spans step x period notes.  With the default
+ * readings that is `period` on a single keyboard and twice `period` on a
+ * stacked pair — two 17-note layouts stacked are 34 notes to the equave —
+ * and it keeps following when the numbering is set by hand.
+ *
+ * ANCHORED ON THE LOWER LEFT, deliberately.  A rig whose devices carry
+ * different periods has no single answer, and the bottom initial keyboard is
+ * the one the others are placed and numbered against.
+ */
+/** The anchor device's Notes in Scale — NOT the selected device's.  The two
+ *  are the same until you give a device a period of its own, and after that
+ *  the equave has to keep still while you edit the others. */
+function rigAnchorPeriod(){
+  const n = (rig.units[0] || {}).period | 0;
+  return (n >= 2 && n <= XM.NOTES) ? n : XM.NOTES;
+}
+/* Off the bare geometry rather than off rigShape(), which reaches for every
+ * device's design and would make asking what the equave is enough to bring a
+ * keyboard into existence. */
+const anchorUnit = () => XM.rigUnits({ keyX1: 0 }, rigCfg())[0];
+function rigEquave(){
+  const n = Math.abs(XM.rigStep(anchorUnit(), rig.units[0])) * rigAnchorPeriod();
+  return n > 1 ? n : 32;
+}
+/** What Scale/Tuning calls the device it is reading the equave off. */
+function rigAnchorLabel(){
+  return XM.rigCount(rigCfg()) > 1 ? XM.rigLabel(anchorUnit()) : '';
+}
 
 /* The strip grows to hold the rig rather than clipping it — but never past
  * half the window, because a rig two units deep would otherwise take the 3D
@@ -1179,13 +1576,17 @@ addEventListener('resize', fitStripHeight);
 function buildStrip(){
   const inner = $('stripInner'); inner.innerHTML='';
   const units = rigUnits();
-  const rows = XM.rigRows(design.devices), cols = XM.rigCols(design.devices);
-  const pitchX = XM.rigPitchX(L);
-  inner.style.width = ((pitchX*(cols-1) + L.width + 40)*PX) + 'px';
+  if (!units.length) return;
+  const rows = units[units.length-1].rows;
+  /* wide enough for whichever device reaches furthest right — they are not
+   * all the same keyboard any more */
+  let w = 0;
+  for (const u of units) if (u.L) w = Math.max(w, u.dx + u.L.width);
+  inner.style.width = ((w + 40)*PX) + 'px';
   stripH = rows*ROW_H + (rows-1)*ROW_GAP;
   inner.style.height = stripH + 'px';
   fitStripHeight();
-  for (const u of units) buildUnit(u, inner, rows);
+  for (const u of units) if (u.L) buildUnit(u, inner, rows);
   /* The strip is torn down and rebuilt whole every time, so the names a
    * tuning writes on it are put back here rather than kept alive across it. */
   if (window.XTuning) window.XTuning.label(L);
@@ -1205,14 +1606,19 @@ function buildStrip(){
  * of the rig, and the tuning and Play both find them here.
  */
 function buildUnit(u, inner, rows){
-  const live = u.primary;
+  /* THE DEVICE YOU ARE EDITING IS THE LIVE ONE — not device 0.  A rig has
+   * one design open at a time, and the grips, the drops and the click-to-
+   * remove belong to it wherever it stands.  The others are drawn inert:
+   * editing them means selecting them first, which is one click and no
+   * ambiguity about which keyboard just changed. */
+  const live = u.selected;
+  const L = u.L;
   const top = (rows-1-u.row)*(ROW_H+ROW_GAP);
   const X = mm => (mm+12+u.dx)*PX;
   // y in mm from the spine front; the strip draws y downward from the top
   const Y = mm => top + 14 + mm*1.5;
-  const note = i => XM.rigNote(u, i);
-  const who = XM.rigLabel(u);
-  const of = rows*u.cols > 1 ? ` · ${who} keyboard` : '';
+  const note = i => u.note(i);
+  const of = rows*u.cols > 1 ? ` · ${u.label} keyboard` : '';
 
   // spine — half A and half B, and only ever these two
   for (const [nm,h] of [['A',XM.SPINE.halfA],['B',XM.SPINE.halfB]]){
@@ -1328,6 +1734,41 @@ function buildUnit(u, inner, rows){
       });
     }
     inner.appendChild(d);
+  }
+
+  /* ---- which band is which, and which one is open ----
+   * With four keyboards on the strip, "which of these am I editing?" has to
+   * be answerable by looking rather than by remembering.  Every band is
+   * named; the ones that are not selected are veiled and take a click to
+   * select, which is the same gesture as reaching for that keyboard.
+   *
+   * The veil goes on LAST so it paints over the keys it covers, and it is no
+   * obstacle in Play: play.js takes the pointer in the capture phase, ahead
+   * of this, and reads the key out of the whole hit stack rather than off
+   * the topmost element. */
+  if (rows*u.cols > 1){
+    const tag = document.createElement('div');
+    tag.className = 'kb-band-tag' + (live ? ' on' : '');
+    tag.style.left = X(0) + 'px';
+    tag.style.top = (top - 2) + 'px';
+    tag.textContent = u.label + (live ? ' · editing' : '');
+    tag.title = live ? `the ${u.label} keyboard — the one the panel is editing`
+                     : `the ${u.label} keyboard — click to edit it`;
+    inner.appendChild(tag);
+    if (!live){
+      const veil = document.createElement('div');
+      veil.className = 'kb-band-veil';
+      veil.style.left = ((12 + u.dx - 6)*PX) + 'px';
+      veil.style.width = ((L.width + 12)*PX) + 'px';
+      veil.style.top = (top + 6) + 'px';
+      veil.style.height = (ROW_H - 10) + 'px';
+      veil.title = `the ${u.label} keyboard — click to edit it`;
+      veil.onclick = () => {
+        if (!document.body.classList.contains('mode-play')) pickUnit(u.slot);
+      };
+      inner.appendChild(veil);
+      tag.onclick = veil.onclick;
+    }
   }
 }
 
@@ -2091,11 +2532,16 @@ function rebuild(){
   applyPeriod();
   save();
   noteHistory();
-  let err = null;
-  try { L = XD.computeLayout(design); meshes = XD.buildMeshes(L); }
-  catch(e){ err = e; }
+  /* EVERY DEVICE IS BUILT, not only the one on screen in the panel: the 3D
+   * view and the strip both draw all of them, and a keyboard that was only
+   * solved when it was selected would appear as a hole in the rig. */
+  buildStamp++;
+  RIG = computeRig();
+  sweepUnitCache();
+  const me = unitBuild(design);
+  L = me.L; meshes = me.meshes;
   const st = $('stats'), wn = $('warnings');
-  if (err){ st.innerHTML=''; wn.innerHTML=`<div class="warning">${err.message}</div>`; return; }
+  if (me.err){ st.innerHTML=''; wn.innerHTML=`<div class="warning">${me.err.message}</div>`; return; }
 
   const c = {};
   for (const n of L.notes) c[n.type] = (c[n.type]||0)+1;
@@ -2121,11 +2567,16 @@ function rebuild(){
     ? L.warnings.map(w=>`<div class="warning">${w}</div>`).join('')
     : '<div class="okline">✓ geometry consistent with the drafting sandbox</div>';
 
+  /* A device that will not solve is reported rather than passed over — with
+   * four keyboards in play, a silent one is a keyboard you cannot find. */
+  for (const u of RIG) if (u.err) wn.innerHTML +=
+    `<div class="warning">the ${u.label} keyboard: ${u.err.message}</div>`;
+
   picked=null; $('inspect').classList.remove('on');
-  buildStrip(); showSize(); buildWidths(); showOrigin(); uploadMeshes(); buildVisToggles();
-  /* Refit on anything that changes how much there is to look at — the
-   * keyboard's own width, and how many of them are standing there. */
-  const frame = L.width + ' ' + XM.rigCount(design.devices);
+  buildStrip(); showSize(); buildWidths(); showOrigin(); uploadRig(); buildVisToggles();
+  /* Refit on anything that changes how much there is to look at — every
+   * device's own width, and where the rig stands them. */
+  const frame = RIG.map(u => u.slot + ':' + (u.L ? u.L.width.toFixed(3) : 'x')).join(',');
   if (rebuild._w !== frame) { rebuild._w = frame; fit(); } else draw();
 }
 
@@ -2160,7 +2611,11 @@ const HIST_MERGE = 700;   // ms within which the same control's nudges are one
 let histUndo = [], histRedo = [], histAt = null;
 let histApplying = false, histPointer = false, histKey = null, histTime = 0;
 
-const histSnap = () => JSON.stringify(design);
+/* THE HISTORY IS THE RIG'S, not one device's.  Selecting another keyboard,
+ * renumbering one, copying a layout across — all of them are edits, and a
+ * step back that restored only the device that happened to be open would put
+ * the panel and the rig into two different pasts. */
+const histSnap = () => JSON.stringify(rig);
 
 /** what the current edit belongs to: a gesture, a control, or nothing */
 function histSource(){
@@ -2192,7 +2647,12 @@ function noteHistory(){
  * misses and solves again. */
 function histApply(json){
   histApplying = true;
-  try { design = JSON.parse(json); syncInputs(); rebuild(); }
+  try {
+    rig = migrateRig(JSON.parse(json)) || blankRig();
+    selectUnit(rig.sel);
+    pressCache = null;
+    syncInputs(); rebuild();
+  }
   finally { histApplying = false; }
   /* what is on screen is what a redo has to come back to, and rebuild may
    * have stamped a period out across it */
@@ -2247,7 +2707,31 @@ function download(name, buf, mime){
   a.download = name; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
 }
-const baseName = () => `xenachord-32key-s${L.s.toFixed(2)}`;
+/* ---- WHAT AN EXPORT IS OF, ON A RIG ----
+ * A device.  You print one keyboard at a time, and with four possibly
+ * different keyboards standing together, "the .stl" is not a thing — so the
+ * single-part buttons and the log export the device the drawer is editing,
+ * and say which in the filename.
+ *
+ * THE ZIP IS THE EXCEPTION, and it is the one that matters: it carries every
+ * DISTINCT keyboard in the rig, each in its own folder. Four devices sharing
+ * one design are still one folder, because they are one thing to print four
+ * times; diverge one and a fourth folder appears. Nobody should have to
+ * remember to come back and export the upper manual separately.
+ */
+const slug = u => (u && (u.rows*u.cols) > 1) ? '-' + u.label.replace(/ /g,'-') : '';
+const nameOf = (LL,u) => `xenachord-32key-s${LL.s.toFixed(2)}${slug(u)}`;
+const baseName = () => nameOf(L, rigUnits().find(u=>u.selected));
+
+/** What pythonLog needs to describe the desk as well as the keyboard. */
+function logOpts(u){
+  const units = rigUnits();
+  return { origin: (u ? u.design : design).origin,
+           rig: units, slot: u ? u.slot : rig.sel,
+           shape: rig.side && rig.stack ? 'stacked, side by side'
+                : rig.side ? 'side by side' : rig.stack ? 'stacked' : 'single' };
+}
+
 document.querySelectorAll('button[data-part]').forEach(b=>{
   b.onclick = ()=>{ if(!meshes) return;
     const p=b.dataset.part;
@@ -2255,20 +2739,43 @@ document.querySelectorAll('button[data-part]').forEach(b=>{
 });
 $('dl-zip').onclick = ()=>{
   if(!meshes) return;
-  const files = ['white','black','gray','spine','feet'].map(p=>({
-    name:`${baseName()}-${p}.stl`, data: XD.toSTL(XD.printMesh(meshes, p), p) }));
-  files.push({ name: `${baseName()}-design-log.py`,
-               data: new TextEncoder().encode(XD.pythonLog(L, {origin: design.origin})) });
-  download(`${baseName()}.zip`, XD.makeZip(files), 'application/zip');
+  /* one folder per distinct keyboard — the build cache already knows which
+   * devices are the same keyboard, so this asks it rather than comparing */
+  const seen = new Map();
+  for(const u of rigUnits()){
+    if(!u.build || !u.build.meshes || seen.has(u.build.key)) continue;
+    seen.set(u.build.key, u);
+  }
+  const many = seen.size > 1;
+  const files = [], taken = new Set();
+  for(const u of seen.values()){
+    /* the folder is named for the KEYBOARD, not for one of the devices that
+     * prints it — three devices can share a design, and picking whichever of
+     * them came first would read as a file only that one needed.  Two
+     * different keyboards can still solve to the same size, so a collision
+     * falls back to naming a device to tell them apart. */
+    let nm = nameOf(u.L, null);
+    if (taken.has(nm)) nm = nameOf(u.L, u);
+    taken.add(nm);
+    const dir = many ? nm + '/' : '';
+    for(const part of ['white','black','gray','spine','feet'])
+      files.push({ name:`${dir}${nm}-${part}.stl`,
+                   data: XD.toSTL(XD.printMesh(u.build.meshes, part), part) });
+    files.push({ name: `${dir}${nm}-design-log.py`,
+                 data: new TextEncoder().encode(XD.pythonLog(u.L, logOpts(u))) });
+  }
+  const zipName = `xenachord-32key-s${L.s.toFixed(2)}` + (many ? '-rig' : '');
+  download(`${zipName}.zip`, XD.makeZip(files), 'application/zip');
+  if(many) toast(`${seen.size} distinct keyboards exported, one folder each`);
 };
 $('dl-py').onclick = ()=>{
   if(!L) return;
   download(`${baseName()}-design-log.py`,
-           new TextEncoder().encode(XD.pythonLog(L, {origin: design.origin})), 'text/x-python');
+           new TextEncoder().encode(XD.pythonLog(L, logOpts())), 'text/x-python');
 };
 $('copy-py').onclick = async ()=>{
   if(!L) return;
-  const txt = XD.pythonLog(L, {origin: design.origin});
+  const txt = XD.pythonLog(L, logOpts());
   try { await navigator.clipboard.writeText(txt); toast(`Python log copied — ${txt.split('\n').length} lines`); }
   catch(e){
     const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta);
@@ -2300,8 +2807,11 @@ const isSpineKey = k => k.indexOf('spine:') === 0;
    the spine bands use, and they all answer to the single "press" toggle. */
 const isPressKey = k => k.indexOf('press:') === 0;
 const partOf = k => isSpineKey(k) ? 'spine' : isPressKey(k) ? 'press' : k;
-const colorOf = k => isSpineKey(k)
-  ? XM.spineLayerColor(L ? L.spineKind : 'three', k.slice(6))
+/* The spine band's colour depends on WHICH spine — a rig can hold a one-type
+ * and a three-type keyboard at once — so the kind is passed in rather than
+ * read off whichever design happens to be selected. */
+const colorOf = (k, kind) => isSpineKey(k)
+  ? XM.spineLayerColor(kind || (L ? L.spineKind : 'three'), k.slice(6))
   : isPressKey(k) ? (COLORS[k.slice(6)] || [1,0,1])
   : (COLORS[k] || [1,0,1]);
 /* for "separate combs": a spine band whose layer name IS a key colour
@@ -2360,7 +2870,6 @@ if (gl){
   m.textContent='WebGL unavailable — the strip, export and Python log still work.';
   $('glwrap').appendChild(m);
 }
-let buffers = {};
 function meshToBuffer(tris){
   const n = tris.length/9, data = new Float32Array(n*18);
   for(let t=0;t<n;t++){
@@ -2378,12 +2887,28 @@ function meshToBuffer(tris){
   gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);
   return {buf:b, n:n*3};
 }
-function uploadMeshes(){
+/* ---- the GL side of one distinct keyboard ----
+ * Buffers hang off the build-cache entry rather than off a single global,
+ * because a rig can hold up to four different keyboards at once and each
+ * needs its own.  They are uploaded when the entry is first drawn and freed
+ * when the sweep drops it, so a design edited mid-rig does not leak the
+ * geometry it used to have. */
+function freeBufs(e){
+  if(gl && e.bufs) for(const k of Object.keys(e.bufs)) gl.deleteBuffer(e.bufs[k].buf);
+  e.bufs = null;
+  if(e.tris) e.tris.clear();
+}
+
+function uploadRig(){
   clearSounding();
-  keyTriCache = new Map();
   if(!gl) return;
-  for(const k of Object.keys(buffers)) gl.deleteBuffer(buffers[k].buf);
-  buffers={};
+  for(const e of unitCache.values())
+    if(!e.bufs && e.meshes) e.bufs = makeBufs(e.meshes);
+  if(pickBuf){ gl.deleteBuffer(pickBuf.buf); pickBuf=null; }
+}
+
+function makeBufs(meshes){
+  const buffers = {};
   for(const k of Object.keys(meshes)){
     if(k==='spine'||k==='spineLayers') continue;      // spine goes in per layer
     if(k==='press'||k==='pressLayers') continue;      // press goes in per colour
@@ -2403,7 +2928,7 @@ function uploadMeshes(){
   const PL = meshes.pressLayers || {};
   for(const lay of Object.keys(PL))
     if(PL[lay].length) buffers['press:'+lay]=meshToBuffer(PL[lay]);
-  if(pickBuf){ gl.deleteBuffer(pickBuf.buf); pickBuf=null; }
+  return buffers;
 }
 
 /* ---- visibility toggles ---- */
@@ -2543,8 +3068,11 @@ function fit(){ if(!L) return;
   /* The frame is the RIG, not the design: a second unit set beside or above
    * the first is part of what there is to look at, so fit walks the units
    * rather than assuming there is one at the origin. */
-  const units = rigUnits(), last = units[units.length-1];
-  const rigW = L.width + last.dx;
+  const units = rigUnits();
+  if(!units.length) return;
+  const last = units[units.length-1];
+  let rigW = 0;
+  for(const u of units) if(u.L) rigW = Math.max(rigW, u.dx + u.L.width);
   /* y runs from the deepest spine — the upper manual's, set back behind the
    * lower one — to the front edge of the lower manual's whites. */
   const yBack = XM.SPINE.yBack + last.dy, yFront = 85.0688;
@@ -2701,18 +3229,21 @@ const ACCENT = [111/255, 183/255, 255/255];
  * key is asked for on every pointer move; cleared with the meshes, since a
  * rebuild is exactly when these stop describing anything.
  */
-let keyTriCache = new Map();
-
-function keyTris(b){
+/* The cache lives on the build-cache entry, keyed by the key's index on its
+ * OWN keyboard: four devices carrying the same design share one cache, and
+ * four different ones keep four, which is exactly the distinction the build
+ * cache already draws. */
+function keyTris(b, e){
   const n = b.ref ? b.ref.noteIndex : null;
-  if(n == null) return null;
-  let t = keyTriCache.get(n);
+  if(n == null || !e || !e.L) return null;
+  let t = e.tris.get(n);
   if(t !== undefined) return t;
+  const L = e.L;
   t = b.kind === 'white'
     ? XM.buildKey(b.ref.cx, b.ref.w || L.wW, b.type, b.ref.ctxL, b.ref.ctxR, null)
     : XM.buildKey(b.ref.cx, b.ref.w || L.aW, b.type, null, null, null);
   if(!t || !t.length) t = null;
-  keyTriCache.set(n, t);
+  e.tris.set(n, t);
   return t;
 }
 
@@ -2732,13 +3263,15 @@ function setSounding(notes){
   /* Asked once per unit, because the same key is a different note on each of
    * them: on a stacked rig the lower keyboard's key 3 is note 6 and the upper
    * keyboard's is note 7, so a note lights on ONE unit, not on all of them. */
-  if(gl && L && notes && notes.size) for(const u of rigUnits())
-    for(const b of keyBoxes()){
+  if(gl && notes && notes.size) for(const u of rigUnits()){
+    if(!u.L) continue;
+    for(const b of keyBoxes(u.L)){
       const i = b.ref ? b.ref.noteIndex : null;
-      if(i == null || !notes.has(XM.rigNote(u, i))) continue;
-      const tris = keyTris(b);
+      if(i == null || !notes.has(u.note(i))) continue;
+      const tris = keyTris(b, u.build);
       if(tris) soundBufs.push({ buf: meshToBuffer(tris), part: b.part, unit: u });
     }
+  }
   draw();
 }
 
@@ -2751,7 +3284,7 @@ function drawPart(b, colour, ofs){
   gl.drawArrays(gl.TRIANGLES,0,b.n);
 }
 function draw(){
-  if(!gl||!Object.keys(buffers).length) return;
+  if(!gl||!RIG.length) return;
   const w=canvas.clientWidth,h=canvas.clientHeight;
   if(canvas.width!==w*devicePixelRatio||canvas.height!==h*devicePixelRatio){
     canvas.width=w*devicePixelRatio; canvas.height=h*devicePixelRatio; }
@@ -2771,10 +3304,15 @@ function draw(){
    * offset the explode slider is already using.  A four-unit rig therefore
    * costs four draw calls per part and not one byte of extra geometry. */
   const units = rigUnits();
-  for(const [k,b] of Object.entries(buffers)){
-    if(!visible[partOf(k)]) continue;
-    const z=(EXPLODE_ORDER[explodeGroupOf(k)]||0)*explode;
-    for(const u of units) drawPart(b, colorOf(k), [u.dx, u.dy, z+u.dz]);
+  for(const u of units){
+    const bufs = u.build && u.build.bufs;
+    if(!bufs) continue;
+    const kind = u.L ? u.L.spineKind : null;
+    for(const [k,b] of Object.entries(bufs)){
+      if(!visible[partOf(k)]) continue;
+      const z=(EXPLODE_ORDER[explodeGroupOf(k)]||0)*explode;
+      drawPart(b, colorOf(k, kind), [u.dx, u.dy, z+u.dz]);
+    }
   }
   // highlight pass: nudged toward the camera so it always wins the depth test
   const lift = mul(norm(sub(B.eye,B.tgt)), Math.max(0.25, cam.dist*0.0016));
@@ -2847,7 +3385,7 @@ canvas.addEventListener('dblclick',()=>{ picked=null; $('inspect').classList.rem
 new ResizeObserver(draw).observe(canvas);
 
 /* ===================== click to inspect ===================== */
-function keyBoxes(){
+function keyBoxes(L){
   if(!L) return [];
   const out=[];
   /* hit boxes come off the drafted profile, so they track the real key */
@@ -2911,43 +3449,43 @@ function rayTris(o,d,tris,zo){
 }
 
 function rayPick(e){
-  if(!gl||!L) return null;
+  if(!gl||!RIG.length) return null;
   const r=canvas.getBoundingClientRect();
   const px=e.clientX-r.left, py=e.clientY-r.top;
   const ndx=(2*px/r.width-1), ndy=(1-2*py/r.height);
   const B=camBasis(), tn=Math.tan(FOV/2), aspect=r.width/r.height;
   const dir=norm(add(B.fwd, add(mul(B.right,ndx*tn*aspect), mul(B.up,ndy*tn))));
-  const boxes=keyBoxes();
   let best=null, bt=Infinity;
-  /* A unit is a TRANSLATION of the one design, so the cast is not repeated
-   * against moved geometry — the eye is moved back by the unit's offset
-   * instead, which is the same question asked of the same triangles.  It
-   * also keeps keyTris' cache keyed on the note it was built for. */
+  /* A device stands where the rig puts it, so the cast is not repeated
+   * against moved geometry — the eye is moved back by the device's offset
+   * instead, which is the same question asked of the same triangles, and it
+   * keeps keyTris' cache keyed on the key's index on its own keyboard. */
   for(const u of rigUnits()){
+    if(!u.L) continue;
     const eye=[B.eye[0]-u.dx, B.eye[1]-u.dy, B.eye[2]-u.dz];
-    for(const b of boxes){
+    for(const b of keyBoxes(u.L)){
       if(!visible[b.part]) continue;
       const zo=(EXPLODE_ORDER[b.part]||0)*explode;
       // The box is the cull; the triangles are the answer.
       if(rayBox(eye,dir,b,zo)==null) continue;
-      const tris=keyTris(b);
+      const tris=keyTris(b, u.build);
       const t = tris ? rayTris(eye,dir,tris,zo) : rayBox(eye,dir,b,zo);
       if(t!=null && t<bt){ bt=t; best=Object.assign({}, b, { unit: u,
-        note: b.ref && b.ref.noteIndex!=null ? XM.rigNote(u, b.ref.noteIndex) : null }); }
+        note: b.ref && b.ref.noteIndex!=null ? u.note(b.ref.noteIndex) : null }); }
     }
   }
   return best;
 }
 
 function pickAt(e){
-  if(!gl||!L) return;
+  if(!gl||!RIG.length) return;
   const best=rayPick(e);
   picked=best;
   if(pickBuf){ gl.deleteBuffer(pickBuf.buf); pickBuf=null; }
   if(best){
     /* A key gets its own geometry; anything else that can be picked is only
      * ever the box it was hit as. */
-    let tris = best.ref ? keyTris(best) : null;
+    let tris = best.ref ? keyTris(best, best.unit && best.unit.build) : null;
     if(!tris && !best.ref){
       tris=[]; XM.pushBox(tris,best.x0,best.x1,best.y0,best.y1,best.z0,best.z1);
     }
@@ -2973,7 +3511,10 @@ function showInspect(b){
     R('z', mm(XM.FOOT.z,5));
     R('spine half', b.index < XM.FEET_PER_HALF ? 'A' : 'B');
     R('index on half', b.index % XM.FEET_PER_HALF);
-    if(b.index>0) R('step from prev', mm(cx-((keyBoxes().filter(q=>q.kind==='foot')[b.index-1].x0+keyBoxes().filter(q=>q.kind==='foot')[b.index-1].x1)/2),5));
+    if(b.index>0){
+      const feet = keyBoxes((b.unit && b.unit.L) || L).filter(q=>q.kind==='foot');
+      R('step from prev', mm(cx-((feet[b.index-1].x0+feet[b.index-1].x1)/2),5));
+    }
     R('world x', mm(cx+W.x0,4));
     R('world y', mm(W.y0-XM.FOOT.yCentre,4));
     R('world z', mm(XM.FOOT.z+W.z0,4));
