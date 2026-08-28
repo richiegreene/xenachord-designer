@@ -342,7 +342,6 @@
   .rigmap button.on{border-color:var(--accent);background:var(--panel-bright)}
   .rigmap button.on b{color:var(--accent)}
   .rigmap button.hand span{color:var(--warn)}
-  #rig-base,#rig-step{flex:1;min-width:0;font-variant-numeric:tabular-nums}
   .rotbtns{display:flex;gap:5px}
   .rotbtns button{padding:2px 12px;font-size:12px;line-height:1.4}
 </style>
@@ -374,12 +373,60 @@
         <div class="drawer" data-drawer="design">
     <h1>Xenachord Designer <small>· Cimbalo Cromatico</small></h1>
 
+    <!-- ---- how many of them you are sitting at ----
+         The register of one AKM320 is small, and the archicembalo's answer to
+         a register too small for the tuning was a second manual. Side-by-side
+         and stacked are two separate questions, so both can be on at once and
+         the rig becomes 2 x 2; "single" is neither of them.
+
+         THIS LEADS THE DRAWER because it is the frame the rest of it sits in:
+         every fieldset below edits ONE device, and this is where you say how
+         many there are and which one that is. Asked afterwards, it would be a
+         footnote to work already done on a keyboard you had not yet chosen. -->
+    <fieldset>
+      <legend>Devices</legend>
+      <div class="seg" id="rig-seg">
+        <button data-v="single" class="on"
+          title="One AKM320 on its own — the keyboard as designed, and the default.">single</button>
+        <button data-v="side"
+          title="A second AKM320 set to the right of the first, with clear air between the two cases. By default its 32 keys carry on where the first keyboard's stopped, so the rig extends the register rather than repeating it.">side-by-side</button>
+        <button data-v="stack"
+          title="A second AKM320 standing over the first like an upper manual, lifted by half the length of a white key. By default the two are read as one scale interchanged: every step of the lower keyboard counts double and the upper one falls in the odd steps between them, so two 17-note layouts stacked are a 34-note scale.">stacked</button>
+      </div>
+
+      <!-- ---- each device is its own keyboard ----
+           Everything else in this drawer edits ONE device. Which one is
+           chosen here, and the panel below follows it: the palette, the
+           repeating layout, the widths and the export all belong to the
+           keyboard lit in this map. -->
+      <div id="rig-edit" style="display:none">
+        <div class="tune-h">Which device the panel edits</div>
+        <div id="rig-units" class="rigmap"></div>
+        <button class="wide" id="rig-copy" style="width:100%;margin-top:7px"
+          title="Give every other device the same layout as the one being edited — the same key types, widths and scale. Each device keeps its own numbering, because that is its relationship to the others rather than part of its keyboard.">⧉ Copy This Layout to the Others</button>
+
+        <!-- ---- and its relationship to the others ----
+             note(i) = base + step x i, and the rig reads both off its own
+             shape: continue in register along x, interchange up the stack.
+             There is no control for it here.  A device may still CARRY a
+             numbering of its own — `noteBase` / `noteStep` on its design are
+             honoured wherever they are found, and the map above marks a
+             device that has them — but nothing in the panel sets them, so
+             what a rig is called follows from how it is arranged. -->
+      </div>
+    </fieldset>
+
     <fieldset>
       <legend>Layout Presets</legend>
       <div class="row">
-        <div><select id="preset"></select></div>
-        <button id="preset-del" title="Delete the selected saved preset" style="padding:4px 8px">⌫</button>
+        <div><select id="preset"
+          title="Every preset the app carries. The list comes from presets-shared.js beside index.html, so it is the same list for everyone who opens this app — not this browser's own. A dot marks one saved here that the file has not been told about yet."></select></div>
+        <button id="preset-del" style="padding:4px 8px"
+          title="Delete the selected preset. Anybody may delete any of them, including the ones the app shipped with — write the presets file afterwards and it is gone for every user.">⌫</button>
       </div>
+      <p class="hint" id="preset-pending" style="display:none"></p>
+      <button class="wide" id="preset-write" style="width:100%;margin-top:7px;display:none"
+        title="Write presets-shared.js — the app's own preset list — from the presets currently here, so that saves and deletions made in this browser become the list every user gets. Where the browser allows it you are asked for the file itself and it is written in place; otherwise it downloads and has to be put beside index.html.">⬇ Write Presets File</button>
       <button class="primary wide" id="clear-all" style="width:100%;margin-top:9px"
         title="32 identical white keys, narrowed so that all 32 fit inside spine half A + half B">
         ↺ Clear All (32 White Keys)</button>
@@ -411,52 +458,6 @@
             <button id="rot-up" title="Rotate the pattern one step up — every key type moves one scale step to the right, and what falls off the top comes back on at the bottom">▶</button>
           </span>
         </div>
-      </div>
-    </fieldset>
-
-    <!-- ---- how many of them you are sitting at ----
-         The register of one AKM320 is small, and the archicembalo's answer to
-         a register too small for the tuning was a second manual. Side-by-side
-         and stacked are two separate questions, so both can be on at once and
-         the rig becomes 2 x 2; "single" is neither of them. -->
-    <fieldset>
-      <legend>Devices</legend>
-      <div class="seg" id="rig-seg">
-        <button data-v="single" class="on"
-          title="One AKM320 on its own — the keyboard as designed, and the default.">single</button>
-        <button data-v="side"
-          title="A second AKM320 set to the right of the first, with clear air between the two cases. By default its 32 keys carry on where the first keyboard's stopped, so the rig extends the register rather than repeating it.">side-by-side</button>
-        <button data-v="stack"
-          title="A second AKM320 standing over the first like an upper manual, lifted by half the length of a white key. By default the two are read as one scale interchanged: every step of the lower keyboard counts double and the upper one falls in the odd steps between them, so two 17-note layouts stacked are a 34-note scale.">stacked</button>
-      </div>
-      <p class="hint" id="rig-read"></p>
-
-      <!-- ---- each device is its own keyboard ----
-           Everything else in this drawer edits ONE device. Which one is
-           chosen here, and the panel below follows it: the palette, the
-           repeating layout, the widths and the export all belong to the
-           keyboard lit in this map. -->
-      <div id="rig-edit" style="display:none">
-        <div class="tune-h">Which device the panel edits</div>
-        <div id="rig-units" class="rigmap"></div>
-        <button class="wide" id="rig-copy" style="width:100%;margin-top:7px"
-          title="Give every other device the same layout as the one being edited — the same key types, widths and scale. Each device keeps its own numbering, because that is its relationship to the others rather than part of its keyboard.">⧉ Copy This Layout to the Others</button>
-
-        <!-- ---- and its relationship to the others ----
-             One line does all of it: note(i) = base + step x i. -->
-        <div class="tune-h" style="margin-top:12px">Numbering
-          <span id="rig-num-who" class="pressval"></span></div>
-        <div class="row" style="align-items:center;gap:7px">
-          <label class="tune-inline" for="rig-base">key 0 =</label>
-          <input type="number" id="rig-base" step="1"
-            title="What this device's first key is called in the run the whole rig is read as. Side by side the default continues the register — the right-hand device starts 32 notes above the left. Stacked, the upper device starts one note above the lower, which is what lands it between the lower device's steps.">
-          <label class="tune-inline" for="rig-step">step</label>
-          <input type="number" id="rig-step" step="1"
-            title="How far one key of this device moves the rig. 1 is the plain reading: key to key is note to note. 2 leaves every other note free for a device stacked with it — which is why stacking sets it to 2 by default, and how two 17-note keyboards become 34 notes to the equave. Negative runs the device backwards.">
-        </div>
-        <button class="wide" id="rig-auto" style="width:100%;margin-top:6px"
-          title="Give this device back the numbering the rig itself implies: continue in register along x, interchange up the stack.">↺ Read Numbering off the Rig</button>
-        <p class="hint" id="rig-num-read"></p>
       </div>
     </fieldset>
 
@@ -697,6 +698,16 @@
       <div id="viewbar2">
         <div class="grp" id="visgrp"></div>
         <div class="sep"></div>
+        <!-- ---- the air between two devices, taken out ----
+             Only ever offered when there is a side-by-side pair to close up:
+             stacking is separated up the Z axis, and one keyboard has nothing
+             to be flush with. -->
+        <div class="grp" id="flushgrp" style="display:none">
+          <label class="vis" id="flushlab"
+            title="Close the 20 mm of air the rig normally leaves between two devices set side by side, down to the 1.5 mm that stands between any two adjacent white keys — so the last key of the left device and the first key of the right are spaced exactly as neighbours on one keyboard are, and the pair reads as one continuous keybed. A way of looking at the register, not a way of building it: they are still two AKM320s with two spines, and the 20 mm is what that costs.">
+            <input type="checkbox" id="flush">flush</label>
+        </div>
+        <div class="sep" id="flushsep" style="display:none"></div>
         <div class="grp"><span style="color:var(--dim)">separate combs</span>
           <input id="explode" type="range" min="0" max="60" step="1" value="0">
           <span id="explodeval" style="color:var(--dim);width:34px">0 mm</span></div>
@@ -709,6 +720,11 @@
 </div>
 <div id="toast"></div>
 
+<!-- The app's own preset list, and the reason it is a script rather than
+     data: a file:// page cannot fetch() a .json, and this app is meant to run
+     by opening index.html.  Loaded before everything so the list is standing
+     by the time the panel is built; the app runs without it. -->
+<script src="presets-shared.js"></script>
 <script type="module" src="tuning.js"></script>
 <script type="module" src="play.js"></script>
 <script src="profiles.js"></script>
@@ -743,8 +759,16 @@ let rig = loadRig();
 let design;                      // === rig.units[rig.sel] — see selectUnit
 let L = null, meshes = null, dragType = null;
 
+/* HOW THE RIG IS LOOKED AT, not what it is.  `flush` closes the air between
+ * two devices set side by side so the pair can be read as one continuous
+ * keybed.  It sits with explode and the part toggles rather than with the
+ * design: it is not a keyboard you could build — they are still two AKM320s
+ * with two spines — so it is not saved, not in a preset, and not something
+ * ⌘Z has any business putting back. */
+let flush = false;
+
 /** The rig's shape, in the terms the geometry reads it in. */
-function rigCfg(){ return { side: !!rig.side, stack: !!rig.stack }; }
+function rigCfg(){ return { side: !!rig.side, stack: !!rig.stack, flush }; }
 
 /** Which corners the rig currently stands in, in the order it lists them. */
 function rigSlots(){
@@ -872,33 +896,177 @@ function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('on'
   clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('on'),1800); }
 
 /* ===================== controls ===================== */
-const CUSTOM_LS = 'xenachord-designer-v2-presets';
-const CUSTOM_PREFIX = 'custom:';
+/* ===================== PRESETS =====================
+ *
+ * A PRESET BELONGS TO THE APP, NOT TO A BROWSER.  presets-shared.js beside
+ * index.html is the list; every copy of the app carries it, so a preset saved
+ * there is one anybody who opens the app can load, and one anybody can throw
+ * away for good.  localStorage cannot do that job at all — what is saved in
+ * it has never left the machine it was typed on.
+ *
+ * BUT A BROWSER CANNOT WRITE TO A FILE ON ITS OWN.  So saving and deleting
+ * take effect at once and are held as an OVERLAY on top of the shipped list —
+ * names added, names struck out — and "Write Presets File" is what turns that
+ * overlay into the file itself.  Until it is written the panel says so, in as
+ * many words, because a change that looks saved and is not is worse than one
+ * that plainly is not.
+ *
+ * THE OVERLAY HEALS ITSELF.  Once the written file is in place beside
+ * index.html, an addition is already in the shipped list and a deletion has
+ * nothing left to strike out, so both drop out of the overlay on the next
+ * load and the panel goes quiet.  Nothing has to be cleared by hand, and
+ * nothing is cleared on the strength of a download that may never have been
+ * moved into the folder.
+ */
+const CUSTOM_LS = 'xenachord-designer-v2-presets';        // pre-file, migrated
+const EDITS_LS  = 'xenachord-designer-v2-preset-edits';
+const CUSTOM_PREFIX = 'custom:';   // kept: saved designs name their preset so
 
-function loadCustomPresets(){ try{
-  return JSON.parse(localStorage.getItem(CUSTOM_LS)) || {};
-}catch(e){} return {}; }
-function saveCustomPresets(p){ try{ localStorage.setItem(CUSTOM_LS, JSON.stringify(p)); }catch(e){} }
+/** The presets the app itself carries. Absent file, absent list — not fatal. */
+function shippedPresets(){
+  const p = window.XENACHORD_PRESETS;
+  return (p && typeof p === 'object') ? p : {};
+}
+
+/** What has been saved or deleted here and is not in the file yet. */
+function loadEdits(){
+  let e = null;
+  try { e = JSON.parse(localStorage.getItem(EDITS_LS)); } catch(err){}
+  if (!e || typeof e !== 'object') e = null;
+  const add = (e && e.add && typeof e.add === 'object') ? e.add : {};
+  const del = (e && Array.isArray(e.del)) ? e.del : [];
+  const out = { add, del: del.filter(n => typeof n === 'string') };
+
+  /* presets from before there was a file: they were saved in good faith and
+   * are not going to be dropped, so they arrive as pending additions and the
+   * panel invites them into the file like any other */
+  if (!e) try {
+    const old = JSON.parse(localStorage.getItem(CUSTOM_LS)) || {};
+    for (const [k,v] of Object.entries(old)) if (!out.add[k]) out.add[k] = v;
+  } catch(err){}
+
+  /* the self-heal: anything the file now says is no longer an edit to it */
+  const ship = shippedPresets();
+  for (const k of Object.keys(out.add))
+    if (k in ship && JSON.stringify(ship[k]) === JSON.stringify(out.add[k])) delete out.add[k];
+  out.del = out.del.filter(k => k in ship);
+  return out;
+}
+function saveEdits(e){ try{ localStorage.setItem(EDITS_LS, JSON.stringify(e)); }catch(err){} }
+
+/** Every preset the app has, shipped and pending together. One list. */
+function allPresets(){
+  const e = loadEdits(), out = {};
+  for (const [k,v] of Object.entries(shippedPresets())) if (!e.del.includes(k)) out[k] = v;
+  for (const [k,v] of Object.entries(e.add)) out[k] = v;
+  return out;
+}
+const presetNames = () => Object.keys(allPresets()).sort((a,b)=>a.localeCompare(b));
+function pendingEdits(){
+  const e = loadEdits();
+  return { adds: Object.keys(e.add).length, dels: e.del.length,
+           n: Object.keys(e.add).length + e.del.length };
+}
 
 const presetSel = $('preset');
 function buildPresetOptions(){
-  const custom = loadCustomPresets();
-  const customHtml = Object.keys(custom).length
-    ? '<optgroup label="Saved Presets">' + Object.keys(custom)
-        .map(name=>`<option value="${CUSTOM_PREFIX}${name}">${name}</option>`).join('') + '</optgroup>'
-    : '';
+  const names = presetNames(), e = loadEdits();
+  const esc = t => String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
   presetSel.innerHTML =
     '<option value="" disabled hidden></option>' +
-    customHtml;
+    (names.length ? '<optgroup label="Presets">' + names.map(n =>
+      `<option value="${CUSTOM_PREFIX}${esc(n)}">${esc(n)}` +
+      /* a preset the file has not been told about yet is marked, so the list
+       * itself says which of these another user would already have */
+      `${(n in e.add) ? ' ·' : ''}</option>`).join('') + '</optgroup>' : '');
+  showPresetState();
 }
+
+/** What is not in the file yet, said plainly. */
+function showPresetState(){
+  const { adds, dels, n } = pendingEdits();
+  const line = $('preset-pending'), btn = $('preset-write');
+  btn.style.display = n ? '' : 'none';
+  line.style.display = n ? '' : 'none';
+  if (!n) return;
+  const bits = [];
+  if (adds) bits.push(`${adds} saved`);
+  if (dels) bits.push(`${dels} deleted`);
+  line.innerHTML =
+    `<b>${bits.join(' · ')}</b> in this browser only. Write the file and put it ` +
+    `beside index.html to give every user the same list.`;
+}
+
 buildPresetOptions();
+
+/* ---- turning the overlay into the app ----
+ * Chrome can be handed the real file and write straight into it, which is the
+ * whole point: the preset ends up in the app rather than in a downloads
+ * folder. Where that is not available the file is downloaded instead and has
+ * to be moved next to index.html by hand — so the overlay is NOT cleared
+ * either way. It clears itself when the file it describes is actually there.
+ */
+let presetFileHandle = null;
+
+function presetsFileText(){
+  const all = allPresets(), names = presetNames();
+  const head = `/* =====================================================================
+ *  SHARED PRESETS — the layouts this app itself carries
+ * =====================================================================
+ *
+ * GENERATED by the Xenachord Designer's "Write Presets File" button.
+ * ${new Date().toISOString().replace('T',' ').slice(0,19)} · ${names.length} preset${names.length===1?'':'s'}
+ *
+ * This file IS the preset list. It lives beside index.html, so every copy of
+ * the app carries it and anybody who opens the app sees the same presets. A
+ * preset is one KEYBOARD — key types, widths, scale length, rotation — not a
+ * rig: where a device stands and what its keys are called belong to the desk,
+ * so a preset loads into any device of any rig without renumbering it.
+ *
+ * Written as a script rather than as .json because the app is meant to run by
+ * opening index.html, and a file:// page cannot fetch() data.
+ */
+`;
+  const body = names.map(n =>
+    '  ' + JSON.stringify(n) + ': ' + JSON.stringify(all[n]) + ',').join('\n');
+  return head + 'window.XENACHORD_PRESETS = {\n' + (body ? body + '\n' : '') + '};\n';
+}
+
+async function writePresetsFile(){
+  const text = presetsFileText();
+  if (window.showSaveFilePicker){
+    try {
+      if (!presetFileHandle) presetFileHandle = await window.showSaveFilePicker({
+        suggestedName: 'presets-shared.js',
+        types: [{ description: 'Xenachord presets', accept: {'text/javascript': ['.js']} }],
+      });
+      const w = await presetFileHandle.createWritable();
+      await w.write(text); await w.close();
+      /* Written into the app itself. The list in memory is now what the file
+       * says, so the overlay has nothing left to describe and empties on the
+       * spot rather than waiting for a reload. */
+      window.XENACHORD_PRESETS = allPresets();
+      saveEdits({ add:{}, del:[] });
+      buildPresetOptions();
+      toast(`presets written — ${presetNames().length} in the app`);
+      return;
+    } catch(err){
+      presetFileHandle = null;
+      if (err && err.name === 'AbortError') return;      // picker dismissed
+      /* fall through to the download */
+    }
+  }
+  download('presets-shared.js', new TextEncoder().encode(text), 'text/javascript');
+  toast('presets-shared.js saved — put it beside index.html');
+}
+$('preset-write').onclick = writePresetsFile;
 presetSel.onchange = () => {
   if (!presetSel.value) return;
   if (presetSel.value.startsWith(CUSTOM_PREFIX)){
     const name = presetSel.value.slice(CUSTOM_PREFIX.length);
-    const custom = loadCustomPresets();
-    if (!custom[name]) return;
-    setDesign(migrate(JSON.parse(JSON.stringify(custom[name]))));
+    const all = allPresets();
+    if (!all[name]) return;
+    setDesign(migrate(JSON.parse(JSON.stringify(all[name]))));
     design.preset = presetSel.value;
   } else {
     /* a drafted sheet is written out as 32 individual keys, so it opens as
@@ -910,26 +1078,36 @@ presetSel.onchange = () => {
   forgetPressBlend();
   syncInputs(); rebuild();
 };
+/* ---- deleting one ----
+ * Any preset, by anybody, for good.  There is no protected set: a preset the
+ * app shipped with is struck out of the list here and out of the file at the
+ * next write, and after that no user has it.  That is what makes the list the
+ * app's rather than an author's, and it is why deleting one the app already
+ * carries asks first — it is not this browser's copy that goes. */
 $('preset-del').onclick = () => {
   const v = presetSel.value;
-  if (!v || !v.startsWith(CUSTOM_PREFIX)){
-    toast('only saved presets can be deleted');
-    return;
-  }
+  if (!v || !v.startsWith(CUSTOM_PREFIX)){ toast('choose a preset to delete'); return; }
   const name = v.slice(CUSTOM_PREFIX.length);
-  const custom = loadCustomPresets();
-  delete custom[name];
-  saveCustomPresets(custom);
+  const e = loadEdits(), shipped = name in shippedPresets();
+  if (!(name in allPresets())) return;
+  if (shipped && !confirm(
+      `Delete "${name}" from the app?\n\nIt is one of the presets this app ` +
+      `carries, so writing the presets file after this takes it away from ` +
+      `every user, not just from this browser.`)) return;
+  delete e.add[name];                       // never reached the file: simply gone
+  if (shipped && !e.del.includes(name)) e.del.push(name);
+  saveEdits(e);
   buildPresetOptions();
   design.preset = null;
   syncInputs();
-  toast(`deleted preset "${name}"`);
+  toast(shipped ? `deleted "${name}" — write the file to make it stick`
+                : `deleted "${name}"`);
 };
 $('save-preset').onclick = () => {
   const name = (prompt('Save current design as preset:', ''))?.trim();
   if (!name) return;
-  const custom = loadCustomPresets();
-  if (custom[name] && !confirm(`Overwrite existing preset "${name}"?`)) return;
+  const all = allPresets();
+  if (all[name] && !confirm(`Overwrite existing preset "${name}"?`)) return;
   /* the scale length is part of the design, not of the session: a preset
    * that forgot it would come back as 32 loose keys that merely happen to
    * look periodic, and the next edit inside the period would not repeat */
@@ -940,12 +1118,16 @@ $('save-preset').onclick = () => {
   const keep = Object.assign(JSON.parse(JSON.stringify(design)),
                              { period: periodNow() });
   delete keep.noteBase; delete keep.noteStep;
-  custom[name] = keep;
-  saveCustomPresets(custom);
+  const e = loadEdits();
+  e.add[name] = keep;
+  /* saving over a preset the app carries is a replacement, not a second one
+   * standing beside it — the strike-out goes with the addition */
+  e.del = e.del.filter(n => n !== name);
+  saveEdits(e);
   buildPresetOptions();
   design.preset = CUSTOM_PREFIX + name;
   syncInputs();
-  toast(`saved preset "${name}"`);
+  toast(`saved "${name}" — write the presets file to give it to every user`);
 };
 /* CLEAR ALL — the cleared keyboard is not "empty", it is the 32-white one:
  * every key identical, narrowed until all 32 stand inside the spine. */
@@ -1012,32 +1194,19 @@ function showRig(){
   for (const b of rigSeg.querySelectorAll('button'))
     b.classList.toggle('on', b.dataset.v === 'single' ? (!rig.side && !rig.stack)
                            : b.dataset.v === 'side'   ? rig.side : rig.stack);
-  /* the ANCHOR's period, not the selected device's: the equave is read off
-   * the lower left, and this sentence has to agree with the tuning panel */
-  const per = rigAnchorPeriod(), read = $('rig-read');
+  /* WHAT THE RIG IS DOES NOT NEED SAYING IN PROSE.  The toggles carry it in
+   * their own tooltips, the map below shows every device and the notes it
+   * holds, and the numbering readout states the reading in force.  A
+   * paragraph restating all three would only be a fourth place for them to
+   * disagree. */
   $('rig-edit').style.display = n > 1 ? '' : 'none';
-  if (n === 1){
-    read.innerHTML = 'One AKM320 — 32 keys, the keyboard as drafted.';
-    return;
-  }
-  const gap = XM.RIG.gapX.toFixed(0), lift = XM.RIG.dz.toFixed(1);
-  read.innerHTML =
-    `<b>${n}</b> AKM320s · <b>${n * XM.NOTES}</b> keys. ` +
-    (rig.side ? `The right-hand device stands ${gap} mm clear of the left and ` +
-                `by default CONTINUES it — 32 notes higher, extending the ` +
-                `register. ` : '') +
-    (rig.stack ? `The upper device sits over the lower one's spine, ${lift} mm ` +
-                 `up — half a white key — and by default INTERCHANGES with ` +
-                 `it: ` +
-                 (per < XM.NOTES
-                   ? `a ${per}-note layout stacked reads as <b>${per*2}</b> ` +
-                     `notes to the equave.`
-                   : `every step of the lower keyboard counts double and the ` +
-                     `upper one falls between them.`)
-               : '') +
-    ' Each device below is its own keyboard, and its own numbering.';
+  /* Nothing to be flush with unless two devices stand side by side: a stack
+   * is separated up Z, and a single keyboard has no neighbour. */
+  const pair = !!rig.side;
+  $('flushgrp').style.display = pair ? '' : 'none';
+  $('flushsep').style.display = pair ? '' : 'none';
+  if (n === 1) return;
   buildUnitMap();
-  showNumbering();
 }
 
 /* WHICH KEYBOARD THE REST OF THE DRAWER IS ABOUT.  Said where the fieldsets
@@ -1076,40 +1245,6 @@ function buildUnitMap(){
   }
 }
 
-/* ---- one device's relationship to the others ----
- * note(i) = base + step x i, and that is the whole model.  The fields show
- * what is in force whether or not it was typed; typing in one states it, and
- * "read it off the rig" takes the statement back. */
-function showNumbering(){
-  const u = rigShape().find(q => q.selected) || rigShape()[0];
-  $('rig-num-who').textContent = u.label;
-  const base = $('rig-base'), step = $('rig-step');
-  if (document.activeElement !== base) base.value = u.base;
-  if (document.activeElement !== step) step.value = u.step;
-  $('rig-auto').disabled = u.auto;
-  const run = [0,1,2].map(i => u.note(i));
-  $('rig-num-read').innerHTML =
-    `${u.auto ? 'Read off the rig' : '<b>Set by hand</b>'} — this keyboard's ` +
-    `32 keys are notes ${run.join(', ')} … ${u.note(XM.NOTES-1)}.` +
-    (u.auto ? '' : ' The rig would say ' +
-      `${XM.rigBase(u, null)} + ${XM.rigStep(u, null)} × i.`);
-}
-
-/* Renumbering moves no geometry, so the build cache carries every keyboard
- * straight through this — it is a rebuild only in the sense that the strip,
- * the 3D note map and the tuning all have to be told. */
-function setNumber(key, v){
-  if (v === '' || !isFinite(+v)) delete design[key]; else design[key] = +v | 0;
-  if (design.noteStep === 0) delete design.noteStep;
-  syncInputs(); rebuild();
-}
-$('rig-base').oninput = e => setNumber('noteBase', e.target.value);
-$('rig-step').oninput = e => setNumber('noteStep', e.target.value);
-$('rig-auto').onclick = () => {
-  delete design.noteBase; delete design.noteStep;
-  syncInputs(); rebuild();
-  toast('numbering read off the rig');
-};
 
 /* ---- one keyboard, on every device ----
  * The layout travels and the numbering stays: a rig is normally the same
@@ -2966,6 +3101,23 @@ function buildVisToggles(){
     g.appendChild(lab);
   }
 }
+/* Only the X gap moves, and no geometry does — so the two displays are laid
+ * out again and redrawn, and nothing is re-solved, saved or pushed onto the
+ * history.  The camera is left alone for the same reason the explode slider
+ * leaves it alone: a view control that re-framed the shot every time would
+ * be unusable for the comparison it exists to make. */
+function relayoutRig(){
+  RIG = computeRig();
+  buildStrip();
+  draw();
+}
+
+$('flush').onchange = e => {
+  flush = e.target.checked;
+  $('flushlab').classList.toggle('on', flush);
+  relayoutRig();
+};
+
 $('explode').oninput=e=>{
   explode=+e.target.value;
   $('explodeval').textContent=explode+' mm';

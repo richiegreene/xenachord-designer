@@ -2745,9 +2745,22 @@
    * that ignored the overhang would have the two units' keys overlapping in
    * the air even though their spines cleared.
    */
-  function rigPitchX(L) {
+  function rigPitchX(L, cfg) {
     const x1 = Math.max(L && L.keyX1 != null ? L.keyX1 : -Infinity, SPINE.halfB.x1);
-    return (x1 - SPINE.halfA.x0) + RIG.gapX;
+    /* FLUSH IS A WAY OF LOOKING, NOT A WAY OF BUILDING.  Closed up, the two
+     * devices stand SIZE.whiteGap apart — the same 1.5 mm of air that stands
+     * between any two adjacent whites — so the last key of the left device
+     * and the first key of the right are spaced exactly as neighbours on one
+     * keyboard are, and the pair reads as a single continuous keybed rather
+     * than as two cases pushed together.
+     *
+     * Not 0.  Two keys touching is not what the run does anywhere else on the
+     * instrument, so a zero join would read as a seam precisely where the
+     * point is that there should not be one.
+     *
+     * Nothing else changes: they are still two AKM320s with two spines, and
+     * RIG.gapX is what that costs whenever it is put back. */
+    return (x1 - SPINE.halfA.x0) + ((cfg && cfg.flush) ? SIZE.whiteGap : RIG.gapX);
   }
 
   /**
@@ -2759,7 +2772,7 @@
    * keyboard, drawn again somewhere else.
    */
   function rigUnits(L, cfg) {
-    const rows = rigRows(cfg), cols = rigCols(cfg), px = rigPitchX(L);
+    const rows = rigRows(cfg), cols = rigCols(cfg), px = rigPitchX(L, cfg);
     const out = [];
     for (let row = 0; row < rows; row++)
       for (let col = 0; col < cols; col++)
