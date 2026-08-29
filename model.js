@@ -1658,14 +1658,16 @@
 
     const tops = topFaces(V, F);
     if (!tops.length) { per.set(key, p); return p; }
-    /* two playing faces meeting on an edge would need their loops merged
-     * before either could be inset; no drafted key has that, and guessing
-     * at one is worse than leaving it square */
-    if (tops.length > 1) {
-      const seen = new Set();
-      for (const fi of tops)
-        for (const j of F[fi]) { if (seen.has(j)) { per.set(key, p); return p; } seen.add(j); }
-    }
+    /* Raised and stepped key types can legitimately expose more than one
+     * up-facing top loop.  They are still one playing surface broken in
+     * multiple pieces, not a signal to skip beveling the whole key.  Each
+     * loop is handled independently below, so the chamfer runs round each
+     * valid face instead of being disabled by a shared boundary vertex.
+     *
+     * The only remaining cases to reject are genuinely malformed top rings,
+     * where a loop would collapse before it can be inset; those are rare and
+     * should fail explicitly rather than silently leaving the profile square.
+     */
 
     /* mutable copies — alpha/beta/y/z per vertex, rings as arrays */
     const nv = [];
