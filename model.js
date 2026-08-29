@@ -520,7 +520,97 @@
     return null;
   }
 
-  /* what the palette can drop: the three full-sized keys, then the pairs */
+  /* ------------------------------------------------------------------ *
+   *  A GAP MAY ALSO HOLD TWO FULL-SIZED KEYS, SIDE BY SIDE             *
+   *                                                                     *
+   *  A split pair divides its gap FRONT TO BACK: the short black stands *
+   *  at the rear and the deep gray reaches past it to the player, both  *
+   *  on one centre, which is why they are cut from each other and why   *
+   *  the palette offers them as one chip with a handedness.             *
+   *                                                                     *
+   *  TWO FULL-SIZED KEYS DIVIDE THE SAME GAP LEFT TO RIGHT.  There is   *
+   *  no new key type and no new chip: these are the ordinary Full Sized *
+   *  Gray and Full Sized Black the palette already drops singly, and a  *
+   *  gap simply holds two of them instead of one.  Drop the second onto *
+   *  a gap that already has one and it takes the lane you dropped it    *
+   *  on.  They are NOT a pair in the split sense — nothing is cut from  *
+   *  anything, either can be removed on its own, and each carries its   *
+   *  own width, so this is a property of the GAP, not of the types.     *
+   *                                                                     *
+   *  THE BUFFER IS THE WHITE KEYS' OWN.  Two keys standing side by side *
+   *  read as two keys, so the air between them is the air between two   *
+   *  whites — SIZE.whiteGap.  The seam sits ON the gap's centre, which  *
+   *  is where the two whites in front of the gap part from each other,  *
+   *  so the two run down the same x and read as one line.               *
+   * ------------------------------------------------------------------ */
+  const LANE_BUFFER = SIZE.whiteGap;
+
+  /* ------------------------------------------------------------------ *
+   *  AND HOW FAR ANY NON-WHITE KEY STANDS OFF A WHITE                   *
+   *                                                                     *
+   *  HALF the white gap, everywhere: beside a split key, a Full Sized   *
+   *  Black or Gray on its own, or either key of a side-by-side pair.    *
+   *                                                                     *
+   *  It used to be FIT.gap, 0.15 mm — the shadow line drawn between two *
+   *  colours that are not going to move relative to each other.  These  *
+   *  two DO move: an accidental travels down past a white's rear every  *
+   *  time it is played, and a tenth of a millimetre is a scrape, not a  *
+   *  clearance.  Half the white gap is the same air the whites give     *
+   *  each other for the same reason, halved because only one of the two *
+   *  faces is cut back for it — the accidental keeps its place in the   *
+   *  pitch and the white's rear does the giving.                        *
+   * ------------------------------------------------------------------ */
+  const WHITE_CLEAR = SIZE.whiteGap / 2;
+
+  /** true when this gap's contents stand side by side rather than stacked */
+  function isLaneSlot(names) {
+    if (!names || names.length !== 2) return false;
+    return names.every(n => {
+      const spec = KEY_TYPES[canonType(n)];
+      return !!spec && spec.kind !== 'white' && !spec.pairRole;
+    });
+  }
+
+  /**
+   * Lay a gap's two members out in lanes and return the span they occupy.
+   * ONE definition, used by the layout, by the clamp that squeezes an
+   * over-wide pair, and by the strip — so the picture and the mesh can
+   * never disagree about where a lane is.
+   *
+   * THE SEAM IS THE ANCHOR, NOT THE CENTRE.  It sits on the gap's own
+   * centre line, where the whites in front of the gap part from each
+   * other, so a wide key beside a narrow one still leaves the buffer on
+   * the line it has to continue.  The span is therefore symmetric about
+   * the centre only when the two keys are the same width.
+   */
+  function layLanes(members, cx) {
+    const half = LANE_BUFFER / 2;
+    const a = members[0], b = members[1];
+    a.x1 = cx - half; a.x0 = a.x1 - a.w; a.cx = (a.x0 + a.x1) / 2;
+    b.x0 = cx + half; b.x1 = b.x0 + b.w; b.cx = (b.x0 + b.x1) / 2;
+    return { x0: a.x0, x1: b.x1, w: b.x1 - a.x0 };
+  }
+
+  /**
+   * Scale a lane pair down so what it costs the two whites fits `lim`,
+   * keeping the two keys in proportion.  `air` — the seam plus the two
+   * clearances — is not scaled: those are fixed millimetres, not shares
+   * of the pair.
+   */
+  function fitLaneSpan(members, cx, lim, air) {
+    const solid = members.reduce((n, m) => n + m.w, 0);
+    if (solid + air <= lim || solid <= 0) return layLanes(members, cx);
+    const k = Math.max(0, lim - air) / solid;
+    for (const m of members) m.w *= k;
+    return layLanes(members, cx);
+  }
+
+  /** the id a lane's own hand-set width is stored under */
+  const laneScaleId = (i, ord) => 'a' + i + '.' + ord;
+
+  /* what the palette can drop: the three full-sized keys, then the two
+   * split pairs.  A gap holding two full-sized keys side by side is made
+   * by dropping them one after the other, so it needs no chip. */
   const PALETTE_ORDER = [
     'Full Sized Black', 'Split: Gray→Black',
     'Split: Black→Gray', 'Full Sized Gray'
@@ -1000,16 +1090,171 @@
    */
   const MIN_REAR = 0.14;    // the least of its own width a rear may keep
 
-  function deriveWhiteProfile(base, halfL, halfR, stepL) {
+  /* ==================================================================== *
+   *  A REAR MAY STEP TWICE ON ONE SIDE                                   *
+   *                                                                      *
+   *  A white's rear is cut back on a side to clear what stands beside it *
+   *  and steps out to full width once past it — ONE step, because until  *
+   *  now one side ever faced one depth.  An END gap breaks that.  Its    *
+   *  white grows out to stand under the WHOLE gap, so when that gap      *
+   *  holds two keys side by side the white faces both, and their fronts  *
+   *  are at different y.  One step has to clear the deeper of them, and  *
+   *  the deck then stops short of the shallower one by the difference —  *
+   *  ten millimetres of bare mount in front of a Gray standing beside a  *
+   *  Black.  Interior gaps do not have this problem: a white there       *
+   *  reaches only to its own edge, which lies between the two lanes, so  *
+   *  it faces one of them and depthOf picks that one.                    *
+   *                                                                      *
+   *  So the rear gets a SECOND step, in front of the shallower key,      *
+   *  where it comes out as far as the deeper key alone allows:           *
+   *                                                                      *
+   *      y < shallow + 1.5     clear of both keys                        *
+   *      ... < deep + 1.5      clear of the deep one only    <- the band *
+   *      y > deep + 1.5        full width, out to the end               *
+   *                                                                      *
+   *  IT ONLY WORKS WITH THE DEEPER KEY OUTERMOST.  The band the shallow  *
+   *  key vacates has to be reachable from the rear that is already       *
+   *  there.  With the deep key outside, the vacated band lies between    *
+   *  the rear and the deep key and the rear simply comes out to meet it. *
+   *  With the deep key INSIDE, the vacated band is on the far side of    *
+   *  it — an island the rear cannot reach without cutting a slot through *
+   *  itself.  computeLayout says so rather than drawing something else.  *
+   *                                                                      *
+   *  The split is `twoSidedWhiteBase`'s, done again at a second plane:   *
+   *  every vertex on the wall gains a forward twin, faces that lie on    *
+   *  the wall become two, every other face that walks along it gains the *
+   *  step's corner, and the two step faces are added.  The twins carry   *
+   *  SENTINEL betas so deriveWhiteProfile can give the band its own      *
+   *  inset through the same `put` table every other role goes through.   *
+   * ==================================================================== */
+  const MID_ROLE = { L_OUT: -11, L_IN: -12, R_OUT: -21, R_IN: -22 };
+
+  /**
+   * Split the wall carried by betas `spec.outer` / `spec.inner` at a second
+   * plane, tagging everything in FRONT of it with `spec.tagOuter` /
+   * `spec.tagInner`.  Works on the editable (V, F, rearSet) form, appends
+   * only — no vertex is renumbered — and returns the corners of the two
+   * new step faces plus the map from a split vertex to its forward twin,
+   * so a caller holding indices into V can follow them.
+   */
+  function midSplit(V, F, rearSet, spec) {
+    const atOf  = b => (b === spec.outer ? spec.atOuter : spec.atInner);
+    const tagOf = b => (b === spec.outer ? spec.tagOuter : spec.tagInner);
+    const onWall = i => (V[i].b === spec.outer || V[i].b === spec.inner) &&
+                        (!spec.only || spec.only.has(i));
+
+    const fwdOf = new Map();
+    const add = v => (V.push(v), V.length - 1);
+    const n0 = V.length;
+    for (let i = 0; i < n0; i++) {
+      if (!onWall(i)) continue;
+      const t = Object.assign({}, V[i]);
+      t.b = tagOf(V[i].b);
+      const k = add(t);
+      fwdOf.set(i, k);
+      if (rearSet.has(i)) rearSet.add(k);
+    }
+    /* which copy a reference to `i` means, given where it sits */
+    const pick = i => !fwdOf.has(i) ? i
+      : (V[i].y <= atOf(V[i].b) + 1e-6 ? i : fwdOf.get(i));
+    const cross = (i, j, at) => {
+      const A = V[i], B = V[j], t = (at - A.y) / (B.y - A.y);
+      return { a: A.a, b: A.b, y: at, z: +(A.z + (B.z - A.z) * t).toFixed(4) };
+    };
+
+    const out = [], steps = [];
+    for (const f of F) {
+      const bs = new Set(f.map(v => V[v].b));
+      const wall = bs.size === 1 && f.every(onWall);
+      const at = wall ? atOf(V[f[0]].b) : 0;
+      const ys = f.map(v => V[v].y);
+      const crosses = wall && Math.min.apply(null, ys) < at - 1e-6 &&
+                             Math.max.apply(null, ys) > at + 1e-6;
+      if (crosses) {
+        /* THE STEP'S CORNERS ARE THE CROSSINGS, NOT RING POSITIONS.  Where
+         * in each of the two loops the crossing pair lands depends on
+         * where the face happened to start, so they are recorded as they
+         * are made.  A wall face crosses the plane exactly twice — it is
+         * a wall, not a ring around the key — and those two crossings,
+         * back copy and forward copy, are the step face.             */
+        const back = [], fwd = [], corners = [];
+        for (let n = 0; n < f.length; n++) {
+          const i = f[n], j = f[(n + 1) % f.length];
+          const yi = V[i].y, yj = V[j].y;
+          if (Math.abs(yi - at) < 1e-6) {
+            back.push(i); fwd.push(fwdOf.get(i));
+            corners.push({ r: i, fr: fwdOf.get(i) });
+          }
+          else (yi < at ? back : fwd).push(yi < at ? i : fwdOf.get(i));
+          if ((yi < at - 1e-6 && yj > at + 1e-6) || (yi > at + 1e-6 && yj < at - 1e-6)) {
+            const c = cross(i, j, at);
+            const r = add(Object.assign({}, c));
+            const fr = add(Object.assign({}, c, { b: tagOf(V[i].b) }));
+            if (rearSet.has(i)) { rearSet.add(r); rearSet.add(fr); }
+            if (yi < at) { back.push(r); fwd.push(fr); }
+            else { fwd.push(fr); back.push(r); }
+            corners.push({ r, fr });
+          }
+        }
+        out.push(back); out.push(fwd);
+        if (corners.length === 2)
+          steps.push({ beta: V[f[0]].b,
+                       back: [corners[0].r,  corners[1].r],
+                       fwd:  [corners[0].fr, corners[1].fr] });
+        continue;
+      }
+      const ring = [];
+      for (let n = 0; n < f.length; n++) {
+        const i = f[n], j = f[(n + 1) % f.length];
+        ring.push(pick(i));
+        if (!fwdOf.has(i) || !fwdOf.has(j) || V[i].b !== V[j].b) continue;
+        const a2 = atOf(V[i].b), yi = V[i].y, yj = V[j].y;
+        if (Math.abs(yi - a2) < 1e-6 && yj > a2 + 1e-6) { ring.push(fwdOf.get(i)); continue; }
+        if (Math.abs(yj - a2) < 1e-6 && yi > a2 + 1e-6) { ring.push(fwdOf.get(j)); continue; }
+        if ((yi < a2 - 1e-6 && yj > a2 + 1e-6) || (yi > a2 + 1e-6 && yj < a2 - 1e-6)) {
+          const c = cross(i, j, a2);
+          const r = add(Object.assign({}, c));
+          const fr = add(Object.assign({}, c, { b: tagOf(V[i].b) }));
+          if (rearSet.has(i)) { rearSet.add(r); rearSet.add(fr); }
+          if (yi < a2) ring.push(r, fr); else ring.push(fr, r);
+        }
+      }
+      out.push(ring);
+    }
+    return { V, F: out, rearSet, steps, fwdOf };
+  }
+
+  /**
+   * The clearance an interior gap already provides on its own, which the
+   * rear inset is measured on top of.  A function, not a constant: FIT is
+   * declared further down, so reading it at module load would be a use
+   * before initialisation.  Exported so the layout can invert the same
+   * arithmetic when it works out how far a rear has to come back.
+   */
+  const rearBack = () => SIZE.whiteGap / 2 - FIT.gap;
+
+  function deriveWhiteProfile(base, halfL, halfR, stepL, mid) {
     /* `halfL` / `halfR` are HALF the neighbouring class's width as a ratio
      * of this white's, or 0 for a gap with nothing in it.  A class can be
      * widened until the two insets would meet in the middle; past that the
      * pair is scaled back together, so a rear never inverts and the two
      * sides stay in proportion to the keys that caused them.            */
     let bL = Math.max(0, halfL || 0), bR = Math.max(0, halfR || 0);
+    /* NO SIDE MAY TAKE MORE THAN HALF.  The rear is inset per side but the
+     * CENTRAL RIB is not: it stands on the key's own centreline whatever
+     * the two insets are.  So a rear that is cut past the centreline on
+     * one side leaves the rib outside the rear it is supposed to brace,
+     * standing alone in the neighbour's gap.  It cannot happen to a key
+     * centred in its gap — the 0.86 ceiling keeps every b under 0.43 —
+     * but a key standing in ONE LANE of a gap is not centred in it, and
+     * can reach that far on its own.  The layout stops it there; this is
+     * the backstop, so no caller can ask for a key that has no rib.   */
+    const HALF = 0.5;
+    if (bL > HALF) bL = HALF;
+    if (bR > HALF) bR = HALF;
     const room = 1 - MIN_REAR;
     if (bL + bR > room) { const k = room / (bL + bR); bL *= k; bR *= k; }
-    const back = SIZE.whiteGap / 2 - FIT.gap;       // what the gap already gives
+    const back = rearBack();                       // what the gap already gives
     const inset = b => b > 0 ? { a: -back, b } : { a: 0, b: 0 };
     const iL = inset(bL), iR = inset(bR);
     const put = {};
@@ -1033,7 +1278,9 @@
      * THIS gap asked for.  So the left one is moved here, to the front of
      * whatever actually stands on that side — and only when something
      * does, since with no inset the step is collinear and welds away. */
-    const V = base.V.map(v => Object.assign({}, v));
+    let V = base.V.map(v => Object.assign({}, v));
+    let F = base.F.map(f => f.slice());
+    let rearSet = base.rearSet, steps = base.steps, midSteps = [];
     /* A step is a pair of corners, not one: the INSET wall ends at the
      * plane and the FULL-WIDTH wall begins on it, so both walls have a
      * vertex there and both have to move together — moving only the inset
@@ -1044,10 +1291,43 @@
       else if (Math.abs(v.y - STEP_Y_INNER) < 1e-6 &&
           (v.b === W_ROLE.L_IN || Math.abs(v.b - W_FRONT_L_IN) < 1e-6)) v.y = stepL.inner;
     }
+
+    /* THE SECOND STEP, IF THIS SIDE FACES TWO DEPTHS.  Done AFTER the
+     * drafted step has been moved, so the band it opens ends on the step
+     * that is actually there, and BEFORE the roles are resolved, so the
+     * band comes through the same `put` table as everything else.     */
+    let bM = 0;
+    if (mid) {
+      bM = Math.min(HALF, Math.max(0, mid.h || 0));
+      const L = mid.side === 'L';
+      const sp = midSplit(V, F, new Set(rearSet), {
+        outer: L ? W_ROLE.L_OUT : W_ROLE.R_OUT,
+        inner: L ? W_ROLE.L_IN  : W_ROLE.R_IN,
+        atOuter: mid.at.outer, atInner: mid.at.inner,
+        tagOuter: L ? MID_ROLE.L_OUT : MID_ROLE.R_OUT,
+        tagInner: L ? MID_ROLE.L_IN  : MID_ROLE.R_IN,
+        only: L ? null : rearSet            // the right wall's REAR half only
+      });
+      V = sp.V; F = sp.F; rearSet = sp.rearSet; midSteps = sp.steps;
+      /* the right-hand step this base was already split at now belongs to
+       * the band, not to the rear behind it */
+      const f = sp.fwdOf;
+      steps = steps.map(st => Object.assign({}, st,
+        { rear: st.rear.map(i => f.has(i) ? f.get(i) : i) }));
+      const iM = inset(bM);
+      if (L) {
+        put[MID_ROLE.L_OUT] = { a: iM.a,        b: iM.b };
+        put[MID_ROLE.L_IN]  = { a: iM.a + WALL, b: iM.b };
+      } else {
+        put[MID_ROLE.R_OUT] = { a: -iM.a,        b: 1 - iM.b };
+        put[MID_ROLE.R_IN]  = { a: -iM.a - WALL, b: 1 - iM.b };
+      }
+    }
+
     for (let i = 0; i < V.length; i++) {
       const v = V[i], q = put[v.b];
       if (q) { v.a = q.a; v.b = q.b; continue; }
-      if (!base.rearSet.has(i)) {                   // a front face
+      if (!rearSet.has(i)) {                        // a front face
         if (Math.abs(v.b - W_FRONT_L_IN) < 1e-6) { v.a = fIn.a;  v.b = fIn.b; }
         else if (Math.abs(v.b - W_ROLE.R_IN) < 1e-6) { v.a = fInR.a; v.b = fInR.b; }
         continue;
@@ -1057,11 +1337,34 @@
     }
     /* the two right-hand step faces, wound to match the left's: the outer
      * step faces back toward the spine, the inner one forward */
-    const F = base.F.map(f => f.slice());
-    for (const st of base.steps)
+    for (const st of steps)
       F.push(st.beta === W_ROLE.R_OUT
         ? [st.rear[1], st.rear[0], st.front[0], st.front[1]]
         : [st.front[0], st.front[1], st.rear[1], st.rear[0]]);
+    /* AND THE SECOND STEP'S TWO, WOUND BY MEASUREMENT.  Which way round a
+     * step face goes depends on which way the wall it caps happened to be
+     * traversed, and that differs between the outer wall and the inner
+     * one, and between the left side and the right — four cases, each
+     * easy to get wrong and none of them visible until a mesh leaks.  So
+     * it is not guessed: a closed mesh uses every directed edge exactly
+     * once, so the ring is offered up, and if any of its directed edges
+     * is already spoken for it is turned around.                      */
+    if (midSteps.length) {
+      const dir = new Set();
+      for (const f of F)
+        for (let n = 0; n < f.length; n++)
+          dir.add(f[n] + '>' + f[(n + 1) % f.length]);
+      for (const st of midSteps) {
+        const ring = [st.back[0], st.back[1], st.fwd[1], st.fwd[0]];
+        let clash = 0;
+        for (let n = 0; n < ring.length; n++)
+          if (dir.has(ring[n] + '>' + ring[(n + 1) % ring.length])) clash++;
+        if (clash) ring.reverse();
+        for (let n = 0; n < ring.length; n++)
+          dir.add(ring[n] + '>' + ring[(n + 1) % ring.length]);
+        F.push(ring);
+      }
+    }
 
     /* WELD.  Where a side takes no inset its rear twin lands exactly on its
      * front twin, and the wall the split opened closes again into a
@@ -1139,7 +1442,16 @@
      * grows past what a keyboard can use at one time — 64 whites, two
      * sides.  Re-deriving is cheap; the profiles are pure ratios and the
      * live ones come straight back.                                    */
-    const k = halfL + '|' + halfR + '|' + stepL.outer + '|' + stepR.outer;
+    /* AND A SIDE MAY FACE TWO DEPTHS.  Only an end gap can — see
+     * midSplit — and only one side of a key is ever an end gap, so at most
+     * one second step is ever asked for. */
+    const midOf = (c, side) => {
+      const m = c && c.mid;
+      return m ? { side, at: stepPlanes(m.d), h: m.h } : null;
+    };
+    const mid = midOf(cL, 'L') || midOf(cR, 'R');
+    const k = halfL + '|' + halfR + '|' + stepL.outer + '|' + stepR.outer +
+              (mid ? '|' + mid.side + mid.at.outer + '@' + mid.h : '');
     if (!DERIVED_WHITE[k]) {
       if (DERIVED_WHITE_N > 512) { DERIVED_WHITE = {}; DERIVED_WHITE_N = 0; }
       const src = akm320Nose(KP.P[KP.INDEX['Full Sized White']['n|n']]);
@@ -1151,7 +1463,7 @@
       } else {
         base = WHITE_BASE || (WHITE_BASE = plainWhiteBase(src));
       }
-      DERIVED_WHITE[k] = deriveWhiteProfile(base, halfL, halfR, stepL);
+      DERIVED_WHITE[k] = deriveWhiteProfile(base, halfL, halfR, stepL, mid);
       DERIVED_WHITE_N++;
     }
     return DERIVED_WHITE[k];
@@ -3018,6 +3330,10 @@
     NOSE_ROOF_Z, NOSE_FLOOR_Z,
     KEY_PAIRS, PAIR_ORDER, PALETTE_ORDER, TYPE_ALIASES,
     canonType, pairOfType, pairOfSlot,
+    isLaneSlot, layLanes, fitLaneSpan, laneScaleId,
+    LANE_BUFFER, WHITE_CLEAR, rearBack,
+    midSplit, MID_ROLE,
+    MIN_REAR,
     whiteWidth, whitePitch, accWidth, slotDelta,
     WIDTH_CLASSES, CLASS_LABEL, WIDTH_RATIO_DEFAULT, ACC_RATIO,
     WIDTH_RATIO_MIN, WIDTH_RATIO_MAX, ACC_RATIO_MAX, accCeiling, whiteFloor,

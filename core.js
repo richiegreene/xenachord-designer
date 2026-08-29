@@ -115,7 +115,7 @@
       if (w.shR != null) w.shR += dx;
     }
     for (const sl of slots) {
-      sl.cx += dx;
+      sl.cx += dx; sl.x0 += dx; sl.x1 += dx;
       for (const m of sl.members) { m.cx += dx; m.x0 += dx; m.x1 += dx; }
     }
     for (const n of (notes || [])) n.cx += dx;
@@ -253,6 +253,34 @@
     const whites = [], slots = [];
     let placed = 0, cut = null;
 
+    /* ------------------------------------------------------------------ *
+     *  WHAT A GAP OCCUPIES, AND WHAT IT KEEPS FROM THE WHITES             *
+     *                                                                     *
+     *  `x0`/`x1` are the gap's real outer edges — not `cx +/- w/2`, which  *
+     *  stopped being the same thing the moment two keys of different      *
+     *  widths could stand in one gap on a seam anchored to its centre.     *
+     *                                                                     *
+     *  `clear` is the air the gap keeps from the white rears either side —  *
+     *  half a white gap, the same for every gap, because every one of      *
+     *  them holds a key that travels past those rears when it is played.   *
+     *  Two keys standing side by side in one gap keep a WHOLE white gap    *
+     *  from each other, since neither of them is let into anything: see    *
+     *  LANE_BUFFER and WHITE_CLEAR in model.js.                            *
+     * ------------------------------------------------------------------ */
+    const gapOf = (i, period, cx, names, members, lanes, end) => {
+      const clear = XM.WHITE_CLEAR;
+      let x0, x1, w;
+      if (lanes) { const s = XM.layLanes(members, cx); x0 = s.x0; x1 = s.x1; w = s.w; }
+      else {
+        w = members.reduce((m, k) => Math.max(m, k.w), 0) || aW;
+        x0 = cx - w / 2; x1 = cx + w / 2;
+      }
+      return { i, period, cx, x0, x1, w, clear, lanes,
+               names: names && names.length ? names.slice() : null, members,
+               truncated: members.length < (names || []).length,
+               end: !!end, placed: true };
+    };
+
     /* ---- A KEYBOARD MAY BEGIN ON AN ACCIDENTAL ----
      * Gap -1 is the gap BEFORE white 0.  Like the gap after the last white
      * it has a white on one side only, and its keys are notes like any
@@ -288,13 +316,10 @@
       const p = (i + rot) % 7;
       const names = slotAt(design, i, rot);
       const wanted = names || [];
+      const laneHere = XM.isLaneSlot(names);
       if (!wanted.length) {
-        slots.push({
-          i, period: p,
-          cx: whites[i].cx + (whites[i].w + XM.SIZE.whiteGap) / 2,
-          w: aW, names: names ? names.slice() : null, members: [],
-          placed: true
-        });
+        slots.push(gapOf(i, p, whites[i].cx + (whites[i].w + XM.SIZE.whiteGap) / 2,
+                         names, [], false));
         continue;
       }
 
@@ -306,9 +331,14 @@
       for (let k = 0; k < wanted.length && placed < NOTES; k++) {
         const spec = XM.KEY_TYPES[wanted[k]];
         if (!spec) throw new Error('unknown key type: ' + wanted[k]);
-        /* both halves of a split share the gap, so they share its width —
-         * and therefore also share the gap's own hand-set multiplier */
-        const mw = cw(spec.widthClass) * XM.keyScale(design, XM.slotScaleId(i));
+        /* BOTH HALVES OF A SPLIT SHARE THE GAP, so they share its width
+         * and therefore its hand-set multiplier.  TWO KEYS IN LANES DO
+         * NOT: they are two keys that happen to share a gap, so each
+         * carries its own multiplier ON TOP of the gap's — the gap grip
+         * scales the pair, the lane grip scales one lane, exactly as a
+         * class ratio and a per-key scale compose everywhere else. */
+        const mw = cw(spec.widthClass) * XM.keyScale(design, XM.slotScaleId(i))
+                 * (laneHere ? XM.keyScale(design, XM.laneScaleId(i, k)) : 1);
         members.push({
           type: wanted[k], spec, cx, w: mw, cls: spec.widthClass,
           x0: cx - mw / 2, x1: cx + mw / 2, slot: i, ord: k
@@ -316,14 +346,10 @@
         placed++;
       }
       if (members.length < wanted.length) cut = { slot: i, kept: members.length, wanted: wanted.length };
-      /* a gap is as wide as the widest thing standing in it */
-      const slotW = members.reduce((m, k) => Math.max(m, k.w), 0) || aW;
-      slots.push({
-        i, period: p, cx, w: slotW, names: names ? names.slice() : null,
-        members,
-        truncated: members.length < wanted.length,
-        placed: true
-      });
+      /* Only a WHOLE pair stands in lanes — if the 32-note limit cut the
+       * gap off after one key, what is left is a single key on the centre. */
+      const lanes = laneHere && members.length === wanted.length;
+      slots.push(gapOf(i, p, cx, names, members, lanes));
     }
     /* ---- THE TWO END GAPS ----
      * Every gap between two whites is already here, the empty ones
@@ -338,16 +364,15 @@
       for (let k = 0; k < wanted.length; k++) {
         const spec = XM.KEY_TYPES[wanted[k]];
         if (!spec) throw new Error('unknown key type: ' + wanted[k]);
-        const mw = cw(spec.widthClass) * XM.keyScale(design, XM.slotScaleId(i));
+        const mw = cw(spec.widthClass) * XM.keyScale(design, XM.slotScaleId(i))
+                 * (XM.isLaneSlot(names) ? XM.keyScale(design, XM.laneScaleId(i, k)) : 1);
         members.push({
           type: wanted[k], spec, cx, w: mw, cls: spec.widthClass,
           x0: cx - mw / 2, x1: cx + mw / 2, slot: i, ord: k
         });
       }
-      return { i, period: ((i % 7) + 7 + rot) % 7, cx,
-               w: members.reduce((m, k) => Math.max(m, k.w), 0) || aW,
-               names: names && names.length ? names.slice() : null,
-               members, end: true, placed: true };
+      const lanes = XM.isLaneSlot(names) && members.length === wanted.length;
+      return gapOf(i, ((i % 7) + 7 + rot) % 7, cx, names, members, lanes, true);
     };
     if (whites.length) {
       const w0 = whites[0], wL = whites[whites.length - 1];
@@ -379,6 +404,7 @@
      * solves to a lower ceiling.  See endRatio below for where the
      * (a + g/2) / W it is solving comes from.                         */
     const ROOM = XM.ACC_RATIO_MAX / 2;      // what one gap may take of a rear
+    const back = XM.rearBack();             // what the white gap already gives
     for (const sl of slots) {
       if (!sl.members.length) continue;
       const a = whites[sl.i], b = whites[sl.i + 1];
@@ -388,10 +414,86 @@
         const w = (a || b).w, g = XM.SIZE.whiteGap;
         lim = (ROOM * w + g * (ROOM - 1) / 2) / (1 - ROOM / 2);
       }
-      if (isFinite(lim) && lim > 0) for (const m of sl.members) if (m.w > lim) {
-        m.w = lim; m.x0 = m.cx - lim / 2; m.x1 = m.cx + lim / 2;
+      /* THE CEILING IS ON THE GAP, NOT ON THE KEY.  What it bounds is how
+       * much rear the whites give up, and that is the gap's whole width
+       * PLUS the air it keeps from them — 0.75 mm a side rather than the
+       * shadow line the ceiling was first written against.  For two keys
+       * in lanes the seam between them is in that bill too.  Clamping the
+       * lanes one at a time would let two keys each pass the test and
+       * still, together, take more rear than exists, so they are squeezed
+       * in proportion and `squeezed` says from what.                  */
+      if (isFinite(lim) && lim > 0) {
+        if (sl.lanes) {
+          const air = XM.LANE_BUFFER + 2 * (sl.clear - XM.FIT.gap);
+          /* NO LANE MAY REACH PAST ITS WHITE'S CENTRELINE.  A key centred
+           * in its gap never can — the 0.86 ceiling puts its far edge at
+           * 0.43 of a white from the gap centre, and the white's centre
+           * is half a white plus half the white gap away.  A key standing
+           * in ONE LANE starts from the seam instead, so a wide one can
+           * cross the centreline of the white it overhangs, where that
+           * white's central rib is pinned.  Solving the rear inset for
+           * h = 1/2 gives each lane its own ceiling.  An END gap needs
+           * none: its white gives up at most ROOM = 0.43, which is inside
+           * the half by construction.                                 */
+          if (a && b) {
+            const cap = q => Math.max(0, 0.5 * q.w - back - sl.clear);
+            const caps = [cap(a), cap(b)];
+            for (let k = 0; k < sl.members.length; k++)
+              if (sl.members[k].w > caps[k] + 1e-9) {
+                sl.capped = true; sl.members[k].w = caps[k];
+              }
+          }
+          const solid0 = sl.members.reduce((n, m) => n + m.w, 0);
+          let want = solid0;
+          if (a && b) {
+            if (solid0 + air > lim + 1e-9) want = Math.max(0, lim - air);
+          } else {
+            /* AN END GAP IS PAID FOR BY ONE WHITE THAT GROWS TO COVER IT,
+             * so how much rear it costs depends on how wide it is — the
+             * closed form the single-key path uses is written for a gap
+             * symmetric about its centre keeping FIT.gap, and a lane pair
+             * is neither.  Solved by bisection on the same condition
+             * instead, which needs no algebra to be right: lay the lanes,
+             * grow the white, read h, halve the interval.            */
+            const w = (a || b), fixed = sl.i === -1 ? w.x1 : w.x0;
+            const hAt = t => {
+              const k = solid0 > 0 ? t / solid0 : 0;
+              const ws = sl.members.map(m => m.w * k);
+              const span = ws.reduce((n, v) => n + v, 0) + XM.LANE_BUFFER;
+              const x0 = sl.cx - XM.LANE_BUFFER / 2 - ws[0];
+              const x1 = x0 + span;
+              const grown = sl.i === -1 ? fixed - Math.min(x0, w.x0)
+                                        : Math.max(x1, w.x1) - fixed;
+              return (span + back + sl.clear) / grown;
+            };
+            if (hAt(solid0) > ROOM) {
+              let lo = 0, hi = solid0;
+              for (let n = 0; n < 60; n++) {
+                const mid = (lo + hi) / 2;
+                if (hAt(mid) > ROOM) hi = mid; else lo = mid;
+              }
+              want = lo;
+            }
+          }
+          if (sl.capped || want < solid0 - 1e-9) {
+            if (want < solid0 - 1e-9) sl.squeezed = sl.w;
+            const sp = XM.fitLaneSpan(sl.members, sl.cx, want + air, air);
+            sl.x0 = sp.x0; sl.x1 = sp.x1; sl.w = sp.w;
+          }
+        } else {
+          /* the same accounting for a gap holding one key, or two on one
+           * centre: what it costs the whites is its width PLUS the air it
+           * keeps from them, which is no longer the shadow line it was */
+          const solo = Math.max(0, lim - 2 * (sl.clear - XM.FIT.gap));
+          for (const m of sl.members) if (m.w > solo) {
+            m.w = solo; m.x0 = m.cx - solo / 2; m.x1 = m.cx + solo / 2;
+          }
+        }
       }
-      sl.w = sl.members.reduce((n, k) => Math.max(n, k.w), 0) || aW;
+      if (!sl.lanes) {
+        sl.w = sl.members.reduce((n, k) => Math.max(n, k.w), 0) || aW;
+        sl.x0 = sl.cx - sl.w / 2; sl.x1 = sl.cx + sl.w / 2;
+      }
     }
 
     /* ---- THE WHITE BESIDE AN END GAP REACHES OUT UNDER IT ----
@@ -408,13 +510,16 @@
      * row shifts; the size solve refits the small amount it added.    */
     for (const sl of slots) {
       if (!sl.members.length) continue;
-      const grow = XM.SIZE.whiteGap / 2 + sl.w / 2;
       const w = sl.i === -1 ? whites[0]
               : sl.i === whites.length - 1 ? whites[sl.i] : null;
       if (!w) continue;
-      if (sl.i === -1) { w.x0 -= grow; w.endL = true; }
-      else             { w.x1 += grow; w.endR = true; }
-      w.w += grow; w.cx = (w.x0 + w.x1) / 2;
+      /* out to the gap's REAL outer edge.  It used to be written as a
+       * grow of whiteGap/2 + w/2 from the white's own edge, which is the
+       * same number only while the gap is symmetric about its centre —
+       * and a lane pair of two different widths is not. */
+      if (sl.i === -1) { w.x0 = Math.min(w.x0, sl.x0); w.endL = true; }
+      else             { w.x1 = Math.max(w.x1, sl.x1); w.endR = true; }
+      w.w = w.x1 - w.x0; w.cx = (w.x0 + w.x1) / 2;
     }
 
     /* ---- neighbour context + the clearance the accidentals cut out ----
@@ -432,8 +537,8 @@
      * an inset scaled up with it and pulls its rear away from the
      * accidental, leaving the gap open; a narrowed one gets too little and
      * its rear runs into the accidental's side.  Against its own width the
-     * inset lands on the accidental's edge less FIT.gap at any size, which
-     * is the fill-in the drafted whites have.                          */
+     * inset lands on the accidental's edge less the air that gap keeps, at
+     * any size.                                                         */
     /* THE CONTEXT IS A WIDTH AND A DEPTH.  How much of this white's width
      * the gap takes decides how far its rear is cut back; how deep the
      * deepest key in that gap reaches decides how far FORWARD the cut
@@ -442,29 +547,80 @@
      * accidental — so a white beside a Full Sized Gray, 10 mm shallower,
      * was cut back past where the gray ends and left bare mount showing
      * in front of it.  See stepPlanes in model.js.                    */
-    const depthOf = sl => sl.members.reduce((m, k) => Math.max(m, k.spec.depth), 0);
-    const halfRatio = (sl, w) => (sl.w / 2) / w.w;
-    /* AN END GAP IS NOT STRADDLED, so its white gives up the whole of it.
-     * deriveWhiteProfile puts the rear edge at back + (1 - b) * w, where
-     * back = whiteGap/2 - FIT.gap is the clearance an interior gap already
-     * provides.  At an end that clearance is not there to be counted, and
-     * the white has grown out to the accidental's outer edge, so landing
-     * the rear on the accidental's inner edge less FIT.gap wants
-     * b = (accidental + whiteGap/2) / width.  Same profile machinery, one
-     * side just gives up twice as much.                               */
-    const endRatio = (sl, w) => (sl.w + XM.SIZE.whiteGap / 2) / w.w;
-    const ctxOf = (sl, w, end) => (sl && sl.members.length)
-      ? { h: end ? endRatio(sl, w) : halfRatio(sl, w), d: depthOf(sl) }
+    /* HOW FAR FORWARD THE CUT RUNS IS A QUESTION ABOUT THIS WHITE.
+     *
+     * The step plane clears the key standing beside the white, so the
+     * depth that sets it is the depth of what the white's full-width
+     * front would actually run into.  While every gap held one key, or
+     * two on one centre, that was simply the deepest thing in the gap:
+     * a split pair's gray and black both overhang both whites.
+     *
+     * Two keys in LANES do not.  A white faces the lane on its own side,
+     * and the far lane may stand entirely past the white's own edge — so
+     * taking the gap's deepest key cut the white back to the BLACK's
+     * front even on the side where only the shallower GRAY stands, and
+     * left an 11.5 mm notch of bare mount in front of the gray, which is
+     * the very thing STEP_Y_FLOOR exists to avoid elsewhere.
+     *
+     * So the depth is measured over the members this white can actually
+     * reach: those whose x overlaps the white's own span, plus the air
+     * that gap keeps, either side.  A far lane that clears the white's
+     * edge does not hold its step back; one that does not clear it still
+     * does.  For every gap that is not in lanes every member overlaps, so
+     * this is the old maximum exactly and no drafted layout moves.    */
+    const depthOf = (sl, w) => sl.members.reduce((d, k) =>
+      (!w || (k.x0 - sl.clear < w.x1 && k.x1 + sl.clear > w.x0))
+        ? Math.max(d, k.spec.depth) : d, 0);
+    /* ONE FORMULA, NOT THREE.  deriveWhiteProfile places the rear edge at
+     * `back + (1 - h) * w` from the key's own edge, where
+     * `back = whiteGap/2 - FIT.gap` is the clearance an interior gap
+     * already provides on its own.  So instead of a ratio per situation —
+     * half the gap for an interior white, the whole of it plus half the
+     * white gap for an end one — INVERT that placement against where the
+     * rear actually has to land: the gap's own edge, less the air that
+     * gap keeps.  Solved for h it is
+     *
+     *     h = (whiteEdge - gapEdge + back + clear) / whiteWidth
+     *
+     * which reproduces the old halfRatio and endRatio EXACTLY where they
+     * applied, and keeps working where neither did: a gap whose two keys
+     * are different widths, so it is not symmetric about its centre, and
+     * a gap that keeps half a white gap from the rears instead of the
+     * shadow line the drafted whites were captured with.              */
+    const hFacing = (sl, w, side) => (side < 0
+        ? (sl.x1 - w.x0)          // the gap is on this white's LEFT
+        : (w.x1 - sl.x0))         // ... or on its RIGHT
+      + back + sl.clear;
+    /* AND WHERE ONE WHITE FACES TWO DEPTHS, THE BAND BETWEEN THEM.  Only
+     * an END gap can put a white in that position: everywhere else the
+     * white reaches to its own edge, which with a 1.5 mm seam lands
+     * exactly on the near lane's inner edge, so the far lane is out of
+     * its way and depthOf answers with the one it actually faces.  At an
+     * end the white grows out under BOTH, and the band the shallower key
+     * vacates is reachable only when the DEEPER key is the outer one —
+     * otherwise it is an island behind the deep key and the rear cannot
+     * get to it.  computeLayout warns rather than drawing a lie.      */
+    const midOf = (sl, w, side) => {
+      if (!sl || !sl.lanes || !(side < 0 ? w.endL : w.endR)) return null;
+      const outer = side < 0 ? sl.members[0] : sl.members[1];
+      const inner = side < 0 ? sl.members[1] : sl.members[0];
+      if (outer.spec.depth <= inner.spec.depth + 1e-9) return null;
+      const band = { x0: outer.x0, x1: outer.x1, clear: sl.clear };
+      return { d: inner.spec.depth, h: hFacing(band, w, side) / w.w };
+    };
+    const ctxOf = (sl, w, side) => (sl && sl.members.length)
+      ? { h: hFacing(sl, w, side) / w.w, d: depthOf(sl, w),
+          mid: midOf(sl, w, side) }
       : null;
     for (const w of whites) {
       const gl = slotOf.get(w.i - 1), gr = slotOf.get(w.i);
-      w.ctxL = ctxOf(gl, w, w.endL);
-      w.ctxR = ctxOf(gr, w, w.endR);
+      w.ctxL = ctxOf(gl, w, -1);
+      w.ctxR = ctxOf(gr, w, +1);
       w.profileExact = XM.profileFor(w.type, w.ctxL, w.ctxR).exact;
       w.shL = w.x0;
       w.shR = w.x1;
-      if (gl && gl.members.length) w.shL = Math.max(w.shL, gl.cx + gl.w / 2 + 0.6);
-      if (gr && gr.members.length) w.shR = Math.min(w.shR, gr.cx - gr.w / 2 - 0.6);
+      if (gl && gl.members.length) w.shL = Math.max(w.shL, gl.x1 + back);
+      if (gr && gr.members.length) w.shR = Math.min(w.shR, gr.x0 - back);
       if (w.shR - w.shL < 6) warnings.push(
         `White ${w.i}: mid-section only ${(w.shR - w.shL).toFixed(2)} mm wide.`);
     }
@@ -472,13 +628,54 @@
     /* ---- validity checks ---- */
     for (const sl of slots) {
       if (sl.members.length > 2) warnings.push(
-        `Gap ${sl.i} holds ${sl.members.length} keys — a split slot takes at most two.`);
+        `Gap ${sl.i} holds ${sl.members.length} keys — a gap takes at most two.`);
+      /* A GAP HOLDING TWO KEYS IS ONE OF EXACTLY TWO ARRANGEMENTS.  Split
+       * — one rear and one front, cut from each other on a shared centre.
+       * Or lanes — two full-sized keys side by side, which need no roles
+       * at all because nothing is cut from anything.  Anything else is two
+       * keys trying to stand in the same place.                       */
+      if (sl.lanes) {
+        /* AT AN END, THE DEEPER KEY HAS TO BE THE OUTER ONE.  One white
+         * grows out under the whole of an end gap, so it faces both keys
+         * and its rear steps in front of the deeper.  The band the
+         * shallower key vacates is then reachable only if it lies between
+         * that rear and the deeper key — which it does when the deeper
+         * key is outside it, and does not when the deeper key is in the
+         * way.  See midSplit in model.js. */
+        if (sl.end) {
+          const outer = sl.i === -1 ? sl.members[0] : sl.members[1];
+          const inner = sl.i === -1 ? sl.members[1] : sl.members[0];
+          if (outer.spec.depth < inner.spec.depth - 1e-9) warnings.push(
+            `Gap ${sl.i} is at the end of the keyboard and puts the shallower ` +
+            `${outer.type} on the outside. The deck cannot reach the ` +
+            `${(inner.spec.depth - outer.spec.depth).toFixed(2)} mm the ${outer.type} ` +
+            `leaves in front of it — it would have to cut through the ` +
+            `${inner.type} to get there. Swap them so the deeper key is outermost.`);
+        }
+        if (sl.squeezed) {
+          const wa = whites[sl.i], wb = whites[sl.i + 1], ww = Math.min(
+            wa ? wa.w : Infinity, wb ? wb.w : Infinity);
+          warnings.push(
+            `Gap ${sl.i}: side by side, the two keys want ` +
+            `${sl.squeezed.toFixed(2)} mm across but the whites beside them can ` +
+            `spare ${sl.w.toFixed(2)} mm, so they were narrowed in proportion to ` +
+            `${sl.members[0].w.toFixed(2)} and ${sl.members[1].w.toFixed(2)} mm. ` +
+            `A side-by-side gap spends ` +
+            `${(XM.LANE_BUFFER + 2 * (sl.clear - XM.FIT.gap)).toFixed(2)} mm on air — ` +
+            `the ${XM.LANE_BUFFER.toFixed(2)} mm seam between the two keys, and ` +
+            `${sl.clear.toFixed(2)} mm from each of them to the white rear beside ` +
+            `it — so set the Black and Gray class widths to about ` +
+            `${(100 * sl.members[0].w / ww).toFixed(0)}% of a white to keep them ` +
+            `at full width here.`);
+        }
+        continue;
+      }
       const rears = sl.members.filter(m => m.spec.pairRole === 'rear').length;
       const fronts = sl.members.filter(m => m.spec.pairRole === 'front').length;
       if (rears > 1) warnings.push(`Gap ${sl.i} has ${rears} rear keys — they would collide.`);
       if (fronts > 1) warnings.push(`Gap ${sl.i} has ${fronts} front keys — they would collide.`);
       if (sl.members.length === 2 && (rears !== 1 || fronts !== 1)) warnings.push(
-        `Gap ${sl.i} pairs two keys of the same depth — a split slot takes one rear (Split Black) and one front (Split Gray).`);
+        `Gap ${sl.i} stacks two keys of the same depth — a split slot takes one rear (Split Black) and one front (Split Gray), and a side-by-side gap takes one Full Sized Gray and one Full Sized Black.`);
       if (sl.members.length > 1 && sl.members.some(m => !m.spec.pairRole)) warnings.push(
         `Gap ${sl.i} mixes a full-sized key with a split key.`);
     }

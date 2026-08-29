@@ -1524,24 +1524,57 @@ $('wreset').onclick = e => {
   toast('key widths back to the sheet’s law — every accidental 83/185 of a white');
 };
 
-/* What a drop of `name` puts in a gap.  A pair lands whole — rear first,
- * so the strip stacks it the way the sheet draws it — and a full-sized key
- * owns the gap outright.  Nothing ever half-fills a split slot. */
-function placeInto(cur, name){
+/* What a drop of `name` puts in a gap.  A split pair lands whole — rear
+ * first, so the strip stacks it the way the sheet draws it — and nothing
+ * ever half-fills a split slot.
+ *
+ * TWO FULL-SIZED KEYS SHARE A GAP BY BEING DROPPED INTO IT ONE AFTER THE
+ * OTHER.  There is no side-by-side chip: drop a Gray on an empty gap and
+ * it takes the gap; drop a Black on the same gap and it takes the LANE
+ * you dropped it on, left or right of the key already there.  `side` is
+ * -1 for the left half of the gap and +1 for the right, read off where
+ * the pointer let go, so the arrangement is the one you drew.  Dropping
+ * onto a gap that already holds two replaces the lane you dropped on.  */
+function placeInto(cur, name, side){
   const pair = XM.KEY_PAIRS[name];
   if (pair) return pair.members.slice();
-  const spec = XM.KEY_TYPES[XM.canonType(name)];
+  const t = XM.canonType(name);
+  const spec = XM.KEY_TYPES[t];
   if (!spec || spec.kind === 'white') return cur;   // whites are the backbone
-  return [XM.canonType(name)];
+  const held = cur && cur.length ? cur.slice() : [];
+  const full = n => { const q = XM.KEY_TYPES[XM.canonType(n)];
+                      return q && q.kind !== 'white' && !q.pairRole; };
+  if (held.length === 1 && full(held[0]))
+    return side < 0 ? [t, held[0]] : [held[0], t];
+  if (XM.isLaneSlot(held)){
+    const k = side < 0 ? 0 : 1;
+    held[k] = t; return held;
+  }
+  return [t];
 }
 
-/* Removing half a pair removes the pair: the gray's rear arm and the black
- * that stands beside it are cut from each other, so one without the other
- * is not a key type the sheet has. */
+/* Removing half a pair removes the pair.  For a split that is because the
+ * gray's rear arm and the black beside it are cut from each other, so one
+ * without the other is not a key type the sheet has.  For a side-by-side
+ * pair it is because the pair is what was dropped: its two keys are
+ * ordinary full-sized keys, so the TYPE cannot say it is half of anything
+ * — only the gap can, which is why this asks pairOfSlot and then whether
+ * the clicked key is one of that pair's members. */
 function removeFrom(cur, name){
   if (!cur) return null;
-  if (XM.pairOfSlot(cur) && XM.pairOfType(name)) return null;
+  const held = XM.pairOfSlot(cur);
+  if (held && XM.KEY_PAIRS[held].members.indexOf(XM.canonType(name)) >= 0) return null;
   const l = cur.filter(n => XM.canonType(n) !== XM.canonType(name));
+  return l.length ? l : null;
+}
+
+/* Removing ONE of two keys standing side by side leaves the other where
+ * it is — they are two keys sharing a gap, not two halves of one thing,
+ * and they may even be the same type, so the lane is named by its index
+ * and not by what stands in it. */
+function removeLane(cur, ord){
+  if (!cur) return null;
+  const l = cur.filter((n, k) => k !== ord);
   return l.length ? l : null;
 }
 
@@ -1830,10 +1863,11 @@ function buildUnit(u, inner, rows){
   for (const sl of L.slots){
     const d = document.createElement('div');
     d.className = 'kb-slot' + (sl.members.length ? '' : ' empty');
-    d.style.left = X(sl.cx-sl.w/2-1)+'px'; d.style.width=((sl.w+2)*PX)+'px';
+    d.style.left = X(sl.x0-1)+'px'; d.style.width=((sl.w+2)*PX)+'px';
     d.style.top = Y(0)+'px'; d.style.height = (54*1.5)+'px';
     if (sl.end) d.classList.add('end');
     const held = XM.pairOfSlot(sl.names);
+    const lanes = !!sl.lanes;
     /* the two ends are gaps like any other, but "gap -1" is not what they
      * are to the person reading the strip */
     const name = sl.i === -1 ? 'the gap before the first white'
@@ -1843,34 +1877,56 @@ function buildUnit(u, inner, rows){
               (sl.end && !sl.members.length
                 ? ' — drop a key here to begin the keyboard on an accidental;'
                   + ' the white beside it grows out to stand under it' : '') +
-              (held ? '  ·  ' + held : '');
+              (held ? '  ·  ' + held
+                    : lanes ? '  ·  ' + sl.members.map(m => m.type.replace('Full Sized ',''))
+                                          .join(' | ') + ', side by side'
+                    : '');
     const ordered = sl.members.slice().sort((a,b)=>b.spec.depth-a.spec.depth);
     for (const m of ordered){
       const k = document.createElement('div');
       k.className = 'kb-m ' + cssOf(m.type);
       if (m.noteIndex != null) k.dataset.note = note(m.noteIndex);
-      k.style.left = ((sl.w/2 - m.w/2 + 1)*PX)+'px';
+      /* WHERE THE LAYOUT PUT IT.  Stacked keys sit on the gap's centre and
+       * a side-by-side pair does not, so the strip reads each key's own x
+       * rather than centring it — which is the same number for a stacked
+       * key, so nothing about the split slots moves. */
+      k.style.left = ((m.x0 - sl.x0 + 1)*PX)+'px';
       k.style.width = (m.w*PX)+'px';
       k.style.top = '0px';
       k.style.height = (m.spec.depth*1.5)+'px';
       k.title = live ? (held ? `${held} (${m.type}) — click to remove the pair`
+                             : lanes ? `${m.type} — click to remove it and leave the other`
                              : `${m.type} — click to remove`)
                      : `${m.type}${of}`;
-      if (live) k.onclick = ev => { ev.stopPropagation(); setSlot(sl.i, removeFrom(sl.names, m.type)); };
+      if (live) k.onclick = ev => { ev.stopPropagation();
+        setSlot(sl.i, lanes ? removeLane(sl.names, m.ord)
+                            : removeFrom(sl.names, m.type)); };
       else k.style.cursor = 'default';
       d.appendChild(k);
     }
-    /* ---- an accidental's own two edges ----
-     * A gap's key is centred in it and both halves of a split share it, so
-     * there is one width here, not two: whichever edge is dragged, the
-     * other mirrors it and the key grows or shrinks about its centre.  It
+    /* ---- a gap's own two edges ----
+     * The grip resizes the GAP, not one key in it: whichever edge is
+     * dragged, the other mirrors it and everything standing in the gap
+     * grows or shrinks about its centre — one key, both halves of a
+     * split, or both lanes of a side-by-side pair together.  The two
+     * lanes keep their proportion to each other, which is set by the
+     * Black and Gray class widths on the bar above.  It
      * takes nothing from its neighbours' pitch — it eats into the rear of
      * the whites either side, which is what the 0.86x ceiling bounds.  */
     if (live && sl.members.length) for (const side of [-1, 1]){
+      /* ON A SIDE-BY-SIDE GAP EACH EDGE IS ONE KEY'S OWN.  The two keys
+       * are not two halves of one thing, so the left edge resizes the
+       * left key and the right edge the right key, each about the seam
+       * that stays put.  Everywhere else the gap is one width and the
+       * far edge still mirrors the near one. */
+      const own = lanes ? sl.members[side < 0 ? 0 : 1] : null;
       const g = mkGrip('slot:' + sl.i + ':' + side,
-        `drag to resize the keys in gap ${sl.i} ` +
-        `(${sl.w.toFixed(2)} mm) — the whites either side give way`);
-      g.style.left = ((1 + sl.w/2 + side*sl.w/2)*PX) + 'px';
+        own ? `drag to resize the ${own.type.replace('Full Sized ','').toLowerCase()} ` +
+              `in gap ${sl.i} (${own.w.toFixed(2)} mm) on its own — ` +
+              `the seam and the other key stay put`
+            : `drag to resize the keys in gap ${sl.i} ` +
+              `(${sl.w.toFixed(2)} mm) — the whites either side give way`);
+      g.style.left = ((1 + (side < 0 ? 0 : sl.w))*PX) + 'px';
       g.style.top = '0px'; g.style.height = (54*1.5) + 'px';
       d.appendChild(g);
     }
@@ -1881,7 +1937,11 @@ function buildUnit(u, inner, rows){
         e.preventDefault(); d.classList.remove('over');
         const n = e.dataTransfer.getData('text/plain') || dragType;
         if (!n || (!XM.KEY_TYPES[XM.canonType(n)] && !XM.KEY_PAIRS[n])) return;
-        setSlot(sl.i, placeInto(sl.names, n));
+        /* which half of the gap the pointer let go over — that is the
+         * lane a second full-sized key takes */
+        const r = d.getBoundingClientRect();
+        setSlot(sl.i, placeInto(sl.names, n,
+          e.clientX < r.left + r.width / 2 ? -1 : 1));
       });
     }
     inner.appendChild(d);
@@ -1989,6 +2049,17 @@ function liveLayout(){
       [a, b] = fix(a, b); [b, a] = fix(b, a);
       setKeyScale(XM.whiteScaleId(drag.i), a);
       setKeyScale(XM.whiteScaleId(drag.i + 1), b);
+    } else if (drag.kind === 'lane'){
+      /* ONE LANE, ON ITS OWN.  The seam stays where it is — it is the
+       * line the two whites in front of the gap part on — so the dragged
+       * edge simply IS this key's far edge, and its width is the distance
+       * back to its own side of the seam.  The other lane does not move.
+       * The multiplier is measured on top of the gap's own, so the two
+       * compose the way a class ratio and a per-key scale do. */
+      const edge = mmAt(e.clientX);
+      const w = drag.sign < 0 ? (drag.seam - XM.LANE_BUFFER / 2) - edge
+                              : edge - (drag.seam + XM.LANE_BUFFER / 2);
+      setKeyScale(XM.laneScaleId(drag.i, drag.ord), clamp(w / drag.base));
     } else {
       /* the dragged edge lands under the pointer and the far edge mirrors
        * it, because the key is centred in its gap and stays centred */
@@ -2016,7 +2087,7 @@ function liveLayout(){
   $('strip').addEventListener('pointerdown', e => {
     const g = e.target.closest('.kb-grip'); if (!g || drag || !L) return;
     e.preventDefault(); e.stopPropagation();
-    const [kind, si] = g.dataset.gid.split(':'), i = +si;
+    const [kind, si, sside] = g.dataset.gid.split(':'), i = +si;
     if (kind === 'white'){
       const wb = L.classW.white;
       drag = { kind:'white', i, x:e.clientX, base:wb,
@@ -2024,11 +2095,17 @@ function liveLayout(){
     } else {
       const sl = L.slots.find(q => q.i === i);
       if (!sl || !sl.members.length) return;
-      /* measured against the class the widest key in the gap belongs to,
-       * so the multiplier means the same thing the width bar's does */
-      const wide = sl.members.reduce((m,k) => k.w > m.w ? k : m, sl.members[0]);
-      drag = { kind:'slot', i, x:e.clientX, cx: sl.cx,
-               base: L.classW[wide.cls] };
+      if (sl.lanes){
+        const ord = +sside < 0 ? 0 : 1, m = sl.members[ord];
+        drag = { kind:'lane', i, ord, x:e.clientX, seam: sl.cx, sign: +sside,
+                 base: L.classW[m.cls] * XM.keyScale(design, XM.slotScaleId(i)) };
+      } else {
+        /* measured against the class the widest key in the gap belongs to,
+         * so the multiplier means the same thing the width bar's does */
+        const wide = sl.members.reduce((m,k) => k.w > m.w ? k : m, sl.members[0]);
+        drag = { kind:'slot', i, x:e.clientX, cx: sl.cx,
+                 base: L.classW[wide.cls] };
+      }
     }
     gripHeld = g.dataset.gid;
     g.classList.add('on');
