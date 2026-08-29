@@ -1469,6 +1469,274 @@
     return DERIVED_WHITE[k];
   }
 
+
+  /* ==================================================================== *
+   *  THE PLAYING EDGE IS BROKEN, NOT LEFT SHARP                          *
+   *                                                                      *
+   *  Every keyboard instrument breaks the top edge of its keys.  A key    *
+   *  moulded or milled to a sharp arris cuts the finger on a glissando    *
+   *  and chips in use, so the trade has always run a small chamfer or     *
+   *  radius round the playing surface — a few tenths on a harpsichord     *
+   *  natural, up to a millimetre on a modern piano's front lip.  The      *
+   *  sheets draw the keys with square arrises because that is what the    *
+   *  drafting sandbox held; this puts the break back, and BEVEL is how    *
+   *  far it is taken.                                                    *
+   *                                                                      *
+   *  WHAT IS BEVELLED, AND WHAT IS NOT.  Only the key's own playing       *
+   *  surface — the up-facing face that reaches the key's greatest z, the  *
+   *  one the performer's finger lands on.  Its boundary loop is the arris *
+   *  between that surface and everything falling away from it (the side   *
+   *  walls with their draft, the sloped nose, the front lip), and that    *
+   *  loop is what the chamfer replaces.  Nothing else in the design is    *
+   *  touched: not the spine, not the feet, not the sensor press, not the  *
+   *  tongues that plug into the spine, not the underside or its ribbing,  *
+   *  and not the internal cavity — a key beside this one meets the same   *
+   *  walls it always did, so the widths, the size solve and every         *
+   *  clearance stand exactly as they were.                               *
+   *                                                                      *
+   *  THE BREAK IS THE SAME ALL THE WAY ROUND.  Including the arris at the *
+   *  back of the key: that is still an edge of the playing surface, and   *
+   *  running the chamfer out short of it would leave the wall beneath it  *
+   *  tapering the whole length of the key to get back to square.  It is   *
+   *  the key's own rear top corner, not the joint — the tongue below it   *
+   *  and the spine it plugs into are the same as they ever were, and only *
+   *  the shell wall between the two loses anything, which is what         *
+   *  BEVEL_MAX is set from.                                              *
+   *                                                                      *
+   *  IT IS DONE ON THE PROFILE, NOT ON THE MESH.  A bevelled profile is   *
+   *  still (alpha, beta, y, z) per vertex, because a chamfer on a         *
+   *  rectilinear loop is a constant millimetre offset along x and y and   *
+   *  therefore a shift of alpha and of y — beta never moves.  So the      *
+   *  bevel spans every width the way the drafted profile does, and the    *
+   *  preview, the STLs and the generated Blender log all get it from the  *
+   *  one place, with nothing to keep in step.                            *
+   *                                                                      *
+   *  HOW FAR IT MAY BE TAKEN.  Two walls decide it.  The white's front    *
+   *  lip is WALL below its top, so a break deeper than a wall would come  *
+   *  through into the cavity; and its rear wall is 1.539 mm between the   *
+   *  playing surface and the tongue, which a break at both ends of that   *
+   *  span narrows.  0.6 mm leaves either one a wall's worth, and it is    *
+   *  already past what a keyboard's own break is — a piano natural is     *
+   *  broken about half a millimetre, a harpsichord's rather less.        *
+   * ==================================================================== */
+  const BEVEL_MAX = 0.6;             // mm — leaves the thinnest wall its own
+  const BEVEL_EPS = 1e-6;
+
+  let BEVEL = 0;
+  /** how far the playing edge is broken, in mm; clamped to [0, BEVEL_MAX] */
+  function setBevel(mm) {
+    const b = Math.min(BEVEL_MAX, Math.max(0, +mm || 0));
+    if (Math.abs(b - BEVEL) > 1e-9) BEVEL = b;
+    return BEVEL;
+  }
+  function getBevel() { return BEVEL; }
+
+  /* one bevelled copy per (source profile, amount).  Profiles are handed
+   * out by identity — KP.P entries and the derived-white cache — so the
+   * copy hangs off the source itself and dies with it. */
+  const BEVEL_CACHE = new WeakMap();
+
+  /** ring -> Newell normal, at the instantiated points */
+  function ringNormal(V, r) {
+    let nx = 0, ny = 0, nz = 0;
+    for (let i = 0; i < r.length; i++) {
+      const a = V[r[i]], b = V[r[(i + 1) % r.length]];
+      nx += (a[1] - b[1]) * (a[2] + b[2]);
+      ny += (a[2] - b[2]) * (a[0] + b[0]);
+      nz += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    const L = Math.hypot(nx, ny, nz) || 1;
+    return [nx / L, ny / L, nz / L];
+  }
+
+  /**
+   * The playing surface of a profile: the up-facing faces that reach the
+   * key's greatest z.  Every drafted key has exactly one — the black's
+   * sloped top, the white's stepped deck, the split gray's front table —
+   * and a profile that somehow has none is simply not bevelled.
+   */
+  function topFaces(V, F) {
+    let zmax = -Infinity;
+    for (const p of V) if (p[2] > zmax) zmax = p[2];
+    const out = [];
+    for (let i = 0; i < F.length; i++) {
+      const r = F[i];
+      if (ringNormal(V, r)[2] < 0.9) continue;         // up-facing only
+      if (!r.some(j => V[j][2] > zmax - 1e-4)) continue;
+      out.push(i);
+    }
+    return out;
+  }
+
+  /**
+   * Break the playing edge of one profile by `b` mm.
+   *
+   * The playing face's boundary loop is INSET by b in its own plane and
+   * the original loop is DROPPED by b, so the surface keeps its height and
+   * its walls keep their line; the chamfer is the strip between the two.
+   * Vertices on the rear arris are frozen — held at their y and their z —
+   * and the chamfer runs out into them.
+   */
+  function bevelProfile(p, b) {
+    if (!(b > BEVEL_EPS)) return p;
+    let per = BEVEL_CACHE.get(p);
+    if (!per) BEVEL_CACHE.set(p, per = new Map());
+    const key = b.toFixed(4);
+    const hit = per.get(key);
+    if (hit) return hit;
+
+    /* work at the drafted width: the loop is rectilinear, so the offsets
+     * come out as constants in mm and hold at every other width */
+    const w = p.w0 || 1;
+    const V = [];
+    for (let i = 0; i < p.nv; i++) {
+      const j = i * 4;
+      V.push([p.v[j] + p.v[j + 1] * w, p.v[j + 2], p.v[j + 3]]);
+    }
+    const F = [];
+    for (let k = 0; k < p.f.length;) { const n = p.f[k++]; F.push(p.f.slice(k, k + n)); k += n; }
+
+    /* ---- A VERTEX THAT IS ON NOBODY'S CORNER IS DROPPED FIRST ----
+     *
+     * The drafted keys carry vertices that stand in the MIDDLE of a
+     * straight edge — a step that welded out, a seam the sheet left behind
+     * — and are collinear in every face that holds them.  They are free
+     * while nothing else changes, because the ear clipper meets them as
+     * zero-area ears and drops them, and the faces either side of the run
+     * drop the same one.  They stop being free the moment a NEW face is
+     * built along that run: the chamfer keeps the vertex, one wall keeps
+     * it, the other drops it, and the two no longer meet on the same edge.
+     *
+     * So they come out before anything else.  A vertex is removed only
+     * where EVERY ring holding it has it collinear with its neighbours in
+     * that ring, which makes the removal exactly geometry-neutral — the
+     * same solid, one fewer way to describe it.
+     * -------------------------------------------------------------- */
+    {
+      const flat = new Array(p.nv).fill(true), held = new Array(p.nv).fill(false);
+      for (const r of F) {
+        if (r.length < 3) continue;
+        for (let k = 0; k < r.length; k++) {
+          const P = V[r[k]], A = V[r[(k + r.length - 1) % r.length]],
+                B = V[r[(k + 1) % r.length]];
+          held[r[k]] = true;
+          const u = [P[0] - A[0], P[1] - A[1], P[2] - A[2]];
+          const v2 = [B[0] - P[0], B[1] - P[1], B[2] - P[2]];
+          const cx = u[1] * v2[2] - u[2] * v2[1], cy = u[2] * v2[0] - u[0] * v2[2],
+                cz = u[0] * v2[1] - u[1] * v2[0];
+          const lu = Math.hypot(u[0], u[1], u[2]), lv = Math.hypot(v2[0], v2[1], v2[2]);
+          if (!(lu > 1e-7 && lv > 1e-7 &&
+                Math.hypot(cx, cy, cz) / (lu * lv) < 1e-6)) flat[r[k]] = false;
+        }
+      }
+      for (let i = 0; i < F.length; i++) {
+        const r = F[i].filter(j => !(held[j] && flat[j]));
+        if (r.length >= 3) F[i] = r;
+      }
+    }
+
+    const tops = topFaces(V, F);
+    if (!tops.length) { per.set(key, p); return p; }
+    /* two playing faces meeting on an edge would need their loops merged
+     * before either could be inset; no drafted key has that, and guessing
+     * at one is worse than leaving it square */
+    if (tops.length > 1) {
+      const seen = new Set();
+      for (const fi of tops)
+        for (const j of F[fi]) { if (seen.has(j)) { per.set(key, p); return p; } seen.add(j); }
+    }
+
+    /* mutable copies — alpha/beta/y/z per vertex, rings as arrays */
+    const nv = [];
+    for (let i = 0; i < p.nv; i++) {
+      const j = i * 4;
+      nv.push({ a: p.v[j], b: p.v[j + 1], y: p.v[j + 2], z: p.v[j + 3] });
+    }
+    const nf = F.map(r => r.slice());
+
+    for (const fi of tops) {
+      const ring = nf[fi];
+      if (ring.length < 3) continue;
+      const N = ringNormal(V, ring);
+      /* the face's own plane, so an inset vertex stays ON the playing
+       * surface however that surface is sloped */
+      const gx = N[2] !== 0 ? -N[0] / N[2] : 0, gy = N[2] !== 0 ? -N[1] / N[2] : 0;
+
+      /* THE ARRIS IS ITS CORNERS, NOT ITS VERTICES.  A drafted loop carries
+       * vertices that lie flat on a straight run — welded-out steps, seams
+       * a neighbouring wall still needs — and offsetting one of those gives
+       * a point collinear with its neighbours, which the ear clipper drops
+       * as a zero-area ear while the chamfer beside it keeps.  That is a
+       * T-junction, and a T-junction is a hole.  So the offset is worked
+       * out on the CORNERS alone; the flat vertices stay on the arris,
+       * where the walls still find them, and the chamfer face beside them
+       * simply runs the whole straight segment.                          */
+      const corner = [];
+      for (let i = 0; i < ring.length; i++) {
+        const P = V[ring[i]], A = V[ring[(i + ring.length - 1) % ring.length]],
+              B = V[ring[(i + 1) % ring.length]];
+        const l1 = Math.hypot(P[0] - A[0], P[1] - A[1]);
+        const l2 = Math.hypot(B[0] - P[0], B[1] - P[1]);
+        const cr = (P[0] - A[0]) * (B[1] - P[1]) - (P[1] - A[1]) * (B[0] - P[0]);
+        if (l1 > 1e-7 && l2 > 1e-7 && Math.abs(cr) / (l1 * l2) > 1e-6) corner.push(i);
+      }
+      const m = corner.length;
+      if (m < 3) continue;
+
+      const inset = new Array(m);
+      for (let c = 0; c < m; c++) {
+        const i = corner[c];
+        const P = V[ring[i]], A = V[ring[corner[(c + m - 1) % m]]],
+              B = V[ring[corner[(c + 1) % m]]];
+        /* inward normals of the two edges meeting here.  The loop is wound
+         * CCW seen from above (it is up-facing), so the interior lies to
+         * the LEFT of each edge and (-dy, dx) points into it. */
+        const e1 = [P[0] - A[0], P[1] - A[1]], e2 = [B[0] - P[0], B[1] - P[1]];
+        const l1 = Math.hypot(e1[0], e1[1]) || 1, l2 = Math.hypot(e2[0], e2[1]) || 1;
+        const n1 = [-e1[1] / l1, e1[0] / l1], n2 = [-e2[1] / l2, e2[0] / l2];
+        const det = n1[0] * n2[1] - n1[1] * n2[0];
+        let dx, dy;
+        if (Math.abs(det) < 1e-9) { dx = b * n1[0]; dy = b * n1[1]; }
+        else { dx = b * (n2[1] - n1[1]) / det; dy = b * (n1[0] - n2[0]) / det; }
+        nv.push({ a: nv[ring[i]].a + dx, b: nv[ring[i]].b,
+                  y: nv[ring[i]].y + dy,
+                  z: nv[ring[i]].z + gx * dx + gy * dy });
+        inset[c] = nv.length - 1;
+      }
+
+      /* the arris drops by the chamfer — every vertex of it, so a straight
+       * run stays straight and the wall under it keeps its line */
+      for (let i = 0; i < ring.length; i++) nv[ring[i]].z -= b;
+
+      for (let c = 0; c < m; c++) {
+        const d = (c + 1) % m;
+        /* the chamfer runs the WHOLE segment of arris between two corners,
+         * any vertex still standing on it included, and returns along the
+         * one inset edge.  It is fanned from the INSET corner rather than
+         * from the arris, because a fan from the arris would lay its first
+         * triangle along the arris itself, where collinear points make it
+         * zero-area and it is dropped — and a dropped triangle is a hole. */
+        const path = [];
+        for (let i = corner[c]; ; i = (i + 1) % ring.length) {
+          path.push(ring[i]);
+          if (i === corner[d]) break;
+        }
+        for (let k = 0; k + 1 < path.length; k++)
+          nf.push([path[k], path[k + 1], inset[c]]);
+        nf.push([path[path.length - 1], inset[d], inset[c]]);
+      }
+      nf[fi] = inset.slice();                 // the surface is now the inset loop
+    }
+
+    const v = [], f = [];
+    for (const q of nv) v.push(q.a, q.b, q.y, q.z);
+    for (const r of nf) { f.push(r.length); for (const i of r) f.push(i); }
+    const out = { w0: p.w0, widths: p.widths, nv: nv.length, nf: nf.length,
+                  v, f, derived: p.derived, bevel: b };
+    per.set(key, out);
+    return out;
+  }
+
   /** the profile for a key type in a given neighbour context */
 
   function profileFor(type, lb, rb) {
@@ -1477,11 +1745,18 @@
     const table = KP.INDEX[t];
     if (!table) throw new Error('no drafted profile for key type: ' + type);
     const want = ctxKey(lb, rb);
+    /* THE BEVEL IS THE LAST THING DONE TO A PROFILE.  It runs here rather
+     * than in buildKey so that everything downstream — the WebGL preview,
+     * the STLs, the polygon reader and the generated Blender log, which
+     * writes this very table — is looking at the same broken edge, with
+     * nothing to keep in step.  It adds no vertex outside the drafted
+     * silhouette, so keyExtent and the size solve are untouched.      */
+    const bev = p => bevelProfile(p, BEVEL);
     /* a white is never picked from the sheet any more — it is derived from
      * what actually stands beside it.  See whiteProfile above.          */
     if (t === 'Full Sized White')
-      return { p: whiteProfile(lb, rb), mirror, exact: true };
-    if (table[want] != null) return { p: KP.P[table[want]], mirror, exact: true };
+      return { p: bev(whiteProfile(lb, rb)), mirror, exact: true };
+    if (table[want] != null) return { p: bev(KP.P[table[want]]), mirror, exact: true };
     /* The sheets draw nine of the sixteen possible neighbour contexts.  For
      * one they never drew, borrow the drafted white whose context is
      * closest — occupancy first, then the nearer slot bias.               */
@@ -1496,7 +1771,7 @@
       if (bl !== null && rb !== null) sc += Math.abs(bl - rb);
       if (sc < bestScore) { bestScore = sc; best = table[k]; }
     }
-    return { p: KP.P[best], mirror, exact: false };
+    return { p: bev(KP.P[best]), mirror, exact: false };
   }
 
   /** the profile's vertex positions at width w, left edge at xLeft */
@@ -3342,6 +3617,7 @@
     widthRatios, classWidth, classOfType,
     pushTri, pushQuad, pushBox, rectWithHoles,
     ctxKey, profileFor, profilePoints, buildKey, keyPolygons,
+    bevelProfile, setBevel, getBevel, BEVEL_MAX, topFaces,
     triangulateFace, triangulateFaceWithHoles, pointInPoly2, faceHoldsSeat,
     keyDecks, mergeCoplanar, polyArea2, keyExtent,
     buildSpine, buildFeet,

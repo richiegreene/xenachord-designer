@@ -499,6 +499,27 @@
       </div>
     </fieldset>
 
+    <!-- ---- the playing edge ----
+         Between the widths and the export because that is where it belongs
+         in the work: the keyboard is laid out and sized, and this is the
+         last thing done to the keys before they are written out. -->
+    <fieldset>
+      <legend>Bevel: break the playing edge<span id="bevel-who"></span></legend>
+      <div class="presswrap"
+        title="Every keyboard instrument breaks the top edge of its keys — a sharp arris cuts the finger on a glissando and chips in use. This runs a chamfer round the playing surface of each key: the up-facing face that reaches the key's greatest z, and nothing else. The spine, the feet, the sensor press, the tongues that plug into the spine and the whole underside are left exactly as drafted, and so is the arris at the back of the key, where it stands against the spine — the chamfer runs out into it rather than opening the joint.">
+        <div class="pressrow">
+          <label for="bevel">Edge Break</label>
+          <span id="bevel-v" class="pressval">square</span>
+        </div>
+        <input id="bevel" type="range" min="0" max="0.6" step="0.025" value="0">
+        <p class="hint" id="bevelinfo">Square at 0 · a piano natural is broken
+          about half a millimetre, a harpsichord's rather less · held under the
+          thinnest shell wall so it cannot come through into the cavity.</p>
+      </div>
+      <button class="primary wide" id="bevel-reset" style="width:100%;margin-top:9px"
+        title="Back to the drafted square arris.">↺ Leave the Edge Square</button>
+    </fieldset>
+
     <fieldset>
       <legend>Export<span id="export-who"></span></legend>
       <div class="btns">
@@ -1232,7 +1253,7 @@ function showRig(){
 function showWhich(){
   const many = XM.rigCount(rigCfg()) > 1;
   const who = many ? ` · ${XM.rigLabel(rigShape().find(u => u.selected))}` : '';
-  for (const id of ['export-who','palette-who']){
+  for (const id of ['export-who','palette-who','bevel-who']){
     const el = $(id); if (el) el.textContent = who;
   }
 }
@@ -1301,6 +1322,8 @@ function syncInputs(){
     sl.value = Math.round(t * 100);
     $('presspct-v').textContent = Math.round(t * 100) + '%';
   }
+  const bv = $('bevel');
+  if (bv){ bv.value = bevelNow(); showBevel(); }
 }
 
 /* THE SIZE IS AN OUTCOME, NOT A SETTING.  s is solved for on every rebuild
@@ -2665,6 +2688,59 @@ function showPress(sol){
   });
 })();
 
+/* ===================== the playing edge ===================== */
+/*
+ *  BREAKING THE EDGE IS A PROPERTY OF THE KEYBOARD, NOT OF THE SESSION.
+ *  It lives on the design beside the widths and the scale length, so it
+ *  goes into a preset, comes back with one, and is written into the STLs
+ *  and the Blender log without being asked for again.
+ *
+ *  It is also the one control here that cannot make the keyboard not fit.
+ *  The chamfer is cut INTO the drafted silhouette — no vertex of it stands
+ *  outside the key as drawn — so the widths, the gaps between keys and the
+ *  size solve are the same at 0.9 mm as they are at 0.  Nothing has to be
+ *  re-solved when it moves; the profiles are simply rebuilt.
+ */
+function bevelNow(){ return XD.bevelOf(design); }
+
+function showBevel(){
+  const b = bevelNow();
+  const v = $('bevel-v');
+  if (v) v.textContent = b > 0 ? b.toFixed(2) + ' mm' : 'square';
+  const info = $('bevelinfo');
+  if (!info) return;
+  /* WHAT IT IS ACTUALLY CUT AT.  A thin split key would lose its playing
+   * surface to two full chamfers, so the layout holds the break under a
+   * share of the narrowest class — say so rather than let the slider read
+   * a number the keys are not built at. */
+  const at = L && L.bevel != null ? L.bevel : b;
+  info.innerHTML = b > 0 && at < b - 5e-4
+    ? `cut at ${at.toFixed(2)} mm — held back so the narrowest key keeps a ` +
+      `playing surface between its two chamfers`
+    : 'Square at 0 · a piano natural is broken about half a millimetre, a ' +
+      "harpsichord's rather less · held under the thinnest shell wall so it " +
+      'cannot come through into the cavity.';
+}
+
+(function(){
+  const sl = $('bevel');
+  if (!sl) return;
+  sl.addEventListener('input', () => {
+    const b = +sl.value || 0;
+    if (b > 0) design.bevel = b; else delete design.bevel;
+    rebuild();
+    showBevel();
+  });
+  const rst = $('bevel-reset');
+  if (rst) rst.onclick = () => {
+    delete design.bevel;
+    sl.value = 0;
+    rebuild();
+    showBevel();
+    toast('the playing edge is back to the drafted square arris');
+  };
+})();
+
 /* ===================== rebuild ===================== */
 function refresh(){ syncInputs(); rebuild(); }
 /* the slider is the scale length itself, so it survives presets, Clear All
@@ -2775,6 +2851,7 @@ function rebuild(){
   sweepUnitCache();
   const me = unitBuild(design);
   L = me.L; meshes = me.meshes;
+  showBevel();                 // says what the edge is actually cut at
   const st = $('stats'), wn = $('warnings');
   if (me.err){ st.innerHTML=''; wn.innerHTML=`<div class="warning">${me.err.message}</div>`; return; }
 

@@ -91,6 +91,12 @@
    * are standing on.  A design may still pin `scale` and set
    * `autoScale: false` to work deliberately off-spine.
    */
+  /** the design's bevel, in mm, held inside what the shell wall allows */
+  function bevelOf(design) {
+    const b = +(design && design.bevel) || 0;
+    return Math.min(XM.BEVEL_MAX, Math.max(0, b));
+  }
+
   function scaleOf(design) {
     if (design.autoScale === false && design.scale) return design.scale;
     return fitScale(design);
@@ -235,6 +241,16 @@
     const cw = c => XM.classWidth(c, s, ratios);
     const wW = cw('white'), wP = wW + XM.SIZE.whiteGap;
     const aW = cw('split'), delta = XM.slotDelta(s);
+    /* HOW FAR THE PLAYING EDGE IS BROKEN, at these widths.  The bevel is a
+     * property of the design and it is set HERE, once, because everything
+     * downstream reads it off the profile — the preview, the STLs and the
+     * Blender log alike.  It is held under a share of the narrowest class
+     * so that a thin split key keeps a playing surface between its two
+     * chamfers; the break costs the keyboard nothing else, because it adds
+     * no vertex outside the drafted silhouette and so leaves every width,
+     * every clearance and the size solve itself exactly as they were. */
+    const bevel = XM.setBevel(Math.min(bevelOf(design),
+      0.35 * Math.min(cw('white'), cw('black'), cw('gray'), cw('split'))));
     const warnings = [];
     const rot = ((design.rotation | 0) % 7 + 7) % 7;
 
@@ -817,6 +833,7 @@
      * no overhang to warn about; what matters is that every pair face
      * found a real deck, that the dome still has its travel, and that no
      * two pair faces collide. */
+    L.bevel = bevel;             // what the playing edge is actually cut at
     const pAudit = XM.pairAudit(pairKeys(L));
     L.pairAudit = pAudit;
     L.bridgeAudit = pAudit;      // old name, same object — see model.js shims
@@ -1181,6 +1198,11 @@
     p('    "rotation":     ', ((d.rotation | 0) % 7 + 7) % 7, ',            # white #0 sits on period slot this index');
     p('    "total_keys":   ', L.total, ',            # ALWAYS 32 — one per sensor foot');
     p('    "akm320_units": 1,            # always one: spine half A + half B');
+    /* THE PLAYING EDGE.  The chamfer is already IN the profile table below —
+     * it is cut on the profile, not on the mesh — so this line is here to be
+     * read rather than to be used.  0 is the drafted square arris. */
+    p('    "bevel":        ', f(L.bevel || 0, 4),
+      ',       # mm the playing edge is broken by, chamfered on the top face only');
     /* ---- more than one of them on the desk ----
      * A rig does not change a single part: it is N of the SAME printed
      * keyboard, so everything below still describes one unit and one set of
@@ -2219,7 +2241,7 @@ if __name__ == "__main__":
     computeLayout, pairKeys, printMesh, buildMeshes, toSTL, makeZip,
     pythonLog, summary, notesPerPeriod, layerCount, templateColours,
     whiteCount, widthAt, suggestScale,
-    bounds, worldOffset, ORIGIN_MODES
+    bounds, worldOffset, ORIGIN_MODES, bevelOf
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else (typeof window !== 'undefined' ? window : globalThis).XD = api;
