@@ -286,6 +286,10 @@
      two numbers in a 20px box and neither of them reads. */
   body:not(.mode-play) .kb-tune{display:none}
   body.mode-play .kb-white .nm{display:none}
+  /* Holding and dragging across keys is how the 3D view is played (#gl is
+     touch-action:none for the same reason); the strip needs the same so a
+     touch glissando slides across notes instead of scrolling the strip. */
+  body.mode-play #strip{touch-action:none}
 
   /* ---------- Play: tuning controls ---------- */
   .tune-h{color:var(--text);font-weight:600;font-size:11.5px;margin:10px 0 5px}

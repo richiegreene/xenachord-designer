@@ -759,6 +759,148 @@
              inner: Math.max(STEP_Y_FLOOR + 1, d + STEP_CLEAR_INNER) };
   }
 
+  /* ==================================================================== *
+   *  THE FRONT NOSE IS CUT BACK FOR THE AKM320                           *
+   *                                                                      *
+   *  The drafted white ends in a leg: the underside ramps down at        *
+   *  y 76.5688, runs along the key bottom to 84.0688 and turns up there  *
+   *  as a full-height front wall, z -5.9192 all the way to 6.628.  So    *
+   *  the very front of the key occupies the whole 14.5 mm of section,    *
+   *  right where the AKM320's own body is.  Nothing about that was a     *
+   *  design decision — it is simply what the sheet drew, on a mount      *
+   *  that had nothing in front of the keys.                              *
+   *                                                                      *
+   *  THE LEG MOVES BACK AND THE NOSE GOES HOLLOW-BOTTOMED.  The leg      *
+   *  keeps its shape exactly — same 5 mm foot, same 1 mm wall, same      *
+   *  2.5 mm sloped rear — and slides NOSE_SHIFT toward the spine.  Its   *
+   *  front wall then stops at the key's own underside instead of         *
+   *  climbing to the lip, and everything in front of it becomes a solid  *
+   *  wedge whose underside RAMPS AWAY from the mount: floor from         *
+   *  Z.whiteUnder at the leg to NOSE_FLOOR_Z at the front face, roof     *
+   *  from NOSE_ROOF_Z up to the cavity ceiling, which it meets one       *
+   *  millimetre behind the front face so the lip closes as before.       *
+   *                                                                      *
+   *  It buys 9.9259 mm of headroom under the front face, tapering to     *
+   *  nothing at the leg — an 11.9156 mm deep pocket the full width of    *
+   *  the key.  The front face, the lip and the playing surface are       *
+   *  untouched, so the key looks and plays the same.                     *
+   *                                                                      *
+   *  MEASURED, NOT INVENTED.  Every number here was read out of          *
+   *  "Y adjusted White Key Face Componant.blend", where the edit was     *
+   *  drafted by hand on one key.  See claude/akm320-white-key-nose.md.   *
+   *                                                                      *
+   *  It runs on the SOURCE profile, once, before either white base is    *
+   *  built, so both the plain and the two-sided path inherit it and the  *
+   *  rear derivation downstream never has to know about it.  The new     *
+   *  vertices carry the same four betas the walls already use, which is  *
+   *  what lets deriveWhiteProfile restate them as millimetre walls with  *
+   *  no special case.                                                    *
+   * ==================================================================== */
+  const NOSE_LEG_RAMP = 76.5688;   // drafted: underside starts down
+  const NOSE_LEG_REAR = 79.0688;   // drafted: leg bottom, rear edge
+  const NOSE_LEG_IN   = 83.0688;   // drafted: leg front wall, inner
+  const NOSE_LEG_OUT  = 84.0688;   // drafted: leg front wall, outer
+  const NOSE_SHIFT    = 11.9156;   // how far the leg moves toward the spine
+  const NOSE_ROOF_Z   = Z.whiteUnder + 0.5;   // 2.21694, where the roof starts
+  const NOSE_FLOOR_Z  = 4.00674;              // the floor at the front face
+  const CAVITY_Z      = Z.whiteTop - WALL;    // 7.628, the shell's ceiling
+
+  /** splice `ins` into ring `f` on the directed edge u -> v */
+  function spliceEdge(f, u, v, ins) {
+    for (let k = 0; k < f.length; k++)
+      if (f[k] === u && f[(k + 1) % f.length] === v)
+        return f.slice(0, k + 1).concat(ins, f.slice(k + 1));
+    throw new Error('akm320Nose: edge ' + u + '->' + v + ' not found');
+  }
+
+  let NOSE_SRC = null;
+  /** the drafted white with its front leg cut back for the AKM320 */
+  function akm320Nose(p) {
+    if (NOSE_SRC) return NOSE_SRC;
+    const V = [];
+    for (let i = 0; i < p.nv; i++) {
+      const j = i * 4;
+      V.push({ a: p.v[j], b: +p.v[j + 1].toFixed(6),
+               y: +p.v[j + 2].toFixed(4), z: +p.v[j + 3].toFixed(4) });
+    }
+    let F = [];
+    for (let i = 0; i < p.f.length;) { const n = p.f[i]; F.push(p.f.slice(i + 1, i + 1 + n)); i += n + 1; }
+
+    const near = (a, b) => Math.abs(a - b) < 1e-3;
+    const find = (b, y, z) => {
+      for (let i = 0; i < V.length; i++)
+        if (near(V[i].b, b) && near(V[i].y, y) && near(V[i].z, z)) return i;
+      throw new Error('akm320Nose: no vertex at ' + [b, y, z]);
+    };
+    const L_IN = W_FRONT_L_IN, R_IN = W_ROLE.R_IN;
+
+    /* the six corners of the drafted leg's front, before anything moves */
+    const outBotL = find(0, NOSE_LEG_OUT, Z.whiteBottom);
+    const outBotR = find(1, NOSE_LEG_OUT, Z.whiteBottom);
+    const outTopL = find(0, NOSE_LEG_OUT, Z.whiteTop - 2);   // 6.628, under the lip
+    const outTopR = find(1, NOSE_LEG_OUT, Z.whiteTop - 2);
+    const inBotL  = find(L_IN, NOSE_LEG_IN, Z.whiteBottom);
+    const inBotR  = find(R_IN, NOSE_LEG_IN, Z.whiteBottom);
+    const inTopL  = find(L_IN, NOSE_LEG_IN, CAVITY_Z);
+    const inTopR  = find(R_IN, NOSE_LEG_IN, CAVITY_Z);
+
+    /* 1. SLIDE THE LEG.  Only y moves, and only on the four drafted leg
+     *    planes — the ramp start, the bottom's rear edge and the two front
+     *    walls' bottom corners.  The leg's own shape is untouched.      */
+    for (const v of V) {
+      if (near(v.y, NOSE_LEG_RAMP) || near(v.y, NOSE_LEG_REAR)) v.y -= NOSE_SHIFT;
+      else if (v.z < 0 && (near(v.y, NOSE_LEG_IN) || near(v.y, NOSE_LEG_OUT)))
+        v.y -= NOSE_SHIFT;
+    }
+
+    /* 2. THE SIX NEW CORNERS: the leg's front wall now tops out at the
+     *    underside, and the wedge in front of it gets a floor.          */
+    const add = v => (V.push(v), V.length - 1);
+    const legTopL  = add({ a: 0, b: 0,    y: NOSE_LEG_OUT - NOSE_SHIFT, z: Z.whiteUnder });
+    const legTopR  = add({ a: 0, b: 1,    y: NOSE_LEG_OUT - NOSE_SHIFT, z: Z.whiteUnder });
+    const roofL    = add({ a: 0, b: L_IN, y: NOSE_LEG_IN  - NOSE_SHIFT, z: NOSE_ROOF_Z });
+    const roofR    = add({ a: 0, b: R_IN, y: NOSE_LEG_IN  - NOSE_SHIFT, z: NOSE_ROOF_Z });
+    const floorL   = add({ a: 0, b: 0,    y: NOSE_LEG_OUT,              z: NOSE_FLOOR_Z });
+    const floorR   = add({ a: 0, b: 1,    y: NOSE_LEG_OUT,              z: NOSE_FLOOR_Z });
+
+    /* 3. THE FACES.  Four rings gain a corner apiece, the two front walls
+     *    are shortened, and three faces are new: the floor ramp, the roof
+     *    ramp, and what is left of the outer front face under the lip. */
+    const same = (f, set) => f.length === set.length && set.every(i => f.indexOf(i) >= 0);
+    let outerFront = -1, innerFront = -1;
+    F = F.map((f, k) => {
+      if (same(f, [outBotL, outTopL, outTopR, outBotR])) { outerFront = k; return [outBotL, legTopL, legTopR, outBotR]; }
+      if (same(f, [inTopR, inTopL, inBotL, inBotR]))     { innerFront = k; return [roofR, roofL, inBotL, inBotR]; }
+      return f;
+    });
+    if (outerFront < 0 || innerFront < 0)
+      throw new Error('akm320Nose: the drafted front walls are not where they were');
+
+    /* the wedge's underside, its roof, and the front face under the lip */
+    F.push([legTopL, floorL, floorR, legTopR]);
+    F.push([inTopR, inTopL, roofL, roofR]);
+    F.push([floorL, outTopL, outTopR, floorR]);
+
+    /* the four side walls follow the new outline */
+    F = F.map(f => {
+      if (f.indexOf(outTopL) >= 0 && f.indexOf(outBotL) >= 0 && f.length > 4)
+        return spliceEdge(f, outTopL, outBotL, [floorL, legTopL]);
+      if (f.indexOf(outBotR) >= 0 && f.indexOf(outTopR) >= 0 && f.length > 4)
+        return spliceEdge(f, outBotR, outTopR, [legTopR, floorR]);
+      if (f.indexOf(inBotL) >= 0 && f.indexOf(inTopL) >= 0 && f.length > 4)
+        return spliceEdge(f, inBotL, inTopL, [roofL]);
+      if (f.indexOf(inTopR) >= 0 && f.indexOf(inBotR) >= 0 && f.length > 4)
+        return spliceEdge(f, inTopR, inBotR, [roofR]);
+      return f;
+    });
+
+    const v = [], f = [];
+    for (const q of V) v.push(q.a, q.b, +q.y.toFixed(4), +q.z.toFixed(5));
+    for (const r of F) { f.push(r.length); for (const i of r) f.push(i); }
+    NOSE_SRC = { w0: p.w0, widths: p.widths, nv: V.length, nf: F.length, v, f, nose: true };
+    return NOSE_SRC;
+  }
+
   /**
    * Split the two right-hand walls at the step planes so the rear can move
    * independently of the front.  Returns the profile as editable arrays
@@ -1000,7 +1142,7 @@
     const k = halfL + '|' + halfR + '|' + stepL.outer + '|' + stepR.outer;
     if (!DERIVED_WHITE[k]) {
       if (DERIVED_WHITE_N > 512) { DERIVED_WHITE = {}; DERIVED_WHITE_N = 0; }
-      const src = KP.P[KP.INDEX['Full Sized White']['n|n']];
+      const src = akm320Nose(KP.P[KP.INDEX['Full Sized White']['n|n']]);
       let base;
       if (halfR > 0) {
         const bk = stepR.outer + '|' + stepR.inner;
@@ -2871,7 +3013,9 @@
     rigNote, rigLabel, rigSlot, rigSlotCol, rigSlotRow, RIG_SLOTS,
     rigStep, rigBase, rigNoteAuto,
     KEY_TYPES, TYPE_ORDER, LAYOUTS,
-    whiteProfile, twoSidedWhiteBase, deriveWhiteProfile,
+    whiteProfile, twoSidedWhiteBase, deriveWhiteProfile, akm320Nose,
+    NOSE_SHIFT, NOSE_LEG_RAMP, NOSE_LEG_REAR, NOSE_LEG_IN, NOSE_LEG_OUT,
+    NOSE_ROOF_Z, NOSE_FLOOR_Z,
     KEY_PAIRS, PAIR_ORDER, PALETTE_ORDER, TYPE_ALIASES,
     canonType, pairOfType, pairOfSlot,
     whiteWidth, whitePitch, accWidth, slotDelta,
