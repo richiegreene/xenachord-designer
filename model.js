@@ -1515,18 +1515,38 @@
    *  lip is WALL below its top, so a break deeper than a wall would come  *
    *  through into the cavity; and its rear wall is 1.539 mm between the   *
    *  playing surface and the tongue, which a break at both ends of that   *
-   *  span narrows.  0.6 mm leaves either one a wall's worth, and it is    *
-   *  already past what a keyboard's own break is — a piano natural is     *
-   *  broken about half a millimetre, a harpsichord's rather less.        *
+   *  span narrows.  1.0 mm is past what a keyboard's own break usually    *
+   *  is — a piano natural is broken about half a millimetre, a            *
+   *  harpsichord's rather less — held there rather than at the wall's own *
+   *  thickness so a slip of the slider cannot open the cavity.           *
+   *                                                                      *
+   *  IT IS A FILLET, NOT A FLAT CHAMFER.  A true quarter-circle profile —  *
+   *  the shape a round-over cutter or a hand-sanded key actually leaves —  *
+   *  tangent to the wall where it starts and to the playing surface where  *
+   *  it ends, so there is no crease at either end of it.  It is built as   *
+   *  BEVEL_SEGMENTS flat strips along that arc, which is enough to read as *
+   *  round at the size this keyboard prints at and cheap enough to rebuild *
+   *  on every drag of the slider.                                         *
+   *                                                                      *
+   *  A HARD TURN IS NOTED, NOT SMOOTHED AWAY.  The offset at a corner is   *
+   *  b / sin(half the turn), so a corner tight enough to throw that well   *
+   *  past the radius is one a round of that radius cannot follow — it      *
+   *  pinches on a convex point and self-overlaps on a concave one.  A      *
+   *  square corner is b·sqrt2 and perfectly fine; past BEVEL_HARD_TURN the *
+   *  corner is counted onto the profile, and computeLayout adds up what    *
+   *  this design actually uses and says so once in a warning, rather than  *
+   *  rounding badly and saying nothing.                                   *
    * ==================================================================== */
-  const BEVEL_MAX = 0.6;             // mm — leaves the thinnest wall its own
+  const BEVEL_MAX = 1.0;             // mm
   const BEVEL_EPS = 1e-6;
+  const BEVEL_SEGMENTS = 8;          // flat strips along the quarter circle
+  const BEVEL_HARD_TURN = 1.9;       // miter/radius past which it is noted
 
   let BEVEL = 0;
   /** how far the playing edge is broken, in mm; clamped to [0, BEVEL_MAX] */
   function setBevel(mm) {
     const b = Math.min(BEVEL_MAX, Math.max(0, +mm || 0));
-    if (Math.abs(b - BEVEL) > 1e-9) BEVEL = b;
+    BEVEL = b;
     return BEVEL;
   }
   function getBevel() { return BEVEL; }
@@ -1573,9 +1593,10 @@
    *
    * The playing face's boundary loop is INSET by b in its own plane and
    * the original loop is DROPPED by b, so the surface keeps its height and
-   * its walls keep their line; the chamfer is the strip between the two.
-   * Vertices on the rear arris are frozen — held at their y and their z —
-   * and the chamfer runs out into them.
+   * its walls keep their line; the round-over is built as BEVEL_SEGMENTS
+   * flat strips swept along a quarter circle between the two, the same way
+   * all the way round the loop — the rear arris, where the key stands
+   * against the spine, included.
    */
   function bevelProfile(p, b) {
     if (!(b > BEVEL_EPS)) return p;
@@ -1653,6 +1674,11 @@
       nv.push({ a: p.v[j], b: p.v[j + 1], y: p.v[j + 2], z: p.v[j + 3] });
     }
     const nf = F.map(r => r.slice());
+    /* corners this profile carries that the round cannot follow.  Counted
+     * onto the profile rather than into a running total, so it survives
+     * the cache: a design that reuses a profile is asking about the same
+     * corners each time it does. */
+    let hard = 0;
 
     for (const fi of tops) {
       const ring = nf[fi];
@@ -1683,7 +1709,13 @@
       const m = corner.length;
       if (m < 3) continue;
 
-      const inset = new Array(m);
+      /* per corner: the full-displacement miter offset (dx, dy), same
+       * direction the flat chamfer used — the round runs along it rather
+       * than along each edge's own normal, so the two walls either side of
+       * a corner still meet the fillet on a clean line.  levels[k][c] is
+       * that corner's vertex at arc step k (0 = the dropped arris itself,
+       * BEVEL_SEGMENTS = fully inset, on the surface). */
+      const mdx = new Array(m), mdy = new Array(m);
       for (let c = 0; c < m; c++) {
         const i = corner[c];
         const P = V[ring[i]], A = V[ring[corner[(c + m - 1) % m]]],
@@ -1695,44 +1727,82 @@
         const l1 = Math.hypot(e1[0], e1[1]) || 1, l2 = Math.hypot(e2[0], e2[1]) || 1;
         const n1 = [-e1[1] / l1, e1[0] / l1], n2 = [-e2[1] / l2, e2[0] / l2];
         const det = n1[0] * n2[1] - n1[1] * n2[0];
-        let dx, dy;
-        if (Math.abs(det) < 1e-9) { dx = b * n1[0]; dy = b * n1[1]; }
-        else { dx = b * (n2[1] - n1[1]) / det; dy = b * (n1[0] - n2[0]) / det; }
-        nv.push({ a: nv[ring[i]].a + dx, b: nv[ring[i]].b,
-                  y: nv[ring[i]].y + dy,
-                  z: nv[ring[i]].z + gx * dx + gy * dy });
-        inset[c] = nv.length - 1;
+        if (Math.abs(det) < 1e-9) { mdx[c] = b * n1[0]; mdy[c] = b * n1[1]; }
+        else { mdx[c] = b * (n2[1] - n1[1]) / det; mdy[c] = b * (n1[0] - n2[0]) / det; }
+        /* NOTING A HARD TURN.  The miter is b / sin(half the turn), so a
+         * corner tight enough to throw the offset well past the radius is
+         * one a round of that radius cannot follow: the fillet pinches on
+         * a convex point and self-overlaps on a concave one.  A square
+         * corner is b·sqrt2 and perfectly fine; past BEVEL_HARD_TURN it is
+         * tallied rather than silently rounded as though it were gentle. */
+        if (Math.hypot(mdx[c], mdy[c]) > BEVEL_HARD_TURN * b) hard++;
       }
 
-      /* the arris drops by the chamfer — every vertex of it, so a straight
-       * run stays straight and the wall under it keeps its line */
+      /* ---- THE ROUND ITSELF ----
+       *
+       * In (u = inward from the drafted silhouette, v = down from the top
+       * plane), the drafted arris is the sharp corner at (0, 0).  A
+       * round-over of radius b is the quarter circle centred on (b, b):
+       *
+       *     u = b(1 - cos t)      v = b(1 - sin t)      t: 0 -> pi/2
+       *
+       * tangent to the wall at (0, b) and to the playing surface at
+       * (b, 0), so it meets both with no crease at either end.  Its
+       * midpoint is (0.293b, 0.293b) — INSIDE the flat chamfer's u + v = b,
+       * because a round-over takes less material off the corner than a
+       * chamfer of the same setback does.  Getting that wrong is what makes
+       * a "round" come out looking like a chamfer: use sin for both and
+       * u + v = b for every t, which is the straight line exactly.
+       */
+      const levels = [];               // levels[k][c] -> vertex index
+      levels[0] = corner.map(i => ring[i]);   // t = 0: the arris, pre-drop
+      for (let k = 1; k <= BEVEL_SEGMENTS; k++) {
+        const t = (k / BEVEL_SEGMENTS) * (Math.PI / 2);
+        const u = 1 - Math.cos(t), drop = b * (1 - Math.sin(t));
+        levels[k] = corner.map((i, c) => {
+          const dx = mdx[c] * u, dy = mdy[c] * u;
+          nv.push({ a: nv[ring[i]].a + dx, b: nv[ring[i]].b,
+                    y: nv[ring[i]].y + dy,
+                    z: V[ring[i]][2] + gx * dx + gy * dy - drop });
+          return nv.length - 1;
+        });
+      }
+
+      /* t = 0 is (u 0, v b): the arris keeps its line and drops the full
+       * radius, which is where the round leaves the wall tangentially */
       for (let i = 0; i < ring.length; i++) nv[ring[i]].z -= b;
 
       for (let c = 0; c < m; c++) {
         const d = (c + 1) % m;
-        /* the chamfer runs the WHOLE segment of arris between two corners,
-         * any vertex still standing on it included, and returns along the
-         * one inset edge.  It is fanned from the INSET corner rather than
-         * from the arris, because a fan from the arris would lay its first
-         * triangle along the arris itself, where collinear points make it
-         * zero-area and it is dropped — and a dropped triangle is a hole. */
+        /* level 0 -> level 1 runs the WHOLE segment of arris between two
+         * corners, any vertex still standing on it included, and closes on
+         * level 1's single edge.  It is fanned from level 1's corner
+         * rather than from the arris, because a fan from the arris would
+         * lay its first triangle along the arris itself, where collinear
+         * points make it zero-area and it is dropped — and a dropped
+         * triangle is a hole. */
         const path = [];
         for (let i = corner[c]; ; i = (i + 1) % ring.length) {
           path.push(ring[i]);
           if (i === corner[d]) break;
         }
         for (let k = 0; k + 1 < path.length; k++)
-          nf.push([path[k], path[k + 1], inset[c]]);
-        nf.push([path[path.length - 1], inset[d], inset[c]]);
+          nf.push([path[k], path[k + 1], levels[1][c]]);
+        nf.push([path[path.length - 1], levels[1][d], levels[1][c]]);
+
+        /* every strip after that is a plain quad between two corner-only
+         * rings — the round's remaining facets */
+        for (let k = 1; k < BEVEL_SEGMENTS; k++)
+          nf.push([levels[k][c], levels[k][d], levels[k + 1][d], levels[k + 1][c]]);
       }
-      nf[fi] = inset.slice();                 // the surface is now the inset loop
+      nf[fi] = levels[BEVEL_SEGMENTS].slice();   // the surface is now the inset loop
     }
 
     const v = [], f = [];
     for (const q of nv) v.push(q.a, q.b, q.y, q.z);
     for (const r of nf) { f.push(r.length); for (const i of r) f.push(i); }
     const out = { w0: p.w0, widths: p.widths, nv: nv.length, nf: nf.length,
-                  v, f, derived: p.derived, bevel: b };
+                  v, f, derived: p.derived, bevel: b, hardTurns: hard };
     per.set(key, out);
     return out;
   }

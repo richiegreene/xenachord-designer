@@ -834,6 +834,25 @@
      * found a real deck, that the dome still has its travel, and that no
      * two pair faces collide. */
     L.bevel = bevel;             // what the playing edge is actually cut at
+    /* A ROUND CANNOT FOLLOW A SHARP CORNER EXACTLY.  Where the playing
+     * surface's own outline turns sharply — the notch a white key cuts
+     * around a neighbouring accidental is the one that actually occurs —
+     * the round-over leaves a touch of material either proud or short right
+     * at the point.  Said once here rather than silently rounded as if
+     * every corner were gentle. */
+    let hardTurns = 0, hardKeys = 0;
+    if (bevel > 0) for (const n of notes) {
+      const q = n.kind === 'white'
+        ? XM.profileFor(n.type, n.ref.ctxL, n.ref.ctxR)
+        : XM.profileFor(n.type, null, null);
+      if (q.p.hardTurns) { hardTurns += q.p.hardTurns; hardKeys++; }
+    }
+    if (hardTurns > 0) warnings.push(
+      `The playing edge is rounded at ${bevel.toFixed(2)} mm, and ${hardTurns} corner` +
+      `${hardTurns === 1 ? '' : 's'} on ${hardKeys} key${hardKeys === 1 ? '' : 's'} ` +
+      `turn${hardTurns === 1 ? 's' : ''} too tightly for a round that size to follow — ` +
+      `the fillet pinches on an outside point and doubles back on an inside one. ` +
+      `A smaller break clears it.`);
     const pAudit = XM.pairAudit(pairKeys(L));
     L.pairAudit = pAudit;
     L.bridgeAudit = pAudit;      // old name, same object — see model.js shims

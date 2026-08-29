@@ -506,15 +506,17 @@
     <fieldset>
       <legend>Bevel: break the playing edge<span id="bevel-who"></span></legend>
       <div class="presswrap"
-        title="Every keyboard instrument breaks the top edge of its keys — a sharp arris cuts the finger on a glissando and chips in use. This runs a chamfer round the playing surface of each key: the up-facing face that reaches the key's greatest z, and nothing else. The spine, the feet, the sensor press, the tongues that plug into the spine and the whole underside are left exactly as drafted, and so is the arris at the back of the key, where it stands against the spine — the chamfer runs out into it rather than opening the joint.">
+        title="Every keyboard instrument breaks the top edge of its keys — a sharp arris cuts the finger on a glissando and chips in use. This runs a rounded-over break round the playing surface of each key: the up-facing face that reaches the key's greatest z, and nothing else. The spine, the feet, the sensor press, the tongues that plug into the spine and the whole underside are left exactly as drafted. The round is the same all the way round the playing surface, the arris at the back of the key included. Where the key's own outline turns sharply — a notch cut around a neighbouring accidental — the round cannot follow the corner exactly and that key is flagged in a warning rather than silently mis-rounded.">
         <div class="pressrow">
           <label for="bevel">Edge Break</label>
           <span id="bevel-v" class="pressval">square</span>
         </div>
-        <input id="bevel" type="range" min="0" max="0.6" step="0.025" value="0">
-        <p class="hint" id="bevelinfo">Square at 0 · a piano natural is broken
-          about half a millimetre, a harpsichord's rather less · held under the
-          thinnest shell wall so it cannot come through into the cavity.</p>
+        <input id="bevel" type="range" min="0" max="1" step="0.025" value="0">
+        <p class="hint" id="bevelinfo">Square at 0 · a rounded-over break, the
+          way a keyboard's own edge is finessed by hand · a piano natural is
+          broken about half a millimetre, a harpsichord's rather less · held
+          under the thinnest shell wall so it cannot come through into the
+          cavity.</p>
       </div>
       <button class="primary wide" id="bevel-reset" style="width:100%;margin-top:9px"
         title="Back to the drafted square arris.">↺ Leave the Edge Square</button>
@@ -2696,9 +2698,9 @@ function showPress(sol){
  *  and the Blender log without being asked for again.
  *
  *  It is also the one control here that cannot make the keyboard not fit.
- *  The chamfer is cut INTO the drafted silhouette — no vertex of it stands
+ *  The round is cut INTO the drafted silhouette — no vertex of it stands
  *  outside the key as drawn — so the widths, the gaps between keys and the
- *  size solve are the same at 0.9 mm as they are at 0.  Nothing has to be
+ *  size solve are the same at 1.0 mm as they are at 0.  Nothing has to be
  *  re-solved when it moves; the profiles are simply rebuilt.
  */
 function bevelNow(){ return XD.bevelOf(design); }
@@ -2716,10 +2718,11 @@ function showBevel(){
   const at = L && L.bevel != null ? L.bevel : b;
   info.innerHTML = b > 0 && at < b - 5e-4
     ? `cut at ${at.toFixed(2)} mm — held back so the narrowest key keeps a ` +
-      `playing surface between its two chamfers`
-    : 'Square at 0 · a piano natural is broken about half a millimetre, a ' +
-      "harpsichord's rather less · held under the thinnest shell wall so it " +
-      'cannot come through into the cavity.';
+      `playing surface between its two rounds`
+    : "Square at 0 · a rounded-over break, the way a keyboard's own edge is " +
+      "finessed by hand · a piano natural is broken about half a millimetre, " +
+      "a harpsichord's rather less · held under the thinnest shell wall so " +
+      'it cannot come through into the cavity.';
 }
 
 (function(){
