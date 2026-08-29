@@ -1570,20 +1570,27 @@
   }
 
   /**
-   * The playing surface of a profile: the up-facing faces that reach the
-   * key's greatest z.  Every drafted key has exactly one — the black's
-   * sloped top, the white's stepped deck, the split gray's front table —
-   * and a profile that somehow has none is simply not bevelled.
+   * The bevel target is every face that reaches the player-facing edge.
+   * That includes the true top of a white key and the sloped / vertical
+   * front faces of accidental keys, because the rounded-over break should
+   * run from the front edge into the diagonal nose rather than stopping at
+   * the flat upper section alone.
    */
   function topFaces(V, F) {
-    let zmax = -Infinity;
-    for (const p of V) if (p[2] > zmax) zmax = p[2];
-    const out = [];
+    let zmax = -Infinity, ymax = -Infinity;
+    for (const p of V) {
+      if (p[2] > zmax) zmax = p[2];
+      if (p[1] > ymax) ymax = p[1];
+    }
+    const out = [], seen = new Set();
+    const add = i => { if (!seen.has(i)) { seen.add(i); out.push(i); } };
     for (let i = 0; i < F.length; i++) {
       const r = F[i];
-      if (ringNormal(V, r)[2] < 0.9) continue;         // up-facing only
-      if (!r.some(j => V[j][2] > zmax - 1e-4)) continue;
-      out.push(i);
+      if (r.length < 3) continue;
+      const N = ringNormal(V, r);
+      const onTop = N[2] >= 0.9 && r.some(j => V[j][2] > zmax - 1e-4);
+      const onFront = N[1] > 0.5 && r.some(j => V[j][1] > ymax - 1e-4) && N[2] > 0.1;
+      if (onTop || onFront) add(i);
     }
     return out;
   }
