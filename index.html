@@ -323,6 +323,18 @@
      does — no drag-to-remove, no width grips, and a key lights while it is
      down. In Design it is a drawing you edit, and none of this applies. */
   body.mode-play .kb-grip{display:none}
+  /* ---------- Play is not an editor ----------
+     Editing belongs to Design, so in Play the strip drops everything that
+     points at it: the accent and the "· editing" mark on the open band, the
+     veil that dims the others (all four sound alike here), and the dashed
+     boxes for gaps you could drop a key into — there is no drag and drop to
+     make good on them. */
+  body.mode-play .kb-band-tag.on{color:var(--dim);border-color:var(--line)}
+  body.mode-play .kb-band-tag{cursor:default}
+  body.mode-play .kb-band-tag .ed{display:none}
+  body.mode-play .kb-band-veil{display:none}
+  body.mode-play .kb-slot.empty,
+  body.mode-play .kb-slot.end.empty{outline-color:transparent;background:none}
   body.mode-play .kb-white,
   body.mode-play .kb-m{cursor:pointer}
   body.mode-play .kb-white.sounding{background:var(--accent)}
@@ -1886,8 +1898,15 @@ function buildUnit(u, inner, rows){
     tag.className = 'kb-band-tag' + (live ? ' on' : '');
     tag.style.left = X(0) + 'px';
     tag.style.top = (top - 2) + 'px';
-    tag.textContent = u.label + (live ? ' · editing' : '');
-    tag.title = live ? `the ${u.label} keyboard — the one the panel is editing`
+    /* WHICH ONE IS OPEN IS A DESIGN QUESTION ONLY.  In Play every keyboard
+     * of the rig sounds, so the mark that says "this is the one you are
+     * editing" is carried in its own span and dropped by the mode's CSS —
+     * along with the accent and the veil — rather than being rebuilt. */
+    tag.textContent = u.label + ' ';
+    const ed = document.createElement('span');
+    ed.className = 'ed'; ed.textContent = '· editing';
+    if (live) tag.appendChild(ed);
+    tag.title = live ? `the ${u.label} keyboard`
                      : `the ${u.label} keyboard — click to edit it`;
     inner.appendChild(tag);
     if (!live){

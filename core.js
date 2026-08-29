@@ -1367,7 +1367,7 @@ SHEET_X0, SHEET_Y0, SHEET_Z0 = ${pn(XM.WORLD.x0)}, ${pn(XM.WORLD.y0)}, ${pn(XM.W
 FOOT_W, FOOT_D   = ${pn(XM.FOOT.w)}, ${pn(XM.FOOT.d)}
 FOOT_YC, FOOT_Z  = ${pn(XM.FOOT.yCentre)}, ${pn(XM.FOOT.z)}
 FIT_ENGAGE       = ${pn(XM.FIT.engage)}   # overlap that makes a comb one solid
-FIT_GAP          = ${pn(XM.FIT.gap)}   # clearance between different colours
+FIT_GAP          = ${pn(XM.FIT.gap)}   # clearance between the stacked bands
 
 # THE FOOT IS NOT A RECTANGLE.  "Feet - A" / "Feet - B" draw all 32 feet as
 # one shape and it is the "-| |-": two mirrored T's, each a full-width
@@ -1939,16 +1939,14 @@ def build():
         spine_mats = {}
         for (hname, hx0, hx1, hy_back, hy_front, layers) in SPINE["halves"]:
             for li, (lname, lz0, lz1) in enumerate(layers):
-                # the band's front face is recessed by FIT_GAP; only the
-                # boss reaches forward, into keys of this band's own colour
+                # the band's front face is the drafted one, y = 0, flush
+                # with every key back — the comb is affixed into one object,
+                # so holding the band off that plane only opened a slot
+                # behind the keys of the other colours.  The 1.29 mm between
+                # half A and half B is left open: that gap is drafted
+                # clearance, not something to bridge.
                 tris = build_spine_slab(hname, hx0, hx1, hy_back,
-                                        hy_front - FIT_GAP, lz0, lz1, li == 0)
-                # couple the two AKM320 halves so a comb is ONE object
-                if hname == "A":
-                    other = [h for h in SPINE["halves"] if h[0] == "B"]
-                    if other and other[0][1] > hx1 + 1e-4:
-                        push_box(tris, hx1, other[0][1], hy_back,
-                                 hy_front - FIT_GAP, lz0, lz1)
+                                        hy_front, lz0, lz1, li == 0)
 
                 # carry this band forward into the keys of its own colour
                 for (blayer, bx0, bx1, bz0, bz1) in SPINE["boss"]:
@@ -1957,7 +1955,7 @@ def build():
                     a, b = max(bx0, hx0), min(bx1, hx1)
                     if b - a <= 1e-4:
                         continue
-                    push_box(tris, a, b, hy_front - FIT_GAP,
+                    push_box(tris, a, b, hy_front,
                              hy_front + SPINE["boss_depth"], bz0, bz1)
                 if lname not in spine_mats:
                     spine_mats[lname] = get_spine_material(spine_kind, lname)

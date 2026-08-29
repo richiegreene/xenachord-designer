@@ -1721,11 +1721,15 @@
     for (const [hn, half] of spineHalves()) {
       const ch = SPINE.channel[hn];
       const layers = spineBands(kind, hn);
-      /* the band's front face is recessed by FIT.gap so that a key of
-       * ANOTHER colour never lies coincident with it — coplanar faces are
-       * what leaves a union non-manifold — and only the boss reaches
-       * forward, into the keys that share this band's colour. */
-      const yF = half.yFront - FIT.gap;
+      /* THE BAND'S FRONT FACE IS THE DRAFTED ONE — y = 0, where every key
+       * back stands.  It used to be recessed by FIT.gap to keep a key of
+       * another colour off a coplanar face, but the whole comb is affixed
+       * and unified when it is printed, so the recess bought nothing and
+       * left a 0.15 mm slot behind every key that did not share the band's
+       * colour.  Flush here; the boss still reaches FIT.engage past it into
+       * the keys that do share the colour, so those overlap rather than
+       * merely touch. */
+      const yF = half.yFront;
       layers.forEach((L, i) => {
         const tris = [];
         if (i === 0) {
@@ -1755,17 +1759,10 @@
           if (z1 - z0 <= 1e-4) continue;
           pushBox(tris, a, b, yF, half.yFront + FIT.engage, z0, z1);
         }
-        /* The two AKM320 halves are drafted 1.3 mm apart.  A comb has to
-         * come off the bed as ONE object, so each band carries a coupler
-         * across that gap — built onto half A so it appears once. */
-        if (hn === 'A') {
-          const other = spineHalves().find(([n]) => n === 'B');
-          if (other) {
-            const g0 = half.x1, g1 = other[1].x0;
-            if (g1 > g0 + 1e-4)
-              pushBox(tris, g0, g1, half.yBack, yF, L.z0, L.z1);
-          }
-        }
+        /* THE 1.29 mm BETWEEN THE HALVES IS LEFT OPEN.  Half A ends at
+         * 183.43233 and half B begins at 184.72359, and that gap is drafted,
+         * not incidental: it is the clearance the two AKM320 halves want.
+         * Nothing bridges it, so half A stops square at its own x1. */
         parts.push({
           name: 'Spine_' + hn + '_' + L.name, half: hn, layer: L.name,
           x0: half.x0, x1: half.x1, yBack: half.yBack, yFront: half.yFront,
@@ -1910,6 +1907,12 @@
    *              coplanar faces is exactly the case a boolean solver gets *
    *              wrong.  Each band therefore grows a BOSS of FIT.engage   *
    *              forward, over the x span of every key of its colour.     *
+   *                                                                      *
+   *              THE BANDS THEMSELVES STAY ON y = 0.  The parts are       *
+   *              affixed into one object anyway, so a band held back off  *
+   *              the drafted plane only opened a slot behind the keys of  *
+   *              every other colour.  FIT.gap is a Z rule now, not a Y    *
+   *              one: it separates the stacked bands, nothing else.       *
    *                                                                      *
    *    CLEAR     nothing of one colour may interfere with another.  The   *
    *              drafted spine bands overlap each other slightly (half A  *
