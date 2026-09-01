@@ -91,7 +91,8 @@
    * are standing on.  A design may still pin `scale` and set
    * `autoScale: false` to work deliberately off-spine.
    */
-  /** the design's bevel, in mm, held inside what the shell wall allows */
+  /** the break the design asks for, in mm, inside what the slider allows;
+   *  each key is then held to its own wall — see XM.bevelRoom */
   function bevelOf(design) {
     const b = +(design && design.bevel) || 0;
     return Math.min(XM.BEVEL_MAX, Math.max(0, b));
@@ -248,7 +249,13 @@
      * so that a thin split key keeps a playing surface between its two
      * chamfers; the break costs the keyboard nothing else, because it adds
      * no vertex outside the drafted silhouette and so leaves every width,
-     * every clearance and the size solve itself exactly as they were. */
+     * every clearance and the size solve itself exactly as they were.
+     *
+     * This is the ASK.  What each key is finally cut at is its own wall's
+     * business — model.js holds every profile to what it can carry without
+     * the wall under its arris doubling back (bevelRoom) — so the range the
+     * keyboard actually came out at is read back off the built profiles
+     * below rather than assumed from the number set here. */
     const bevel = XM.setBevel(Math.min(bevelOf(design),
       0.35 * Math.min(cw('white'), cw('black'), cw('gray'), cw('split'))));
     const warnings = [];
@@ -833,7 +840,8 @@
      * no overhang to warn about; what matters is that every pair face
      * found a real deck, that the dome still has its travel, and that no
      * two pair faces collide. */
-    L.bevel = bevel;             // what the playing edge is actually cut at
+    L.bevel = bevel;             // the break asked for, at these widths
+                                 // (L.bevelCut, below, is what was cut)
     /* A ROUND CANNOT FOLLOW A SHARP CORNER EXACTLY.  Where the playing
      * surface's own outline turns sharply — the notch a white key cuts
      * around a neighbouring accidental is the one that actually occurs —
@@ -841,14 +849,24 @@
      * at the point.  Said once here rather than silently rounded as if
      * every corner were gentle. */
     let hardTurns = 0, hardKeys = 0;
+    /* WHAT THE KEYS WERE ACTUALLY CUT AT, read off the profiles that were
+     * built.  A white asked for more than its rear wall carries comes back
+     * rounded less than an accidental beside it, and the two ends of that
+     * are worth saying rather than reporting the ask as though it were the
+     * cut. */
+    let cutLo = Infinity, cutHi = 0;
     if (bevel > 0) for (const n of notes) {
       const q = n.kind === 'white'
         ? XM.profileFor(n.type, n.ref.ctxL, n.ref.ctxR)
         : XM.profileFor(n.type, null, null);
       if (q.p.hardTurns) { hardTurns += q.p.hardTurns; hardKeys++; }
+      const at = q.p.bevel || 0;
+      if (at < cutLo) cutLo = at;
+      if (at > cutHi) cutHi = at;
     }
+    L.bevelCut = bevel > 0 && isFinite(cutLo) ? { lo: cutLo, hi: cutHi } : null;
     if (hardTurns > 0) warnings.push(
-      `The playing edge is rounded at ${bevel.toFixed(2)} mm, and ${hardTurns} corner` +
+      `The playing edge is rounded at ${cutHi.toFixed(2)} mm, and ${hardTurns} corner` +
       `${hardTurns === 1 ? '' : 's'} on ${hardKeys} key${hardKeys === 1 ? '' : 's'} ` +
       `turn${hardTurns === 1 ? 's' : ''} too tightly for a round that size to follow — ` +
       `the fillet pinches on an outside point and doubles back on an inside one. ` +
@@ -1016,17 +1034,39 @@
     return out;
   }
 
+  /**
+   * What the sensor press offers each key's own arms, keyed by the key.
+   * A key is drawn from L.whites / L.slots but is paired with its foot in
+   * pairKeys, and the arms cannot be placed without the foot — so the one
+   * is looked up from the other.  Type and centre together name a key: the
+   * two halves of a split pair share a centre and never a type.
+   */
+  function armTargets(bkeys) {
+    const m = new Map();
+    for (const k of bkeys) {
+      const at = XM.pressArms(k.cx, k.w, k.type, k.lb, k.rb, k.foot, k.sib);
+      if (at) m.set(k.type + '@' + Math.round(k.cx * 1e4), at);
+    }
+    return m;
+  }
+  const armKey = (type, cx) => type + '@' + Math.round(cx * 1e4);
+
   function buildMeshes(L) {
     const out = { white: [], black: [], gray: [] };
     /* Keys are drawn whole.  Nothing is cut into their undersides any more:
      * the pair face is a floating loop lying in the deck plane, not a weld,
-     * so the key's own triangulation is left exactly as drafted. */
+     * so the key's own triangulation is left exactly as drafted — save for
+     * the two arms of its underside "-| |-", which slide along their own
+     * bars to stand on the sensor press.  See THE KEY'S OWN ARMS. */
     const bkeys = pairKeys(L);
+    const arms = armTargets(bkeys);
     for (const w of L.whites)
-      out.white.push(...XM.buildKey(w.cx, w.w, w.type, w.ctxL, w.ctxR, null));
+      out.white.push(...XM.buildKey(w.cx, w.w, w.type, w.ctxL, w.ctxR, null,
+                                    arms.get(armKey(w.type, w.cx))));
     for (const sl of L.slots) {
       for (const m of sl.members)
-        out[m.spec.layer].push(...XM.buildKey(m.cx, m.w, m.type, null, null, null));
+        out[m.spec.layer].push(...XM.buildKey(m.cx, m.w, m.type, null, null, null,
+                                              arms.get(armKey(m.type, m.cx))));
     }
     /* The spine is the drafted one for this design's colour count — the
      * "<kind> type Spine - A / - B" pair.  Keep it whole for the STL, and
@@ -1221,7 +1261,14 @@
      * it is cut on the profile, not on the mesh — so this line is here to be
      * read rather than to be used.  0 is the drafted square arris. */
     p('    "bevel":        ', f(L.bevel || 0, 4),
-      ',       # mm the playing edge is broken by, chamfered on the top face only');
+      ',       # mm the playing edge is broken by, round the playing surface and over the ridge into the nose');
+    /* WHAT EACH KEY TOOK.  The ask is one number; the cut is not, because a
+     * key is held to the wall under its own arris — a white's rear wall
+     * carries less than an accidental's nose does.  Written out when the
+     * two ends differ, so the log says what the profiles below are. */
+    if (L.bevelCut && L.bevelCut.lo < L.bevelCut.hi - 5e-4)
+      p('    "bevel_cut":    [', f(L.bevelCut.lo, 4), ', ', f(L.bevelCut.hi, 4),
+        '],  # mm actually cut: the least and the most, held to each key\'s own wall');
     /* ---- more than one of them on the desk ----
      * A rig does not change a single part: it is N of the SAME printed
      * keyboard, so everything below still describes one unit and one set of
@@ -1300,13 +1347,25 @@
     /* --- key table ---------------------------------------------------- */
     p('# --- the 32 keys, left to right, one per sensor foot -------------------');
     p('# (name, type, x_centre, width, depth, profile,');
-    p('#  world_x, world_y_back, world_z_bottom, foot_x)');
+    p('#  world_x, world_y_back, world_z_bottom, foot_x, arm_x)');
     p('# "profile" names the drafted key this one is instantiated from.  For a');
     p('# white it carries the neighbour context "<leftBias>|<rightBias>" ("n" =');
     p('# that slot is empty), because the drafted whites rib differently');
     p('# depending on what sits beside them.');
     p('# KEYS is always exactly 32 entries long. KEYS[i] belongs to FEET[i].');
+    p('# "arm_x" places the two arms of the key\'s underside "-| |-" on their');
+    p('# own bars, in x: one value per stem line ("arm_a"/"arm_b" in the profile');
+    p('# below), so the pair lands on the stems of the sensor press standing');
+    p('# under it and is ', pn(XM.PAIR.stem), ' mm wide whatever this key\'s width is.');
+    p('# The arms are drafted where the key was drawn over its own sensor, and');
+    p('# some are drafted as a fraction of the key rather than a millimetre off');
+    p('# its centreline — neither survives a change of layout.  Nothing else of');
+    p('# the key moves — see THE KEY\'S OWN ARMS in model.js.');
     p('KEYS = [');
+    /* the sibling land a split half needs before its press — and so its
+     * arms — can be placed; pairKeys is where that pairing is worked out */
+    const armSib = new Map();
+    for (const k of pairKeys(L)) armSib.set(k.index, k.sib);
     for (const n of L.notes) {
       const r = n.ref;
       const spec = XM.KEY_TYPES[n.type];
@@ -1316,10 +1375,16 @@
       const nm = 'K' + String(n.index).padStart(2, '0') + '_' +
         (n.kind === 'white' ? 'W' + r.i
                             : 'A' + r.slot + '_' + (r.ord + 1));
+      const lb = white ? r.ctxL : null, rb = white ? r.ctxR : null;
       p('    ("', nm, '", "', n.type, '", ',
         pn(r.cx), ', ', pn(w), ', ', f(e.y1 - e.y0), ', "', n.profileKey, '", ',
         f(r.cx + W.x0, 4), ', ', f(W.y0, 4), ', ', f(e.z0 + W.z0), ', ',
-        r.foot == null ? 'None' : f(r.foot + W.x0, 4), '),');
+        r.foot == null ? 'None' : f(r.foot + W.x0, 4), ', ',
+        (function (P) {
+          return P ? '(' + pn(P[0]) + ', ' + pn(P[1]) + ')' : 'None';
+        })(r.foot == null ? null
+           : XM.armPlaceFor(r.cx, w, n.type, lb, rb, r.foot, armSib.get(n.index))),
+        '),');
     }
     p(']');
     p('');
@@ -1540,6 +1605,9 @@
       rows.push('        "nv": ' + q.p.nv + ', "mirror": ' + (q.mirror ? 'True' : 'False') + ',');
       rows.push('        "v": [' + Array.from(q.p.v).map(pn).join(',') + '],');
       rows.push('        "f": [' + Array.from(q.p.f).join(',') + '],');
+      const A = XM.armLines(q.p);
+      rows.push('        "arm_a": [' + (A ? A.a.join(',') : '') + '],');
+      rows.push('        "arm_b": [' + (A ? A.b.join(',') : '') + '],');
       rows.push('    },');
     }
     return 'KEY_PROFILES = {\n' + rows.join('\n') + '\n}';
@@ -1746,7 +1814,12 @@ def triangulate_face(V, ring):
 # =========================================================================
 # KEY GEOMETRY — a drafted profile, instantiated
 # =========================================================================
-def build_key(cx, w, prof):
+def build_key(cx, w, prof, arm_x=None):
+    """A drafted profile instantiated at this key's width, with the two arms
+    of its underside "-| |-" placed at arm_x -- one x per stem line -- so they
+    stand on the sensor press, the drafted stem width whatever this key's width
+    is.  Only the vertices on the two stem lines move, and only in x; see THE
+    KEY'S OWN ARMS in model.js."""
     v, n, mirror = prof["v"], prof["nv"], prof["mirror"]
     x_left = cx - w / 2.0
     V = [None] * n
@@ -1756,6 +1829,10 @@ def build_key(cx, w, prof):
         if mirror:
             x = w - x
         V[i] = (x_left + x, v[j + 2], v[j + 3])
+    if arm_x:
+        for (line, x) in zip(("arm_a", "arm_b"), arm_x):
+            for i in prof.get(line, ()):
+                V[i] = (x, V[i][1], V[i][2])
     t = []
     f = prof["f"]
     k = 0
@@ -2149,7 +2226,7 @@ def build():
 
     keys_from_sheet = 0
     for (name, ktype, cx, width, depth, profile,
-         wx, wy, wz, foot) in KEYS:
+         wx, wy, wz, foot, arm_x) in KEYS:
         coll = part[LAYER_PART[KEY_LAYER[ktype]]]
         if USE_BLEND_CATEGORIES:
             src = find_category(ktype)
@@ -2157,7 +2234,8 @@ def build():
                 place_from_category(src, name, cx, width, coll)
                 keys_from_sheet += 1
                 continue
-        make_mesh_object(name, build_key(cx, width, KEY_PROFILES[profile]),
+        make_mesh_object(name,
+                         build_key(cx, width, KEY_PROFILES[profile], arm_x),
                          coll, mats[KEY_LAYER[ktype]])
 
     spine_from_sheet = feet_from_sheet = 0

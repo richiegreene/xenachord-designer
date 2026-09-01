@@ -9,6 +9,16 @@
     --bg:#15161a; --panel:#1e1f25; --panel2:#25262e; --panel-bright:#2f313a; --line:#33343d;
     --text:#e9e9ec; --dim:#9a9ba4; --accent:#6fb7ff; --warn:#ffb454; --ok:#79d18b;
     --kw:#f3f3f0; --kb:#2b2b31; --kg:#8d8e95; --palette-bg:var(--panel-bright);
+    --strip-bg:#101116; --scope-bg:#12161c;
+  }
+  /* Bright-mode rails: when the viewport background is switched to light
+     (v-theme), the left rail/drawer and the bottom viewer bar switch with
+     it — everything inside them reads off these vars, so overriding the
+     vars in scope is enough to recolor the whole subtree. */
+  body.bright #panel, body.bright #viewbar2, body.bright #strip{
+    --bg:#e9e9ec; --panel:#f2f2f4; --panel2:#e4e5e9; --panel-bright:#d8d9de;
+    --line:#c9cad0; --text:#1b1c20; --dim:#5c5d66; --accent:#1f6feb;
+    --strip-bg:#dcdde2; --palette-bg:#d8d9de; --scope-bg:#dcdde2;
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
@@ -56,10 +66,10 @@
     width:22px;height:22px;padding:0;border-radius:50%;
     display:flex;align-items:center;justify-content:center;
     font-size:12px;line-height:1}
-  /* ---------- viewer overlay ---------- */
-  #viewbar2{position:absolute;left:12px;bottom:12px;display:flex;align-items:center;
-    gap:12px;background:rgba(30,31,37,.86);backdrop-filter:blur(4px);
-    border:1px solid var(--line);border-radius:8px;padding:7px 11px;font-size:11px}
+  /* ---------- options bar, below the strip ---------- */
+  #viewbar2{display:flex;align-items:center;flex-wrap:wrap;
+    gap:12px;background:var(--panel);border-top:1px solid var(--line);
+    padding:7px 11px;font-size:11px}
   #viewbar2 .grp{display:flex;align-items:center;gap:7px}
   #viewbar2 .sep{width:1px;height:20px;background:var(--line)}
   .vis{display:flex;align-items:center;gap:4px;cursor:pointer;user-select:none;color:var(--dim)}
@@ -81,11 +91,11 @@
   #inspect td:first-child{color:var(--dim);padding-right:8px;white-space:nowrap}
   #inspect td:last-child{text-align:right;font-variant-numeric:tabular-nums}
   #camread{display:none}
-  h1{font-size:15px;margin:2px 0 2px}
+  h1{font-size:15px;margin:2px 0 2px;color:var(--text)}
   h1 small{color:var(--dim);font-weight:400}
   .sub{color:var(--dim);font-size:11.5px;margin:0 0 12px}
   fieldset{border:1px solid var(--line);border-radius:8px;margin:0 0 12px;padding:9px 11px}
-  legend{color:var(--dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;padding:0 6px}
+  legend{color:var(--dim);font-size:10.5px;font-weight:400;letter-spacing:.03em;padding:0 6px}
   /* which device of the rig this fieldset is about, when there is more
      than one — empty, and invisible, when there is not */
   legend span{color:var(--accent);text-transform:none;letter-spacing:0}
@@ -162,7 +172,7 @@
   /* Height is set from the strip's own content — one band per AKM320 in the
      rig — so overflow-y is auto rather than hidden: a rig too tall for the
      window scrolls instead of losing its upper keyboard. */
-  #strip{height:190px;border-top:1px solid var(--line);background:#101116;
+  #strip{height:190px;border-top:1px solid var(--line);background:var(--strip-bg);
     overflow:auto;position:relative}
   #stripInner{position:relative;height:170px;margin:10px 0}
   /* THE STRIP IS A MEASUREMENT, NOT A PICTURE.  Every box is placed at a
@@ -196,7 +206,7 @@
      Only ever drawn when there is more than one, because a name on the only
      keyboard there is is just clutter. */
   .kb-band-tag{position:absolute;z-index:7;font-size:9.5px;letter-spacing:.04em;
-    text-transform:uppercase;color:var(--dim);background:#101116;
+    text-transform:uppercase;color:var(--dim);background:var(--strip-bg);
     padding:1px 5px;border-radius:3px;border:1px solid var(--line);
     pointer-events:auto;cursor:pointer;white-space:nowrap}
   .kb-band-tag.on{color:var(--accent);border-color:var(--accent);cursor:default}
@@ -218,7 +228,7 @@
     border-radius:2px;background:var(--accent)}
   .kb-grip::after{content:"";position:absolute;left:0;right:0;top:50%;
     height:9px;margin-top:-4.5px;border-radius:2px;background:var(--accent);
-    box-shadow:0 0 0 1px #101116}
+    box-shadow:0 0 0 1px var(--strip-bg)}
   .kb-grip:hover,.kb-grip.on{opacity:1}
   #stripInner.resizing .kb-grip{opacity:0}
   #stripInner.resizing .kb-grip.on{opacity:1}
@@ -314,7 +324,7 @@
   /* ---------- synth: the wave and the envelope ----------
      One idiom for both — a dark box, an axis, one glowing stroke — because
      they answer the same question about the same note. Engrave's scheme. */
-  .scope{display:block;width:100%;height:74px;background:#12161c;
+  .scope{display:block;width:100%;height:74px;background:var(--scope-bg);
     border:1px solid var(--line);border-radius:6px}
   #s-adsr{height:92px;cursor:pointer;touch-action:none}
   .wave-ticks{display:flex;justify-content:space-between;
@@ -405,9 +415,9 @@
         <button data-v="single" class="on"
           title="One AKM320 on its own — the keyboard as designed, and the default.">single</button>
         <button data-v="side"
-          title="A second AKM320 set to the right of the first, with clear air between the two cases. By default its 32 keys carry on where the first keyboard's stopped, so the rig extends the register rather than repeating it.">side-by-side</button>
+          title="A second AKM320 beside the first. Extends the register by default, rather than repeating it.">side-by-side</button>
         <button data-v="stack"
-          title="A second AKM320 standing over the first like an upper manual, lifted by half the length of a white key. By default the two are read as one scale interchanged: every step of the lower keyboard counts double and the upper one falls in the odd steps between them, so two 17-note layouts stacked are a 34-note scale.">stacked</button>
+          title="A second AKM320 stacked above the first as an upper manual. By default the two interchange as one scale — two 17-note layouts stacked become a 34-note scale.">stacked</button>
       </div>
 
       <!-- ---- each device is its own keyboard ----
@@ -419,7 +429,7 @@
         <div class="tune-h">Which device the panel edits</div>
         <div id="rig-units" class="rigmap"></div>
         <button class="wide" id="rig-copy" style="width:100%;margin-top:7px"
-          title="Give every other device the same layout as the one being edited — the same key types, widths and scale. Each device keeps its own numbering, because that is its relationship to the others rather than part of its keyboard.">⧉ Copy This Layout to the Others</button>
+          title="Copies this device's key types, widths and scale to every other device. Each keeps its own numbering.">⧉ Copy This Layout to the Others</button>
 
         <!-- ---- and its relationship to the others ----
              note(i) = base + step x i, and the rig reads both off its own
@@ -436,13 +446,13 @@
       <legend>Layout Presets</legend>
       <div class="row">
         <div><select id="preset"
-          title="Every preset the app carries. The list comes from presets-shared.js beside index.html, so it is the same list for everyone who opens this app — not this browser's own. A dot marks one saved here that the file has not been told about yet."></select></div>
+          title="All presets, shared via presets-shared.js. A dot marks one saved locally that isn't in that file yet."></select></div>
         <button id="preset-del" style="padding:4px 8px"
-          title="Delete the selected preset. Anybody may delete any of them, including the ones the app shipped with — write the presets file afterwards and it is gone for every user.">⌫</button>
+          title="Delete the selected preset. Write the presets file afterward to remove it for every user.">⌫</button>
       </div>
       <p class="hint" id="preset-pending" style="display:none"></p>
       <button class="wide" id="preset-write" style="width:100%;margin-top:7px;display:none"
-        title="Write presets-shared.js — the app's own preset list — from the presets currently here, so that saves and deletions made in this browser become the list every user gets. Where the browser allows it you are asked for the file itself and it is written in place; otherwise it downloads and has to be put beside index.html.">⬇ Write Presets File</button>
+        title="Writes presets-shared.js from the current preset list, so local saves/deletions apply for every user. Saves in place if the browser allows it, otherwise downloads for you to put beside index.html.">⬇ Write Presets File</button>
       <button class="primary wide" id="clear-all" style="width:100%;margin-top:9px"
         title="32 identical white keys, narrowed so that all 32 fit inside spine half A + half B">
         ↺ Clear All (32 White Keys)</button>
@@ -461,7 +471,7 @@
     <fieldset>
       <legend>Repeating Layout</legend>
       <div class="presswrap"
-        title="How many notes there are in the scale before it repeats. At 32 the whole keyboard is one arrangement; below that, the key types of the first N notes are the period, stamped out again and again up to the right.">
+        title="Notes in the scale before it repeats. Below 32, the first N key types are the period, repeated up the keyboard.">
         <div class="pressrow">
           <label for="period">Notes in Scale</label>
           <span id="period-v" class="pressval">32</span>
@@ -482,7 +492,7 @@
       <div id="wbar"></div>
       <div id="wtable" style="display:none"></div>
       <button class="primary wide" id="wreset" style="width:100%;margin-top:9px"
-        title="The bar is the four classes drawn to scale against one another. Drag a divider to trade width between two of them; the size solve then re-fits the whole keyboard, so widening one class narrows the others rather than running off the spine. An accidental stops at 0.86× a white — past that the white has no rear left to cut away for it.">
+        title="Relative widths of the four key classes. Drag a divider to trade width between two; the rest of the keyboard re-fits. Accidentals cap at 0.86× a white.">
         ↺ Reset to Standard Scaling</button>
       <button class="primary wide" id="kreset" style="width:100%;margin-top:6px"
         title="Reset keys widths set in draggable bottom bar and/or senor press optimization">
@@ -493,7 +503,7 @@
           <label for="presspct">Optimize for Sensor Press</label>
           <span id="presspct-v" class="pressval">0%</span>
         </div>
-        <input id="presspct" type="range" min="0" max="100" step="1" value="0">
+        <input id="presspct" type="range" min="0" max="100" step="1" value="45">
         <p class="hint" id="pressinfo" style="display:none">0% is your own arrangement · 100% stands every
           key as square over its sensor pad as the widths allow.</p>
       </div>
@@ -506,17 +516,13 @@
     <fieldset>
       <legend>Bevel: break the playing edge<span id="bevel-who"></span></legend>
       <div class="presswrap"
-        title="Every keyboard instrument breaks the top edge of its keys — a sharp arris cuts the finger on a glissando and chips in use. This runs a rounded-over break round the playing surface of each key: the up-facing face that reaches the key's greatest z, and nothing else. The spine, the feet, the sensor press, the tongues that plug into the spine and the whole underside are left exactly as drafted. The round is the same all the way round the playing surface, the arris at the back of the key included. Where the key's own outline turns sharply — a notch cut around a neighbouring accidental — the round cannot follow the corner exactly and that key is flagged in a warning rather than silently mis-rounded.">
+        title="Rounds over the top edge of each key's playing surface only (not the spine, feet, sensor press, or underside). Runs up to 2mm, capped by each key's own wall clearance (whites 1.539mm, accidentals 4.5mm) — the line below the slider shows the actual cut. Sharp corners in a key's outline may block the full round; flagged when that happens.">
         <div class="pressrow">
           <label for="bevel">Edge Break</label>
           <span id="bevel-v" class="pressval">square</span>
         </div>
-        <input id="bevel" type="range" min="0" max="1" step="0.025" value="0">
-        <p class="hint" id="bevelinfo">Square at 0 · a rounded-over break, the
-          way a keyboard's own edge is finessed by hand · a piano natural is
-          broken about half a millimetre, a harpsichord's rather less · held
-          under the thinnest shell wall so it cannot come through into the
-          cavity.</p>
+        <input id="bevel" type="range" min="0" max="2" step="0.025" value="2">
+        <p class="hint" id="bevelinfo"></p>
       </div>
       <button class="primary wide" id="bevel-reset" style="width:100%;margin-top:9px"
         title="Back to the drafted square arris.">↺ Leave the Edge Square</button>
@@ -530,7 +536,7 @@
         <button data-part="black">black .stl</button>
         <button data-part="gray">gray .stl</button>
         <button data-part="spine">spine .stl</button>
-        <button class="primary wide" id="copy-py" title="The Python log is a runnable Blender script: a readable data header (datum, size law, every key, spine, feet) followed by a builder that rebuilds the design from the Key Type Categories collection.">⧉ Copy Python Log</button>
+        <button class="primary wide" id="copy-py" title="A runnable Blender script that rebuilds the design from the Key Type Categories collection.">⧉ Copy Python Log</button>
         <button class="wide" id="dl-py">⬇ Save design log (.py)</button>
         <button class="wide" id="save-preset" title="Save the current layout, widths and scale as a named preset in the Layout Presets menu above">⬇ Save to Presets</button>
       </div>
@@ -629,7 +635,7 @@
                     title="Allow half-sharp and half-flat spellings where the division has them">show halves</button>
                 </div>
                 <div class="presswrap"
-                  title="Which step of the EDO the first key carries. The steps keep their order and their frequencies; rotating slides the whole run along the keyboard, so a different degree comes to rest under key 0.">
+                  title="EDO step of the first key. Rotating slides the run along the keyboard.">
                   <div class="pressrow">
                     <label>&#8597; Rotate by EDO Step</label>
                     <span class="rotbtns">
@@ -664,12 +670,12 @@
 
                 <div class="tune-h">Custom Scale</div>
                 <textarea id="t-scale" rows="3" spellcheck="false"
-                  title="One octave of ratios, separated by spaces, commas or newlines. They are folded into [1, 2) and sorted, so the order you type them in does not matter; 1/1 is always included."
+                  title="One octave of ratios, separated by spaces, commas or newlines. Folded into [1, 2) and sorted; 1/1 always included."
                   placeholder="e.g. 1/1 9/8 5/4 4/3 3/2 5/3 15/8">1/1 9/8 5/4 4/3 3/2 5/3 15/8</textarea>
                 <div class="tune-read" id="t-scale-read" style="margin-top:6px"></div>
 
                 <div class="presswrap"
-                  title="Which degree of the scale the first key carries. The ratios keep their order; rotating slides the scale along the keyboard, so a different degree comes to rest under key 0 as 1/1.">
+                  title="Scale degree of the first key. Rotating slides the scale along the keyboard.">
                   <div class="pressrow">
                     <label>&#8597; Rotate 1/1 by Step</label>
                     <span class="rotbtns">
@@ -692,7 +698,7 @@
                    apps cannot come to offer different shapes. -->
               <label class="tune-inline" for="s-family">Wave</label>
               <select id="s-family"
-                title="Wavetable reads a fixed waveform at pitch, so how it sounds does not depend on how loud it is. Filtered wavetable is a sine phase-modulated by a low-passed copy of its own output — driven by the signal itself, so a quiet note is very nearly a sine and a loud one folds into a bright buzz, off the envelope below."></select>
+                title="Wavetable: fixed waveform, volume-independent. Filtered wavetable: sine phase-modulated by its own low-passed output, so quiet notes stay near-sine and loud ones buzz."></select>
               <canvas id="s-wave" class="scope" style="margin-top:9px"></canvas>
               <div class="pressrow" style="margin-top:7px">
                 <label for="s-timbre" id="s-label" style="margin:0;font-weight:600;
@@ -734,26 +740,26 @@
         </div>
       </div>
       <div id="camread"></div>
-      <div id="viewbar2">
-        <div class="grp" id="visgrp"></div>
-        <div class="sep"></div>
-        <!-- ---- the air between two devices, taken out ----
-             Only ever offered when there is a side-by-side pair to close up:
-             stacking is separated up the Z axis, and one keyboard has nothing
-             to be flush with. -->
-        <div class="grp" id="flushgrp" style="display:none">
-          <label class="vis" id="flushlab"
-            title="Close the 20 mm of air the rig normally leaves between two devices set side by side, down to the 1.5 mm that stands between any two adjacent white keys — so the last key of the left device and the first key of the right are spaced exactly as neighbours on one keyboard are, and the pair reads as one continuous keybed. A way of looking at the register, not a way of building it: they are still two AKM320s with two spines, and the 20 mm is what that costs.">
-            <input type="checkbox" id="flush">flush</label>
-        </div>
-        <div class="sep" id="flushsep" style="display:none"></div>
-        <div class="grp"><span style="color:var(--dim)">separate combs</span>
-          <input id="explode" type="range" min="0" max="60" step="1" value="0">
-          <span id="explodeval" style="color:var(--dim);width:34px">0 mm</span></div>
-      </div>
       <div id="inspect"></div>
     </div>
     <div id="strip"><div id="stripInner"></div></div>
+    <div id="viewbar2">
+      <div class="grp" id="visgrp"></div>
+      <div class="sep"></div>
+      <!-- ---- the air between two devices, taken out ----
+           Only ever offered when there is a side-by-side pair to close up:
+           stacking is separated up the Z axis, and one keyboard has nothing
+           to be flush with. -->
+      <div class="grp" id="flushgrp" style="display:none">
+        <label class="vis" id="flushlab"
+          title="Closes the 20mm gap between side-by-side devices to 1.5mm — the same spacing as adjacent white keys — so the pair reads as one keybed. Still two separate AKM320s and spines.">
+          <input type="checkbox" id="flush">flush</label>
+      </div>
+      <div class="sep" id="flushsep" style="display:none"></div>
+      <div class="grp"><span style="color:var(--dim)">separate combs</span>
+        <input id="explode" type="range" min="0" max="60" step="1" value="0">
+        <span id="explodeval" style="color:var(--dim);width:34px">0 mm</span></div>
+    </div>
   </div>
   </div>
 </div>
@@ -2700,7 +2706,7 @@ function showPress(sol){
  *  It is also the one control here that cannot make the keyboard not fit.
  *  The round is cut INTO the drafted silhouette — no vertex of it stands
  *  outside the key as drawn — so the widths, the gaps between keys and the
- *  size solve are the same at 1.0 mm as they are at 0.  Nothing has to be
+ *  size solve are the same at 2.0 mm as they are at 0.  Nothing has to be
  *  re-solved when it moves; the profiles are simply rebuilt.
  */
 function bevelNow(){ return XD.bevelOf(design); }
@@ -2711,18 +2717,28 @@ function showBevel(){
   if (v) v.textContent = b > 0 ? b.toFixed(2) + ' mm' : 'square';
   const info = $('bevelinfo');
   if (!info) return;
-  /* WHAT IT IS ACTUALLY CUT AT.  A thin split key would lose its playing
-   * surface to two full chamfers, so the layout holds the break under a
-   * share of the narrowest class — say so rather than let the slider read
-   * a number the keys are not built at. */
-  const at = L && L.bevel != null ? L.bevel : b;
-  info.innerHTML = b > 0 && at < b - 5e-4
-    ? `cut at ${at.toFixed(2)} mm — held back so the narrowest key keeps a ` +
-      `playing surface between its two rounds`
-    : "Square at 0 · a rounded-over break, the way a keyboard's own edge is " +
-      "finessed by hand · a piano natural is broken about half a millimetre, " +
-      "a harpsichord's rather less · held under the thinnest shell wall so " +
-      'it cannot come through into the cavity.';
+  /* WHAT IT IS ACTUALLY CUT AT, which is not always what was asked for.
+   * Two things hold it back and they hold back different keys: a thin
+   * split key would lose its playing surface to two full rounds, so the
+   * layout holds the break under a share of the narrowest class; and each
+   * key is then held to the wall under its own arris, which is 1.539 mm on
+   * a white's rear and far more on an accidental.  So the line says the
+   * range the keys were actually built at rather than letting the slider
+   * read a number nothing was cut to. */
+  const at = L && L.bevel != null ? L.bevel : b;      // the ask, at these widths
+  const cut = L && L.bevelCut;                        // what the keys were cut at
+  const held = at < b - 5e-4 ||
+    (cut && (cut.hi < b - 5e-4 || cut.lo < cut.hi - 5e-4));
+  if (!(b > 0) || !held) { info.innerHTML = ''; return; }
+  info.innerHTML =
+    cut && cut.lo < cut.hi - 5e-4
+      ? `cut at ${cut.hi.toFixed(2)} mm, and ${cut.lo.toFixed(2)} mm on the keys ` +
+        `whose own wall will not carry more`
+    : cut && cut.hi < at - 5e-4
+      ? `cut at ${cut.hi.toFixed(2)} mm — as deep as the wall under the arris ` +
+        `will carry`
+      : `cut at ${(cut ? cut.hi : at).toFixed(2)} mm — held back so the ` +
+        `narrowest key keeps a playing surface between its two rounds`;
 }
 
 (function(){
@@ -2874,9 +2890,9 @@ function rebuild(){
     `<b>${L.spineColours.length}</b> key colour${L.spineColours.length===1?'':'s'} ` +
     `(${L.spineColours.join(' + ')}) → <b>${L.spineKind}</b> type spine, ` +
     `${L.layers} layer${L.layers===1?'':'s'} ` +
-    `<span title="One slab per key colour, each key's rear tongue plugging into the layer for its own colour. Gray always takes all three: its tongue is the bottom band and black's sits above it, so the two are stacked, not alternatives.">ⓘ</span><br>` +
+    `<span title="One slab per key colour. Gray's tongue is the bottom band, with black's stacked above it — not an alternative.">ⓘ</span><br>` +
     `widest key→foot reach <b>${L.footDrift.toFixed(2)} mm</b> (key ${L.footDriftAt}) ` +
-    `<span title="Split pairs share one X and still reach two feet 11.3 mm apart. That gap is closed by the sensor press: the drafted pad lofted up to the pair face popped off the key's own underside deck, capped into a watertight solid, with the dome window left open the whole way.">ⓘ</span><br>` +
+    `<span title="Split pairs share one X but keep two feet 11.3 mm apart, closed by the sensor press pad.">ⓘ</span><br>` +
     Object.keys(c).map(k=>`${c[k]}× ${k}`).join(' · ');
   wn.innerHTML = L.warnings.length
     ? L.warnings.map(w=>`<div class="warning">${w}</div>`).join('')
@@ -3443,6 +3459,7 @@ themeBtn.onclick=()=>{
   const light=bgColor===BG_LIGHT;
   bgColor=light?BG_DARK:BG_LIGHT;
   themeBtn.textContent=light?'⏾':'●';
+  document.body.classList.toggle('bright', !light);
   draw();
 };
 

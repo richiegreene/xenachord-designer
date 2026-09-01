@@ -1483,11 +1483,15 @@
    *  far it is taken.                                                    *
    *                                                                      *
    *  WHAT IS BEVELLED, AND WHAT IS NOT.  Only the key's own playing       *
-   *  surface — the up-facing face that reaches the key's greatest z, the  *
-   *  one the performer's finger lands on.  Its boundary loop is the arris *
-   *  between that surface and everything falling away from it (the side   *
-   *  walls with their draft, the sloped nose, the front lip), and that    *
-   *  loop is what the chamfer replaces.  Nothing else in the design is    *
+   *  surface — and on an accidental that is TWO drafted faces, the flat   *
+   *  top and the diagonal nose the finger runs down towards the player.   *
+   *  They are welded into one region first, so the break is taken round   *
+   *  the region's outer boundary and the ridge they share is rolled       *
+   *  instead: the surface falls away under the hand in one continuous     *
+   *  sweep rather than as two separately rounded plates standing proud of *
+   *  each other.  Everything below that boundary — the side walls with    *
+   *  their draft, the front lip — keeps its drafted line.  Nothing else   *
+   *  in the design is                                                     *
    *  touched: not the spine, not the feet, not the sensor press, not the  *
    *  tongues that plug into the spine, not the underside or its ribbing,  *
    *  and not the internal cavity — a key beside this one meets the same   *
@@ -1511,14 +1515,20 @@
    *  preview, the STLs and the generated Blender log all get it from the  *
    *  one place, with nothing to keep in step.                            *
    *                                                                      *
-   *  HOW FAR IT MAY BE TAKEN.  Two walls decide it.  The white's front    *
-   *  lip is WALL below its top, so a break deeper than a wall would come  *
-   *  through into the cavity; and its rear wall is 1.539 mm between the   *
-   *  playing surface and the tongue, which a break at both ends of that   *
-   *  span narrows.  1.0 mm is past what a keyboard's own break usually    *
-   *  is — a piano natural is broken about half a millimetre, a            *
-   *  harpsichord's rather less — held there rather than at the wall's own *
-   *  thickness so a slip of the slider cannot open the cavity.           *
+   *  HOW FAR IT MAY BE TAKEN.  The slider reaches BEVEL_MAX, and EACH KEY *
+   *  IS THEN HELD TO ITS OWN WALL — see bevelRoom.  The arris drops by    *
+   *  the full radius, so the wall it runs down has to be that deep before *
+   *  it meets whatever the profile does next; past that the wall inverts  *
+   *  and the key is no longer a solid the slicer can read.  The white is  *
+   *  the tight one: 1.539 mm of rear wall between its playing surface and *
+   *  the roof of the mortice its tongue plugs into (its front lip gives   *
+   *  2.0, its sides far more), while an accidental stands 4.5 mm or more  *
+   *  clear of anything under its nose.  So a full 2 mm break is real on   *
+   *  the accidentals and the white takes the deepest round its own rear   *
+   *  wall will carry — which is what a maker does by hand, finessing each *
+   *  key to the wood that is actually there — rather than every key being *
+   *  held down to the thinnest one, or the cavity being opened by a slip  *
+   *  of the slider.                                                      *
    *                                                                      *
    *  IT IS A FILLET, NOT A FLAT CHAMFER.  A true quarter-circle profile —  *
    *  the shape a round-over cutter or a hand-sanded key actually leaves —  *
@@ -1537,10 +1547,11 @@
    *  this design actually uses and says so once in a warning, rather than  *
    *  rounding badly and saying nothing.                                   *
    * ==================================================================== */
-  const BEVEL_MAX = 1.0;             // mm
+  const BEVEL_MAX = 2.0;             // mm
   const BEVEL_EPS = 1e-6;
   const BEVEL_SEGMENTS = 8;          // flat strips along the quarter circle
   const BEVEL_HARD_TURN = 1.9;       // miter/radius past which it is noted
+  const BEVEL_KEEP = 0.15;           // wall left standing under the deepest break
 
   let BEVEL = 0;
   /** how far the playing edge is broken, in mm; clamped to [0, BEVEL_MAX] */
@@ -1595,6 +1606,117 @@
     return out;
   }
 
+  /* what each profile's own walls will carry, measured once and kept */
+  const ROOM_CACHE = new WeakMap();
+
+  /**
+   * HOW DEEP A BREAK THIS PROFILE CAN ACTUALLY TAKE.
+   *
+   * The arris does not stay where it was drawn: the round is tangent to
+   * the wall, so the boundary of the playing surface DROPS by the full
+   * radius and the wall below it gives that much up.  A wall has only so
+   * much to give — the white's rear wall has 1.539 mm before it reaches
+   * the roof of the mortice its tongue plugs into — and a break deeper
+   * than that does not cut a bigger round, it drags the arris PAST the
+   * feature below and the wall doubles back on itself.  The key stays
+   * edge-closed while it does, which is exactly why it is worth measuring
+   * rather than trusting: the count says nothing and the solid is ruined.
+   *
+   * What is measured is the drop to the first vertex the profile holds
+   * DIRECTLY BENEATH an arris vertex — same alpha, same beta, so the two
+   * stand over one another at every width the profile spans, not just at
+   * the drafted one.  A neighbour that is merely lower and off to one side
+   * is no obstacle: it lies in the wall's own plane and the wall simply
+   * changes shape around it, which is what an accidental's stepped
+   * shoulder does under its nose.  A profile with nothing under its arris
+   * at all is held at BEVEL_MAX like everything else.
+   *
+   * BEVEL_KEEP comes off the drop.  Taken to the drop itself the round is
+   * tangent to the wall exactly where the wall ends, which leaves the two
+   * meeting at nothing — a feather edge to print, and a tangency for the
+   * arithmetic to fall the wrong side of.  A sliver of real wall under the
+   * round costs a seventh of a millimetre and is worth having.
+   */
+  function bevelRoom(p) {
+    const hit = ROOM_CACHE.get(p);
+    if (hit != null) return hit;
+
+    const w = p.w0 || 1;
+    const V = [];
+    for (let i = 0; i < p.nv; i++) {
+      const j = i * 4;
+      V.push([p.v[j] + p.v[j + 1] * w, p.v[j + 2], p.v[j + 3]]);
+    }
+    const F = [];
+    for (let k = 0; k < p.f.length;) { const n = p.f[k++]; F.push(p.f.slice(k, k + n)); k += n; }
+
+    const tops = topFaces(V, F);
+    if (!tops.length) { ROOM_CACHE.set(p, BEVEL_MAX); return BEVEL_MAX; }
+
+    /* the playing faces are welded into regions and the arris taken round
+     * the region's outer boundary, the same way the break itself does it —
+     * an edge in the middle of a region is not an arris and drops nothing */
+    const ek = (i, j) => (i < j ? i + ':' + j : j + ':' + i);
+    const uf = new Map();
+    const find = x => { while (uf.get(x) !== x) { uf.set(x, uf.get(uf.get(x))); x = uf.get(x); } return x; };
+    for (const fi of tops) uf.set(fi, fi);
+    const heldBy = faces => {
+      const m = new Map();
+      for (const fi of faces) {
+        const r = F[fi];
+        for (let i = 0; i < r.length; i++) {
+          const k = ek(r[i], r[(i + 1) % r.length]);
+          const a = m.get(k);
+          if (a) a.push(fi); else m.set(k, [fi]);
+        }
+      }
+      return m;
+    };
+    for (const [, fs] of heldBy(tops)) {
+      if (fs.length !== 2) continue;
+      const a = find(fs[0]), c = find(fs[1]);
+      if (a !== c) uf.set(a, c);
+    }
+    const regions = new Map();
+    for (const fi of tops) {
+      const rt = find(fi);
+      const a = regions.get(rt);
+      if (a) a.push(fi); else regions.set(rt, [fi]);
+    }
+    const arris = new Set();
+    for (const [, faces] of regions) {
+      const eF = heldBy(faces);
+      for (const fi of faces) {
+        const r = F[fi];
+        for (let i = 0; i < r.length; i++) {
+          const u = r[i], v = r[(i + 1) % r.length];
+          if (eF.get(ek(u, v)).length === 1) { arris.add(u); arris.add(v); }
+        }
+      }
+    }
+
+    const over = (a, c) =>                       // c stands directly under a
+      Math.abs(p.v[a * 4]     - p.v[c * 4])     < 1e-4 &&
+      Math.abs(p.v[a * 4 + 1] - p.v[c * 4 + 1]) < 1e-6 &&
+      Math.abs(p.v[a * 4 + 2] - p.v[c * 4 + 2]) < 1e-4;
+
+    let room = BEVEL_MAX;
+    for (const r of F)
+      for (let i = 0; i < r.length; i++) {
+        const u = r[i], v = r[(i + 1) % r.length];
+        for (const [a, c] of [[u, v], [v, u]]) {
+          if (!arris.has(a)) continue;
+          const d = V[a][2] - V[c][2];
+          if (d > BEVEL_EPS && over(a, c)) {
+            const r = Math.max(0, d - BEVEL_KEEP);
+            if (r < room) room = r;
+          }
+        }
+      }
+    ROOM_CACHE.set(p, room);
+    return room;
+  }
+
   /**
    * Break the playing edge of one profile by `b` mm.
    *
@@ -1606,6 +1728,13 @@
    * against the spine, included.
    */
   function bevelProfile(p, b) {
+    /* HELD TO THIS KEY'S OWN WALL.  The ask is the same for every key on
+     * the keyboard; what it comes out at is not, because the wall under
+     * the arris is not.  Clamping here rather than at the slider means the
+     * preview, the STLs and the log all read the break off the profile
+     * that was actually built, and the cache is keyed on what was cut. */
+    if (!(b > BEVEL_EPS)) return p;
+    b = Math.min(b, bevelRoom(p));
     if (!(b > BEVEL_EPS)) return p;
     let per = BEVEL_CACHE.get(p);
     if (!per) BEVEL_CACHE.set(p, per = new Map());
@@ -1665,16 +1794,6 @@
 
     const tops = topFaces(V, F);
     if (!tops.length) { per.set(key, p); return p; }
-    /* Raised and stepped key types can legitimately expose more than one
-     * up-facing top loop.  They are still one playing surface broken in
-     * multiple pieces, not a signal to skip beveling the whole key.  Each
-     * loop is handled independently below, so the chamfer runs round each
-     * valid face instead of being disabled by a shared boundary vertex.
-     *
-     * The only remaining cases to reject are genuinely malformed top rings,
-     * where a loop would collapse before it can be inset; those are rare and
-     * should fail explicitly rather than silently leaving the profile square.
-     */
 
     /* mutable copies — alpha/beta/y/z per vertex, rings as arrays */
     const nv = [];
@@ -1689,122 +1808,415 @@
      * corners each time it does. */
     let hard = 0;
 
-    for (const fi of tops) {
-      const ring = nf[fi];
-      if (ring.length < 3) continue;
-      const N = ringNormal(V, ring);
-      /* the face's own plane, so an inset vertex stays ON the playing
-       * surface however that surface is sloped */
-      const gx = N[2] !== 0 ? -N[0] / N[2] : 0, gy = N[2] !== 0 ? -N[1] / N[2] : 0;
-
-      /* THE ARRIS IS ITS CORNERS, NOT ITS VERTICES.  A drafted loop carries
-       * vertices that lie flat on a straight run — welded-out steps, seams
-       * a neighbouring wall still needs — and offsetting one of those gives
-       * a point collinear with its neighbours, which the ear clipper drops
-       * as a zero-area ear while the chamfer beside it keeps.  That is a
-       * T-junction, and a T-junction is a hole.  So the offset is worked
-       * out on the CORNERS alone; the flat vertices stay on the arris,
-       * where the walls still find them, and the chamfer face beside them
-       * simply runs the whole straight segment.                          */
-      const corner = [];
-      for (let i = 0; i < ring.length; i++) {
-        const P = V[ring[i]], A = V[ring[(i + ring.length - 1) % ring.length]],
-              B = V[ring[(i + 1) % ring.length]];
-        const l1 = Math.hypot(P[0] - A[0], P[1] - A[1]);
-        const l2 = Math.hypot(B[0] - P[0], B[1] - P[1]);
-        const cr = (P[0] - A[0]) * (B[1] - P[1]) - (P[1] - A[1]) * (B[0] - P[0]);
-        if (l1 > 1e-7 && l2 > 1e-7 && Math.abs(cr) / (l1 * l2) > 1e-6) corner.push(i);
-      }
-      const m = corner.length;
-      if (m < 3) continue;
-
-      /* per corner: the full-displacement miter offset (dx, dy), same
-       * direction the flat chamfer used — the round runs along it rather
-       * than along each edge's own normal, so the two walls either side of
-       * a corner still meet the fillet on a clean line.  levels[k][c] is
-       * that corner's vertex at arc step k (0 = the dropped arris itself,
-       * BEVEL_SEGMENTS = fully inset, on the surface). */
-      const mdx = new Array(m), mdy = new Array(m);
-      for (let c = 0; c < m; c++) {
-        const i = corner[c];
-        const P = V[ring[i]], A = V[ring[corner[(c + m - 1) % m]]],
-              B = V[ring[corner[(c + 1) % m]]];
-        /* inward normals of the two edges meeting here.  The loop is wound
-         * CCW seen from above (it is up-facing), so the interior lies to
-         * the LEFT of each edge and (-dy, dx) points into it. */
-        const e1 = [P[0] - A[0], P[1] - A[1]], e2 = [B[0] - P[0], B[1] - P[1]];
-        const l1 = Math.hypot(e1[0], e1[1]) || 1, l2 = Math.hypot(e2[0], e2[1]) || 1;
-        const n1 = [-e1[1] / l1, e1[0] / l1], n2 = [-e2[1] / l2, e2[0] / l2];
-        const det = n1[0] * n2[1] - n1[1] * n2[0];
-        if (Math.abs(det) < 1e-9) { mdx[c] = b * n1[0]; mdy[c] = b * n1[1]; }
-        else { mdx[c] = b * (n2[1] - n1[1]) / det; mdy[c] = b * (n1[0] - n2[0]) / det; }
-        /* NOTING A HARD TURN.  The miter is b / sin(half the turn), so a
-         * corner tight enough to throw the offset well past the radius is
-         * one a round of that radius cannot follow: the fillet pinches on
-         * a convex point and self-overlaps on a concave one.  A square
-         * corner is b·sqrt2 and perfectly fine; past BEVEL_HARD_TURN it is
-         * tallied rather than silently rounded as though it were gentle. */
-        if (Math.hypot(mdx[c], mdy[c]) > BEVEL_HARD_TURN * b) hard++;
-      }
-
-      /* ---- THE ROUND ITSELF ----
-       *
-       * In (u = inward from the drafted silhouette, v = down from the top
-       * plane), the drafted arris is the sharp corner at (0, 0).  A
-       * round-over of radius b is the quarter circle centred on (b, b):
-       *
-       *     u = b(1 - cos t)      v = b(1 - sin t)      t: 0 -> pi/2
-       *
-       * tangent to the wall at (0, b) and to the playing surface at
-       * (b, 0), so it meets both with no crease at either end.  Its
-       * midpoint is (0.293b, 0.293b) — INSIDE the flat chamfer's u + v = b,
-       * because a round-over takes less material off the corner than a
-       * chamfer of the same setback does.  Getting that wrong is what makes
-       * a "round" come out looking like a chamfer: use sin for both and
-       * u + v = b for every t, which is the straight line exactly.
-       */
-      const levels = [];               // levels[k][c] -> vertex index
-      levels[0] = corner.map(i => ring[i]);   // t = 0: the arris, pre-drop
-      for (let k = 1; k <= BEVEL_SEGMENTS; k++) {
-        const t = (k / BEVEL_SEGMENTS) * (Math.PI / 2);
-        const u = 1 - Math.cos(t), drop = b * (1 - Math.sin(t));
-        levels[k] = corner.map((i, c) => {
-          const dx = mdx[c] * u, dy = mdy[c] * u;
-          nv.push({ a: nv[ring[i]].a + dx, b: nv[ring[i]].b,
-                    y: nv[ring[i]].y + dy,
-                    z: V[ring[i]][2] + gx * dx + gy * dy - drop });
-          return nv.length - 1;
-        });
-      }
-
-      /* t = 0 is (u 0, v b): the arris keeps its line and drops the full
-       * radius, which is where the round leaves the wall tangentially */
-      for (let i = 0; i < ring.length; i++) nv[ring[i]].z -= b;
-
-      for (let c = 0; c < m; c++) {
-        const d = (c + 1) % m;
-        /* level 0 -> level 1 runs the WHOLE segment of arris between two
-         * corners, any vertex still standing on it included, and closes on
-         * level 1's single edge.  It is fanned from level 1's corner
-         * rather than from the arris, because a fan from the arris would
-         * lay its first triangle along the arris itself, where collinear
-         * points make it zero-area and it is dropped — and a dropped
-         * triangle is a hole. */
-        const path = [];
-        for (let i = corner[c]; ; i = (i + 1) % ring.length) {
-          path.push(ring[i]);
-          if (i === corner[d]) break;
+    /* A NEW VERTEX, OFFSET FROM ONE THAT IS ALREADY THERE.  The offset goes
+     * into alpha, which is millimetres outright, and beta — the part of x
+     * that is a fraction of the key's width — is inherited unchanged.  So
+     * the new point tracks its source across every width the profile spans
+     * and the break stays the same size on a narrow key as on a wide one.
+     * V is grown alongside, because everything below reads the mesh as it
+     * now stands rather than as it was drafted. */
+    const addFrom = (src, dx, y, z) => {
+      const q = { a: nv[src].a + dx, b: nv[src].b, y, z };
+      nv.push(q);
+      V.push([q.a + q.b * w, y, z]);
+      return nv.length - 1;
+    };
+    const ekey = (i, j) => (i < j ? i + ':' + j : j + ':' + i);
+    const sub = (a, c) => [a[0] - c[0], a[1] - c[1], a[2] - c[2]];
+    const dot = (a, c) => a[0] * c[0] + a[1] * c[1] + a[2] * c[2];
+    const cross = (a, c) => [a[1] * c[2] - a[2] * c[1],
+                             a[2] * c[0] - a[0] * c[2],
+                             a[0] * c[1] - a[1] * c[0]];
+    const unit = a => {
+      const L = Math.hypot(a[0], a[1], a[2]) || 1;
+      return [a[0] / L, a[1] / L, a[2] / L];
+    };
+    const centroid = r => {
+      const c = [0, 0, 0];
+      for (const i of r) { c[0] += V[i][0]; c[1] += V[i][1]; c[2] += V[i][2]; }
+      return [c[0] / r.length, c[1] / r.length, c[2] / r.length];
+    };
+    /** the faces of a ring, by the edges only one of a set of faces holds */
+    const edgeFaces = faces => {
+      const m = new Map();
+      for (const fi of faces) {
+        const r = nf[fi];
+        for (let i = 0; i < r.length; i++) {
+          const k = ekey(r[i], r[(i + 1) % r.length]);
+          const a = m.get(k);
+          if (a) a.push(fi); else m.set(k, [fi]);
         }
-        for (let k = 0; k + 1 < path.length; k++)
-          nf.push([path[k], path[k + 1], levels[1][c]]);
-        nf.push([path[path.length - 1], levels[1][d], levels[1][c]]);
-
-        /* every strip after that is a plain quad between two corner-only
-         * rings — the round's remaining facets */
-        for (let k = 1; k < BEVEL_SEGMENTS; k++)
-          nf.push([levels[k][c], levels[k][d], levels[k + 1][d], levels[k + 1][c]]);
       }
-      nf[fi] = levels[BEVEL_SEGMENTS].slice();   // the surface is now the inset loop
+      return m;
+    };
+
+    /* ---- THE PLAYING SURFACE IS ONE REGION, NOT A PILE OF FACES ----
+     *
+     * An accidental's playing surface is drafted as two faces: the flat top
+     * and the diagonal nose the finger slides down towards the player.  They
+     * are one surface, and rounding each of them separately is what makes
+     * the key bulge: every face gets its own rim, so the two rims meet back
+     * to back along the ridge they share and stand proud of it, and the key
+     * reads as a stack of rounded plates rather than one shape falling away
+     * under the hand.  So the faces that reach the playing edge are welded
+     * into regions first — anything sharing an edge is one surface — and it
+     * is the REGION's outer boundary that is broken.  An edge in the middle
+     * of a region is not an arris and gets no chamfer.
+     * -------------------------------------------------------------- */
+    const uf = new Map();
+    const find = x => { while (uf.get(x) !== x) { uf.set(x, uf.get(uf.get(x))); x = uf.get(x); } return x; };
+    for (const fi of tops) uf.set(fi, fi);
+    for (const [, fs] of edgeFaces(tops)) {
+      if (fs.length !== 2) continue;
+      const a = find(fs[0]), c = find(fs[1]);
+      if (a !== c) uf.set(a, c);
+    }
+    const regions = new Map();
+    for (const fi of tops) {
+      const rt = find(fi);
+      const a = regions.get(rt);
+      if (a) a.push(fi); else regions.set(rt, [fi]);
+    }
+
+    /* ---- AND THE RIDGE INSIDE IT IS ROLLED, NOT LEFT SHARP ----
+     *
+     * Welding the faces together stops the bulge, but on its own it leaves
+     * the ridge between top and nose a hard arris in the middle of the
+     * playing surface — the very edge the finger crosses on its way to the
+     * player.  A real key has no such crease: the top rolls over into the
+     * slope in one continuous surface.  So every interior edge of a region
+     * that actually turns, and turns OUTWARD, is replaced by a quarter-round
+     * of the same radius the arris gets: each face is trimmed back by r
+     * along its own plane, and CREASE_SEGMENTS strips are swept round the
+     * arc that is tangent to both.  It takes material off the ridge and adds
+     * none, so the key's silhouette, its widths and every clearance are the
+     * same as they were drafted.
+     *
+     * At the two ends the ridge runs out onto the region's boundary, where
+     * the side wall stands.  The wall's own ring gets the arc's points
+     * spliced in where the ridge vertex used to be, so the wall follows the
+     * roll instead of tearing away from it, and the boundary loop that the
+     * chamfer below walks then runs over the arc as a matter of course —
+     * one loop, no seam, and the same vertex count on both sides of every
+     * edge.  A ridge that branches, closes on itself, dies inside the
+     * surface, or is held by a face outside the region is left alone rather
+     * than rolled badly.
+     * -------------------------------------------------------------- */
+    const CREASE_MIN = 0.25;                 // rad of turn worth rolling
+    const CREASE_SEGMENTS = BEVEL_SEGMENTS;
+
+    /** roll one ordered ridge between faces fa and fb; true if it was done */
+    function rollChain(chain, fa, fb, faces) {
+      const n = chain.length;
+      const na = ringNormal(V, nf[fa]), nb = ringNormal(V, nf[fb]);
+      /* nothing outside the two faces may hold a vertex in the middle of the
+       * ridge, and both ends must be held by something (the wall) that can
+       * take the arc; otherwise the roll would open a hole */
+      const endFaces = [[], []];
+      for (let fi = 0; fi < nf.length; fi++) {
+        if (fi === fa || fi === fb) continue;
+        const r = nf[fi];
+        for (let i = 0; i < n; i++) {
+          if (r.indexOf(chain[i]) < 0) continue;
+          if (i > 0 && i < n - 1) return false;
+          endFaces[i === 0 ? 0 : 1].push(fi);
+        }
+      }
+      if (!endFaces[0].length || !endFaces[1].length) return false;
+
+      const cA = centroid(nf[fa]), cB = centroid(nf[fb]);
+      const dA = [], dB = [];
+      for (let i = 0; i < n; i++) {
+        const P = V[chain[i]];
+        const t = unit(sub(V[chain[Math.min(n - 1, i + 1)]], V[chain[Math.max(0, i - 1)]]));
+        let a = unit(cross(na, t)), c = unit(cross(nb, t));
+        if (dot(a, sub(cA, P)) < 0) a = [-a[0], -a[1], -a[2]];
+        if (dot(c, sub(cB, P)) < 0) c = [-c[0], -c[1], -c[2]];
+        dA.push(a); dB.push(c);
+      }
+
+      /* the roll is the arris radius, held back from eating either face */
+      let r = b;
+      for (let i = 0; i < n; i++) {
+        let ea = 0, eb = 0;
+        for (const q of nf[fa]) ea = Math.max(ea, dot(dA[i], sub(V[q], V[chain[i]])));
+        for (const q of nf[fb]) eb = Math.max(eb, dot(dB[i], sub(V[q], V[chain[i]])));
+        r = Math.min(r, 0.45 * ea, 0.45 * eb);
+      }
+      if (!(r > BEVEL_EPS)) return false;
+
+      /* THE ARC.  Tangent to fa at P + r·dA and to fb at P + r·dB, centred
+       * where those two tangents' normals cross: C = P + t(dA + dB) with
+       * t = r / (1 + dA·dB), which is the one point at equal distance from
+       * both tangent points along each face's own normal. */
+      const arc = [];
+      for (let i = 0; i < n; i++) {
+        const P = V[chain[i]], a = dA[i], c = dB[i];
+        const cs = dot(a, c);
+        if (cs <= -0.999) return false;
+        const t = r / (1 + cs);
+        const C = [P[0] + t * (a[0] + c[0]), P[1] + t * (a[1] + c[1]), P[2] + t * (a[2] + c[2])];
+        const u0 = sub([P[0] + r * a[0], P[1] + r * a[1], P[2] + r * a[2]], C);
+        const u1 = sub([P[0] + r * c[0], P[1] + r * c[1], P[2] + r * c[2]], C);
+        const R = Math.hypot(u0[0], u0[1], u0[2]);
+        if (!(R > BEVEL_EPS)) return false;
+        const ang = Math.acos(Math.max(-1, Math.min(1, dot(u0, u1) / (R * R))));
+        const e1 = unit(u0);
+        const pr = dot(u1, e1);
+        const e2 = unit(sub(u1, [e1[0] * pr, e1[1] * pr, e1[2] * pr]));
+        const row = [];
+        for (let k = 0; k <= CREASE_SEGMENTS; k++) {
+          const th = ang * k / CREASE_SEGMENTS, co = Math.cos(th), si = Math.sin(th);
+          const x = C[0] + R * (co * e1[0] + si * e2[0]);
+          const y = C[1] + R * (co * e1[1] + si * e2[1]);
+          const z = C[2] + R * (co * e1[2] + si * e2[2]);
+          row.push(addFrom(chain[i], x - P[0], y, z));
+        }
+        arc.push(row);
+      }
+
+      const quads = [];
+      for (let i = 0; i + 1 < n; i++)
+        for (let k = 0; k < CREASE_SEGMENTS; k++)
+          quads.push([arc[i][k], arc[i][k + 1], arc[i + 1][k + 1], arc[i + 1][k]]);
+      if (!quads.length) return false;
+      const up = [na[0] + nb[0], na[1] + nb[1], na[2] + nb[2]];
+      if (dot(ringNormal(V, quads[0]), up) < 0) for (const q of quads) q.reverse();
+
+      /* the two faces give the ridge up and stop at their tangent lines */
+      const at = new Map();
+      for (let i = 0; i < n; i++) at.set(chain[i], i);
+      nf[fa] = nf[fa].map(q => (at.has(q) ? arc[at.get(q)][0] : q));
+      nf[fb] = nf[fb].map(q => (at.has(q) ? arc[at.get(q)][CREASE_SEGMENTS] : q));
+
+      /* and the wall at each end follows the arc across */
+      const faSet = new Set(nf[fa]);
+      for (let e = 0; e < 2; e++) {
+        const i0 = e === 0 ? 0 : n - 1, vtx = chain[i0], row = arc[i0];
+        for (const fi of endFaces[e]) {
+          const ring = nf[fi], k = ring.indexOf(vtx);
+          if (k < 0) continue;
+          const before = ring[(k + ring.length - 1) % ring.length];
+          const seq = faSet.has(before) ? row.slice() : row.slice().reverse();
+          nf[fi] = ring.slice(0, k).concat(seq, ring.slice(k + 1));
+        }
+      }
+
+      const base = nf.length;
+      for (const q of quads) { nf.push(q); faces.push(nf.length - 1); }
+      return base >= 0;
+    }
+
+    /** roll every ridge inside one region */
+    function rollCreases(faces) {
+      const FN = new Map();
+      for (const fi of faces) FN.set(fi, ringNormal(V, nf[fi]));
+      const cos0 = Math.cos(CREASE_MIN);
+      const byPair = new Map();
+      for (const [k, fs] of edgeFaces(faces)) {
+        if (fs.length !== 2) continue;
+        const na = FN.get(fs[0]), nb = FN.get(fs[1]);
+        if (dot(na, nb) > cos0) continue;
+        const ends = k.split(':').map(Number);
+        /* orient the edge the way the first face winds it; a ridge (as
+         * against a valley) is then the turn that goes outward */
+        let a = ends[0], c = ends[1];
+        const r = nf[fs[0]];
+        let fwd = false;
+        for (let i = 0; i < r.length; i++)
+          if (r[i] === a && r[(i + 1) % r.length] === c) { fwd = true; break; }
+        if (!fwd) { a = ends[1]; c = ends[0]; }
+        if (dot(cross(na, nb), sub(V[c], V[a])) <= 0) continue;   // a valley
+        const pk = ekey(fs[0], fs[1]);
+        const g = byPair.get(pk);
+        if (g) g.push([a, c, fs[0], fs[1]]);
+        else byPair.set(pk, [[a, c, fs[0], fs[1]]]);
+      }
+      for (const [, es] of byPair) {
+        const nxt = new Map(), prv = new Map();
+        let bad = false;
+        for (const e of es) {
+          if (nxt.has(e[0]) || prv.has(e[1])) { bad = true; break; }
+          nxt.set(e[0], e[1]); prv.set(e[1], e[0]);
+        }
+        if (bad) continue;
+        let start = null;
+        for (const e of es) if (!prv.has(e[0])) { start = e[0]; break; }
+        if (start === null) continue;                 // a closed ring of ridges
+        const chain = [start];
+        while (nxt.has(chain[chain.length - 1])) chain.push(nxt.get(chain[chain.length - 1]));
+        if (chain.length !== es.length + 1) continue;  // it branched
+        rollChain(chain, es[0][2], es[0][3], faces);
+      }
+    }
+
+    for (const [, faces] of regions) {
+      rollCreases(faces);
+
+      /* ---- THE REGION'S OWN BOUNDARY ----
+       *
+       * The arris is every edge only one face of the region holds.  Taken in
+       * the direction its face winds it, those edges chain straight into the
+       * loop, already wound the way the surface is. */
+      const eF = edgeFaces(faces);
+      const nxt = new Map(), owner = new Map();
+      for (const fi of faces) {
+        const r = nf[fi];
+        for (let i = 0; i < r.length; i++) {
+          const u = r[i], v2 = r[(i + 1) % r.length];
+          if (eF.get(ekey(u, v2)).length === 1) { nxt.set(u, v2); owner.set(u, fi); }
+        }
+      }
+      const loops = [], seen2 = new Set();
+      for (const s of nxt.keys()) {
+        if (seen2.has(s)) continue;
+        const loop = [];
+        let cur = s;
+        while (nxt.has(cur) && !seen2.has(cur)) { seen2.add(cur); loop.push(cur); cur = nxt.get(cur); }
+        if (cur === s && loop.length >= 3) loops.push(loop);
+      }
+
+      for (const ring of loops) {
+        /* THE ARRIS IS ITS CORNERS, NOT ITS VERTICES.  A drafted loop carries
+         * vertices that lie flat on a straight run — welded-out steps, seams
+         * a neighbouring wall still needs — and offsetting one of those gives
+         * a point collinear with its neighbours, which the ear clipper drops
+         * as a zero-area ear while the chamfer beside it keeps.  That is a
+         * T-junction, and a T-junction is a hole.  So the offset is worked
+         * out on the CORNERS alone; the flat vertices stay on the arris,
+         * where the walls still find them, and the chamfer face beside them
+         * simply runs the whole straight segment.
+         *
+         * The test is in THREE dimensions, not in plan.  A region's boundary
+         * runs down the side of the key from the top face onto the nose, and
+         * those two runs are the same line seen from above — flat in plan
+         * and a hard turn in fact.  Judged in plan the turn would be missed
+         * and the inset surface would cut straight from the back of the key
+         * to its lip, taking the nose with it.                             */
+        const corner = [];
+        for (let i = 0; i < ring.length; i++) {
+          const P = V[ring[i]], A = V[ring[(i + ring.length - 1) % ring.length]],
+                B = V[ring[(i + 1) % ring.length]];
+          const u = sub(P, A), v2 = sub(B, P);
+          const lu = Math.hypot(u[0], u[1], u[2]), lv = Math.hypot(v2[0], v2[1], v2[2]);
+          const cr = cross(u, v2);
+          if (lu > 1e-7 && lv > 1e-7 &&
+              Math.hypot(cr[0], cr[1], cr[2]) / (lu * lv) > 1e-6) corner.push(i);
+        }
+        const m = corner.length;
+        if (m < 3) continue;
+
+        /* per corner: the full-displacement miter offset (dx, dy), same
+         * direction the flat chamfer used — the round runs along it rather
+         * than along each edge's own normal, so the two walls either side of
+         * a corner still meet the fillet on a clean line.  levels[k][c] is
+         * that corner's vertex at arc step k (0 = the dropped arris itself,
+         * BEVEL_SEGMENTS = fully inset, on the surface). */
+        const mdx = new Array(m), mdy = new Array(m),
+              gxs = new Array(m), gys = new Array(m);
+        for (let c = 0; c < m; c++) {
+          const i = corner[c];
+          const P = V[ring[i]], A = V[ring[corner[(c + m - 1) % m]]],
+                B = V[ring[corner[(c + 1) % m]]];
+          /* inward normals of the two edges meeting here.  The loop is wound
+           * CCW seen from above (it is up-facing), so the interior lies to
+           * the LEFT of each edge and (-dy, dx) points into it. */
+          const e1 = [P[0] - A[0], P[1] - A[1]], e2 = [B[0] - P[0], B[1] - P[1]];
+          const l1 = Math.hypot(e1[0], e1[1]) || 1, l2 = Math.hypot(e2[0], e2[1]) || 1;
+          const n1 = [-e1[1] / l1, e1[0] / l1], n2 = [-e2[1] / l2, e2[0] / l2];
+          const det = n1[0] * n2[1] - n1[1] * n2[0];
+          if (Math.abs(det) < 1e-9) { mdx[c] = b * n1[0]; mdy[c] = b * n1[1]; }
+          else { mdx[c] = b * (n2[1] - n1[1]) / det; mdy[c] = b * (n1[0] - n2[0]) / det; }
+          /* the inset rides the plane of the region face this corner leaves
+           * along, so it stays ON the playing surface however that surface
+           * is sloped — flat at the back of the key, tilted on the roll,
+           * steeper again down the nose. */
+          const NF = ringNormal(V, nf[owner.get(ring[i])]);
+          gxs[c] = NF[2] !== 0 ? -NF[0] / NF[2] : 0;
+          gys[c] = NF[2] !== 0 ? -NF[1] / NF[2] : 0;
+          /* NOTING A HARD TURN.  The miter is b / sin(half the turn), so a
+           * corner tight enough to throw the offset well past the radius is
+           * one a round of that radius cannot follow: the fillet pinches on
+           * a convex point and self-overlaps on a concave one.  A square
+           * corner is b·sqrt2 and perfectly fine; past BEVEL_HARD_TURN it is
+           * tallied rather than silently rounded as though it were gentle. */
+          if (Math.hypot(mdx[c], mdy[c]) > BEVEL_HARD_TURN * b) hard++;
+        }
+
+        /* ---- THE ROUND ITSELF ----
+         *
+         * In (u = inward from the drafted silhouette, v = down from the top
+         * plane), the drafted arris is the sharp corner at (0, 0).  A
+         * round-over of radius b is the quarter circle centred on (b, b):
+         *
+         *     u = b(1 - cos t)      v = b(1 - sin t)      t: 0 -> pi/2
+         *
+         * tangent to the wall at (0, b) and to the playing surface at
+         * (b, 0), so it meets both with no crease at either end.  Its
+         * midpoint is (0.293b, 0.293b) — INSIDE the flat chamfer's u + v = b,
+         * because a round-over takes less material off the corner than a
+         * chamfer of the same setback does.  Getting that wrong is what makes
+         * a "round" come out looking like a chamfer: use sin for both and
+         * u + v = b for every t, which is the straight line exactly.
+         */
+        const levels = [];               // levels[k][c] -> vertex index
+        levels[0] = corner.map(i => ring[i]);   // t = 0: the arris, pre-drop
+        for (let k = 1; k <= BEVEL_SEGMENTS; k++) {
+          const t = (k / BEVEL_SEGMENTS) * (Math.PI / 2);
+          const u = 1 - Math.cos(t), drop = b * (1 - Math.sin(t));
+          levels[k] = corner.map((i, c) => {
+            const dx = mdx[c] * u, dy = mdy[c] * u;
+            return addFrom(ring[i], dx, nv[ring[i]].y + dy,
+                           V[ring[i]][2] + gxs[c] * dx + gys[c] * dy - drop);
+          });
+        }
+
+        /* THE SURFACE STOPS AT THE INSET LOOP.  Every face of the region
+         * gives its boundary corners up to their inset copies; a vertex flat
+         * on the arris is dropped outright, because on the inset line it is
+         * collinear with its neighbours and leaving it out is exact. */
+        const insetOf = new Map();
+        for (let c = 0; c < m; c++) insetOf.set(ring[corner[c]], levels[BEVEL_SEGMENTS][c]);
+        const onArris = new Set(ring);
+        for (const fi of faces) {
+          const r = nf[fi];
+          if (!r.some(q => onArris.has(q))) continue;
+          const out = [];
+          for (const q of r) {
+            if (insetOf.has(q)) out.push(insetOf.get(q));
+            else if (!onArris.has(q)) out.push(q);
+          }
+          if (out.length >= 3) nf[fi] = out;
+        }
+
+        /* t = 0 is (u 0, v b): the arris keeps its line and drops the full
+         * radius, which is where the round leaves the wall tangentially */
+        for (let i = 0; i < ring.length; i++) { nv[ring[i]].z -= b; V[ring[i]][2] -= b; }
+
+        for (let c = 0; c < m; c++) {
+          const d = (c + 1) % m;
+          /* level 0 -> level 1 runs the WHOLE segment of arris between two
+           * corners, any vertex still standing on it included, and closes on
+           * level 1's single edge.  It is fanned from level 1's corner
+           * rather than from the arris, because a fan from the arris would
+           * lay its first triangle along the arris itself, where collinear
+           * points make it zero-area and it is dropped — and a dropped
+           * triangle is a hole. */
+          const path = [];
+          for (let i = corner[c]; ; i = (i + 1) % ring.length) {
+            path.push(ring[i]);
+            if (i === corner[d]) break;
+          }
+          for (let k = 0; k + 1 < path.length; k++)
+            nf.push([path[k], path[k + 1], levels[1][c]]);
+          nf.push([path[path.length - 1], levels[1][d], levels[1][c]]);
+
+          /* every strip after that is a plain quad between two corner-only
+           * rings — the round's remaining facets */
+          for (let k = 1; k < BEVEL_SEGMENTS; k++)
+            nf.push([levels[k][c], levels[k][d], levels[k + 1][d], levels[k + 1][c]]);
+        }
+      }
     }
 
     const v = [], f = [];
@@ -2073,10 +2485,21 @@
    *   lb/rb  bias of the occupied slot to the left / right, or null
    *   seats  kept for callers that still pass it; the pair face is a
    *          floating loop now, so nothing is cut into the deck
+   *   armAt  what the sensor press offers this key (see pressArms), so
+   *          the key's own arms can slide along their bars to meet it —
+   *          see THE KEY'S OWN ARMS.  Null leaves the boss as drafted.
    */
-  function buildKey(cx, w, type, lb, rb, seats) {
+  function buildKey(cx, w, type, lb, rb, seats, armAt) {
     const q = profileFor(type, lb, rb);
     const V = profilePoints(q.p, q.mirror, w, cx - w / 2);
+    if (armAt != null) {
+      const A = armLines(q.p);
+      const P = armPlace(V, A, armAt);
+      if (P) {
+        for (const i of A.a) V[i][0] = P[0];
+        for (const i of A.b) V[i][0] = P[1];
+      }
+    }
     const f = q.p.f, t = [];
     /* DEGENERATE TRIANGLES ARE DROPPED, NOT EMITTED.  A drafted face can
      * collapse to a line once a profile is rectified — the plain white's
@@ -3349,6 +3772,226 @@
     return v;
   }
 
+  /* ==================================================================== *
+   *  THE KEY'S OWN ARMS  —  the two stems of the drafted underside boss   *
+   *                                                                      *
+   *  Every drafted key carries the "-| |-" on its underside: two BARS    *
+   *  spanning the key's belly, and reaching out of them in y, two 1 mm   *
+   *  STEMS — the arms.  They are what the sensor press meets: the press  *
+   *  climbs off the pad and closes on the same "-| |-" in the key's own  *
+   *  deck plane, so the two shapes have to stand over one another.       *
+   *                                                                      *
+   *  THE ARMS ARE DRAFTED ON THE KEY, THE PRESS STANDS ON THE SENSOR.    *
+   *  The sheet draws each pair of arms where the key it belongs to was   *
+   *  drawn over its own sensor — on the centreline of a full key, on a   *
+   *  quarter of the slot for a split half.  Change the layout and the    *
+   *  key is no longer over that sensor: the press follows the pad, the   *
+   *  drafted arms stay with the key, and the two miss each other by as   *
+   *  much as half a key.                                                 *
+   *                                                                      *
+   *  So the arms are PLACED ON THEIR OWN BARS, at the press's stems and  *
+   *  at the drafted PAIR.stem width whatever the key's width, and        *
+   *  nothing else about the key moves.  Only vertices lying on the two   *
+   *  stem lines are shifted, and only in x: the bars keep their span,    *
+   *  the walls keep theirs, and every face the stems part — a bar wall,  *
+   *  the belly n-gon they are cut out of — is parted at a different x    *
+   *  rather than reshaped.  A stem stops ARM_SHOULDER short of the end   *
+   *  of its bar, so it always lands on material at both ends.            *
+   * ==================================================================== */
+  const ARM_EPS = 0.01;       // the sheets carry a thou or two of noise
+  const ARM_TOL = 0.15;       // how near PAIR.stem a candidate pair must sit
+  const ARM_SHOULDER = 0.2;   // bar material kept outboard of a stem
+  const ARM_CACHE = new WeakMap();
+
+  /** which PAIR_SHAPE the boss on this profile was drafted to, if any */
+  function armShapeOf(p) {
+    for (const k of ['full', 'split', 'short']) {
+      const S = PAIR_SHAPE[k];
+      let ok = true;
+      for (const y of S) {
+        let hit = false;
+        for (let i = 0; i < p.nv && !hit; i++)
+          if (Math.abs(p.v[i * 4 + 2] - y) < ARM_EPS) hit = true;
+        if (!hit) { ok = false; break; }
+      }
+      if (ok) return S;
+    }
+    return null;
+  }
+
+  /**
+   * The two stem lines of a profile's underside boss, found once per
+   * profile object and cached.
+   *
+   * A stem line is an (alpha, beta) pair — a whole x line of the drafted
+   * key, so every vertex on it moves together and the stem keeps its
+   * width at every key width.  The two are recognised at the boss's own
+   * y tips: the only pair of lines PAIR.stem apart that shows at BOTH
+   * tips and touches neither edge of the key.  A key's outer walls are
+   * also a millimetre thick, which is why the edges are ruled out.
+   */
+  function armLines(p) {
+    if (ARM_CACHE.has(p)) return ARM_CACHE.get(p);
+    const A = findArmLines(p);
+    ARM_CACHE.set(p, A);
+    return A;
+  }
+
+  function findArmLines(p) {
+    const S = armShapeOf(p);
+    if (!S) return null;
+    const w = p.w0;
+    const X = i => p.v[i * 4] + p.v[i * 4 + 1] * w;
+    const lineKey = i =>
+      Math.round(p.v[i * 4] * 1e4) + ':' + Math.round(p.v[i * 4 + 1] * 1e4);
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < p.nv; i++) {
+      const x = X(i); if (x < lo) lo = x; if (x > hi) hi = x;
+    }
+    const linesAt = y => {
+      const m = new Map();
+      for (let i = 0; i < p.nv; i++) {
+        if (Math.abs(p.v[i * 4 + 2] - y) > ARM_EPS) continue;
+        const k = lineKey(i), z = p.v[i * 4 + 3];
+        if (!m.has(k)) m.set(k, { key: k, x: X(i), z });
+        else if (z < m.get(k).z) m.get(k).z = z;
+      }
+      return Array.from(m.values()).sort((a, b) => a.x - b.x);
+    };
+    const tipA = linesAt(S[0]), tipB = linesAt(S[5]);
+    const at = (L, k) => L.some(e => e.key === k);
+    /* A WALL IS ALSO A MILLIMETRE THICK.  What tells the two apart is z:
+     * an arm STANDS ON the boss's deck, and a wall carries on down past
+     * it, so of the candidate pairs the arms are the pair that starts
+     * highest.  (On an accidental there is only ever the one pair.)   */
+    let pair = null, pairZ = -Infinity;
+    for (let i = 0; i + 1 < tipA.length; i++) {
+      const a = tipA[i], b = tipA[i + 1];
+      if (Math.abs((b.x - a.x) - PAIR.stem) > ARM_TOL) continue;
+      if (a.x < lo + ARM_EPS || b.x > hi - ARM_EPS) continue;   // the key's own edge
+      if (!at(tipB, a.key) || !at(tipB, b.key)) continue;
+      const z = Math.min(a.z, b.z);
+      if (z > pairZ) { pairZ = z; pair = [a.key, b.key]; }
+    }
+    if (!pair) return null;
+    /* every vertex on either stem line, inside the boss's own y band, kept
+     * line by line: a stem is set to PAIR.stem wide, not merely moved, so
+     * its two edges are placed rather than translated together */
+    const a = [], b = [];
+    let deck = Infinity;
+    for (let i = 0; i < p.nv; i++) {
+      const k = lineKey(i), y = p.v[i * 4 + 2];
+      if (k !== pair[0] && k !== pair[1]) continue;
+      if (y < S[0] - ARM_EPS || y > S[5] + ARM_EPS) continue;
+      (k === pair[0] ? a : b).push(i);
+      if (p.v[i * 4 + 3] < deck) deck = p.v[i * 4 + 3];
+    }
+    if (!a.length || !b.length) return null;
+    const idx = a.concat(b);
+    let top = -Infinity;
+    for (const i of idx) if (p.v[i * 4 + 3] > top) top = p.v[i * 4 + 3];
+    /* HOW FAR THE ARMS MAY SLIDE: the bars they stand on.  A bar is what
+     * the boss raises off the deck ALONG ONE OF ITS TWO ROWS — not the
+     * dome window between them, and not the key's own walls, which cross
+     * the same rows and stand far higher than the boss does.  So the two
+     * vertices at the bars' ends are the widest the boss itself reaches,
+     * off the deck and no higher than its own arms, and they are read at
+     * the key's width like any other. */
+    let barLo = null, barHi = null, xLo = Infinity, xHi = -Infinity;
+    for (let i = 0; i < p.nv; i++) {
+      const y = p.v[i * 4 + 2], z = p.v[i * 4 + 3], x = X(i);
+      const row = (y > S[1] - ARM_EPS && y < S[2] + ARM_EPS) ||
+                  (y > S[3] - ARM_EPS && y < S[4] + ARM_EPS);
+      if (!row) continue;
+      if (z < deck + ARM_EPS || z > top + ARM_EPS) continue;
+      if (x < xLo) { xLo = x; barLo = i; }
+      if (x > xHi) { xHi = x; barHi = i; }
+    }
+    if (barLo == null || barHi == null) return null;
+    return { a, b, idx, bar: [barLo, barHi], shape: S, deck };
+  }
+
+  /** the arms as instantiated: the stem span and the bar span they ride */
+  function armSpan(V, A) {
+    let x0 = Infinity, x1 = -Infinity;
+    for (const i of A.idx) {
+      const x = V[i][0]; if (x < x0) x0 = x; if (x > x1) x1 = x;
+    }
+    const a = V[A.bar[0]][0], b = V[A.bar[1]][0];
+    return { x0, x1, lo: Math.min(a, b), hi: Math.max(a, b) };
+  }
+
+  /**
+   * WHERE THIS KEY'S ARMS GO: the x of each of the two stem lines, as
+   * A.a and A.b are ordered.  Null when there is nowhere to put them.
+   *
+   *   `at`   what the press offers: the x its own stems stand at, and the
+   *          span of the bars they reach out of (see pressArms).
+   *
+   * AN ARM IS PAIR.stem WIDE, WHATEVER THE KEY IS.  The sheets draft some
+   * of them against the key's width — a full gray's stems are a fraction
+   * of its width, not a millimetre off its centreline — so a rescaled key
+   * grew or shrank its arms while the press's stem stayed the millimetre
+   * the sensor pad draws.  The two edges are therefore PLACED, at the
+   * drafted width, rather than the drafted pair being translated: the arm
+   * matches the press's stem at every key width.
+   *
+   * The arms go to the press's stems, and stay ON THE BAR at both ends —
+   * their own, always, and the press's too whenever the two bars overlap
+   * enough to hold them.  Where the key barely reaches over its sensor at
+   * all the second is impossible; the arms then go as far along their own
+   * bar as they can, which is the most contact an x shift can buy, and
+   * the pair audit is what reports a press that thin.
+   */
+  function armPlace(V, A, at) {
+    if (A == null || at == null) return null;
+    const s = armSpan(V, A);
+    const half = PAIR.stem / 2;
+    let lo = s.lo + ARM_SHOULDER + half, hi = s.hi - ARM_SHOULDER - half;
+    if (hi < lo) return null;                    // the bars cannot hold a stem
+    if (at.bar) {
+      const blo = Math.max(lo, at.bar[0] + ARM_SHOULDER + half);
+      const bhi = Math.min(hi, at.bar[1] - ARM_SHOULDER - half);
+      if (bhi >= blo) { lo = blo; hi = bhi; }
+    }
+    const c = Math.min(Math.max(at.x, lo), hi);
+    /* which line is which in the world depends on whether the profile is
+     * mirrored, so ask the instantiated points rather than the sheet */
+    return V[A.a[0]][0] <= V[A.b[0]][0] ? [c - half, c + half]
+                                        : [c + half, c - half];
+  }
+
+  /**
+   * What the press offers this key's arms: the x its own stems stand at
+   * and the span of its bars, read off the pair ring — the "-| |-" the
+   * press closes onto in the key's deck plane.  Null when there is no
+   * press.
+   */
+  function pressArms(cx, w, type, lb, rb, footX, sib) {
+    const faces = pairFaces(cx, w, type, lb, rb, footX, sib);
+    if (faces == null) return null;
+    let r0 = Infinity, r1 = -Infinity;
+    for (const f of faces) for (const q of f.ring) {
+      if (q[0] < r0) r0 = q[0]; if (q[0] > r1) r1 = q[0];
+    }
+    let s0 = Infinity, s1 = -Infinity;
+    for (const f of faces) for (const q of f.ring)
+      if (q[0] - r0 > PAIR_X_EPS && r1 - q[0] > PAIR_X_EPS) {
+        if (q[0] < s0) s0 = q[0]; if (q[0] > s1) s1 = q[0];
+      }
+    return { x: isFinite(s0) ? (s0 + s1) / 2 : (r0 + r1) / 2, bar: [r0, r1] };
+  }
+
+  /** the same two x values, for the generated Blender log */
+  function armPlaceFor(cx, w, type, lb, rb, footX, sib) {
+    const q = profileFor(type, lb, rb);
+    const A = armLines(q.p);
+    if (A == null) return null;
+    const at = pressArms(cx, w, type, lb, rb, footX, sib);
+    if (at == null) return null;
+    return armPlace(profilePoints(q.p, q.mirror, w, cx - w / 2), A, at);
+  }
+
   /** the pair face's plan, for the audit */
   function pairPlan(cx, w, type, lb, rb, footX, sib) {
     const faces = pairFaces(cx, w, type, lb, rb, footX, sib);
@@ -3696,7 +4339,7 @@
     widthRatios, classWidth, classOfType,
     pushTri, pushQuad, pushBox, rectWithHoles,
     ctxKey, profileFor, profilePoints, buildKey, keyPolygons,
-    bevelProfile, setBevel, getBevel, BEVEL_MAX, topFaces,
+    bevelProfile, bevelRoom, setBevel, getBevel, BEVEL_MAX, topFaces,
     triangulateFace, triangulateFaceWithHoles, pointInPoly2, faceHoldsSeat,
     keyDecks, mergeCoplanar, polyArea2, keyExtent,
     buildSpine, buildFeet,
@@ -3710,6 +4353,7 @@
     keyBackSpan, keyPadSection,
     pairPlan, pairFaces, pairLand, pairAudit, PAIR_SHAPE, pushFlatFace,
     mapRingToPair, buildPress, pressParts, pushPrism, isWatertight, meshVolume,
+    armLines, armSpan, armPlace, armPlaceFor, pressArms, ARM_SHOULDER,
     spineKindOf, spineKindForColours, spineLayerCount,
     SPINE_LAYER_COLORS, spineLayerColor, spineLayerMaterial,
     spineHalves, spineParts, spineBands, spineZRange, footParts,
