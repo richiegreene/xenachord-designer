@@ -9,7 +9,7 @@
     --bg:#15161a; --panel:#1e1f25; --panel2:#25262e; --panel-bright:#2f313a; --line:#33343d;
     --text:#e9e9ec; --dim:#9a9ba4; --accent:#6fb7ff; --warn:#ffb454; --ok:#79d18b;
     --kw:#f3f3f0; --kb:#2b2b31; --kg:#8d8e95; --palette-bg:var(--panel-bright);
-    --strip-bg:#101116; --scope-bg:#12161c;
+    --strip-bg:#101116; --scope-bg:#12161c; --spine:#40414a;
   }
   /* Bright-mode rails: when the viewport background is switched to light
      (v-theme), the left rail/drawer and the bottom viewer bar switch with
@@ -183,8 +183,8 @@
      between its two whites.  The slot's outline draws without taking part
      in layout, which is what keeps the strip honest.                     */
   #stripInner, #stripInner *{box-sizing:border-box}
-  .kb-white{position:absolute;background:var(--kw);border:1px solid #b9b9b4;
-    border-radius:0 0 3px 3px;color:#444;font-size:9px;text-align:center}
+  .kb-white{position:absolute;background:var(--spine);border:1px solid #55565f;
+    border-radius:0 0 3px 3px;color:var(--key-text,#444);font-size:9px;text-align:center}
   .kb-white .nm{position:absolute;bottom:2px;left:0;right:0}
   .kb-slot{position:absolute;border-radius:3px;
     outline:1px dashed transparent;outline-offset:-1px}
@@ -200,7 +200,7 @@
   .kb-m.b{background:var(--kb)} .kb-m.g{background:var(--kg)}
   .kb-foot{position:absolute;background:#3d5f7d;border-radius:1px;opacity:.9}
   .kb-foot.half-b{box-shadow:-2px 0 0 var(--accent)}
-  .kb-spine{position:absolute;background:#40414a;border-radius:2px}
+  .kb-spine{position:absolute;background:var(--spine);border-radius:2px}
   .kb-over{outline:2px solid var(--accent)}
   /* ---------- which keyboard of the rig a band is ----------
      Only ever drawn when there is more than one, because a name on the only
@@ -288,7 +288,7 @@
     white-space:nowrap;pointer-events:none;line-height:1;text-align:center}
   /* In Play the enumeration is not drawn, so the name takes the foot of the
      key it used to share — the same seat, and the whole of it. */
-  .kb-white .kb-tune{bottom:4px;color:#26272c;font-size:10px}
+  .kb-white .kb-tune{bottom:4px;color:var(--key-text,#26272c);font-size:10px}
   .kb-m .kb-tune{bottom:4px;color:#f0f0f2;font-size:9px}
   .kb-m.g .kb-tune{color:#141419}
   /* A key answers one question at a time: in Design it is the position it
@@ -302,7 +302,7 @@
   body.mode-play #strip{touch-action:none}
 
   /* ---------- Play: tuning controls ---------- */
-  .tune-h{color:var(--text);font-weight:600;font-size:11.5px;margin:10px 0 5px}
+  .tune-h{display:block;color:var(--text);font-weight:600;font-size:11.5px;margin:10px 0 5px}
   .tune-h:first-child{margin-top:0}
   .tune-ref{display:flex;gap:5px}
   .tune-inline{margin:0;white-space:nowrap;color:var(--dim)}
@@ -351,7 +351,7 @@
   body.mode-play .kb-slot.end.empty{outline-color:transparent;background:none}
   body.mode-play .kb-white,
   body.mode-play .kb-m{cursor:pointer}
-  body.mode-play .kb-white.sounding{background:var(--accent)}
+  body.mode-play .kb-white.sounding{background:var(--accent)!important}
   body.mode-play .kb-m.sounding{outline:2px solid var(--accent);outline-offset:-1px}
   /* ---------- the rig, as a map you can press ----------
      Laid out the way the devices actually stand — upper row above lower,
@@ -696,7 +696,7 @@
                    family list and the slider's range are written in by
                    createTimbrePicker rather than spelled out here, so the two
                    apps cannot come to offer different shapes. -->
-              <label class="tune-inline" for="s-family">Wave</label>
+              <label class="tune-h" for="s-family">Timbre</label>
               <select id="s-family"
                 title="Wavetable: fixed waveform, volume-independent. Filtered wavetable: sine phase-modulated by its own low-passed output, so quiet notes stay near-sine and loud ones buzz."></select>
               <canvas id="s-wave" class="scope" style="margin-top:9px"></canvas>
@@ -800,6 +800,7 @@ const LS = 'xenachord-designer-v2';
  * which is nearly always "the same keyboard again, read differently".
  * Diverging from there is one edit; starting from nothing is thirty-two.
  */
+const isFreshLoad = !localStorage.getItem(LS);
 let rig = loadRig();
 let design;                      // === rig.units[rig.sel] — see selectUnit
 let L = null, meshes = null, dragType = null;
@@ -1836,15 +1837,20 @@ function buildUnit(u, inner, rows){
   const of = rows*u.cols > 1 ? ` · ${u.label} keyboard` : '';
 
   // spine — half A and half B, and only ever these two
+  // seen from above, so the strip takes the top band's drafted colour —
+  // the whites below are drawn in this same colour, not a fixed white,
+  // so the strip reads as one keybed rather than two mismatched greys.
+  const topLayer = XM.SPINE.layers[L.spineKind].A.slice(-1)[0].name;
+  const spineC = XM.spineLayerColor(L.spineKind, topLayer);
+  const spineColor = 'rgb('+spineC.map(v=>Math.round(v*255)).join(',')+')';
+  const spineLuma = 0.2126*spineC[0] + 0.7152*spineC[1] + 0.0722*spineC[2];
+  const keyText = spineLuma > 0.5 ? '#33343a' : '#e4e4e8';
   for (const [nm,h] of [['A',XM.SPINE.halfA],['B',XM.SPINE.halfB]]){
     const d = document.createElement('div'); d.className='kb-spine';
     d.style.left = X(h.x0)+'px'; d.style.width = ((h.x1-h.x0)*PX)+'px';
     d.style.top = Y(XM.SPINE.yBack)+'px';
     d.style.height = (XM.SPINE.depth*1.5)+'px';
-    // seen from above, so the strip takes the top band's drafted colour
-    const topLayer = XM.SPINE.layers[L.spineKind].A.slice(-1)[0].name;
-    const c = XM.spineLayerColor(L.spineKind, topLayer);
-    d.style.background = 'rgb('+c.map(v=>Math.round(v*255)).join(',')+')';
+    d.style.background = spineColor;
     d.title = `spine half ${nm}${of} — ${(h.x1-h.x0).toFixed(3)} mm, 16 feet · `+
               `${L.spineKind} type Spine - ${nm}, ${topLayer} layer on top`;
     inner.appendChild(d);
@@ -1868,6 +1874,7 @@ function buildUnit(u, inner, rows){
     const d = document.createElement('div'); d.className='kb-white';
     d.style.left = X(w.x0)+'px'; d.style.width=(w.w*PX)+'px';
     d.style.top = Y(0)+'px'; d.style.height = (85.0688*1.5)+'px';
+    d.style.background = spineColor; d.style.setProperty('--key-text', keyText);
     const n = w.noteIndex != null ? note(w.noteIndex) : null;
     if (n != null) d.dataset.note = n;
     d.innerHTML = `<div class="nm">${n != null ? n : w.i}</div>`;
@@ -3453,8 +3460,10 @@ projBtn.onclick=()=>{
 };
 
 const BG_DARK=[0.075,0.08,0.095], BG_LIGHT=[214/255,214/255,214/255];
-let bgColor=BG_DARK.slice();
+let bgColor=BG_LIGHT.slice();
+document.body.classList.add('bright');
 const themeBtn=$('v-theme');
+themeBtn.textContent='●';
 themeBtn.onclick=()=>{
   const light=bgColor===BG_LIGHT;
   bgColor=light?BG_DARK:BG_LIGHT;
@@ -3964,6 +3973,10 @@ setMode(railPane.querySelector('.rail-btn[aria-expanded="true"]')?.dataset.drawe
 new ResizeObserver(()=>{ layoutGizmo(); drawGizmo(); draw(); }).observe($('glwrap'));
 
 /* ===================== boot ===================== */
+if (isFreshLoad){
+  design.bevel = XM.BEVEL_MAX;
+  applyPressBlend(0.45);
+}
 buildPalette(); buildVisToggles(); syncInputs(); rebuild();
 requestAnimationFrame(()=>{ fit(); requestAnimationFrame(fit); });
 </script>
