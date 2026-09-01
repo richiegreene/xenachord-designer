@@ -17,6 +17,19 @@
  * drawing the same glyphs out of the same fonts at the same sizes the Tuner
  * draws them.  A name spelled here is the name that app would spell.
  *
+ * WHAT A TRANSPOSITION IS, AND WHY IT IS NOT A ROTATION.  The octave shift in
+ * the MIDI panel is here rather than there, because it is a fact about the
+ * instrument and not about a cable: shifted up one, every key on the strip
+ * carries a pitch an equave higher, the names and the Hz on them say so, and
+ * a key sounds the same whether a finger or a controller pressed it.
+ *
+ * It cannot be expressed as a rotation, though a rotation by a whole equave
+ * would sound identical: the rotations below are folded back into the scale
+ * on every pass, precisely so that "which degree is under key 0" stays a
+ * question with N answers rather than infinitely many.  So the shift is its
+ * own term, added to the equave AFTER the fold, and the two controls do not
+ * interfere: rotate to choose the mode, transpose to choose the register.
+ *
  * WHAT A ROTATION IS.  Not a transposition and not a re-ordering: the scale
  * keeps its degrees in their order and keeps their frequencies, and the whole
  * run slides along the keyboard, so a different degree comes to rest under
@@ -50,6 +63,7 @@ const T = {
   sagFlavour: 'revo',
   scale: '1/1 9/8 5/4 4/3 3/2 5/3 15/8',
   jiRot: 0,
+  equaveShift: 0,                 // the octave shift, in equaves — see below
 };
 
 try { Object.assign(T, JSON.parse(localStorage.getItem(STORE) || '{}')); } catch (e) {}
@@ -138,14 +152,14 @@ function pitchOf(i, ji) {
   if (T.system === 'edo') {
     const N = equaveNotes();
     const slot = i + T.edoRot;
-    const step = mod(slot, N), equave = Math.floor(slot / N);
+    const step = mod(slot, N), equave = Math.floor(slot / N) + T.equaveShift;
     return { kind: 'edo', step, equave, edo: N,
              hz: T.hz * Math.pow(2, step / N + equave) };
   }
   const M = ji.length;
   if (!M) return null;
   const slot = i + T.jiRot;
-  const deg = mod(slot, M), equave = Math.floor(slot / M);
+  const deg = mod(slot, M), equave = Math.floor(slot / M) + T.equaveShift;
   const d = ji[deg];
   return { kind: 'ji', deg, equave, num: d.num, den: d.den, supported: d.supported,
            hz: T.hz * (d.num / d.den) * Math.pow(2, equave) };
@@ -236,6 +250,17 @@ function label() {
   }
   window.XTuning.freqs = freqs;
   window.XTuning.notesEq = equaveNotes();
+  /* How many notes it takes to come back to the same pitch class — 17, 19,
+   * 34 on an interchanged rig, or however many degrees a custom scale was
+   * read as. Not the same question as the layout's period once a JI scale of
+   * some other length is laid over it, which is why it is answered here
+   * rather than left for a reader to guess from notesEq. */
+  window.XTuning.scaleNotes =
+    (T.system === 'ji' && ji.length) ? ji.length : equaveNotes();
+  /* Anything downstream that has to restate a pitch — MIDI's octave readout —
+   * hears about it here rather than polling, because this is the one place
+   * the table is settled. */
+  window.dispatchEvent(new CustomEvent('xenachord:tuning'));
 }
 
 /**
@@ -249,6 +274,30 @@ function refresh() {
   save();
   if (typeof window.buildStrip === 'function') window.buildStrip();
   else label();
+}
+
+/**
+ * How far the transposition is allowed to run.
+ *
+ * Four equaves either way puts a 1/1 of 261 Hz between 16 Hz and 4.2 kHz, and
+ * the keyboard on top of that — which is the whole of what is left to hear.
+ * Past it the control would only be a way of turning the instrument off.
+ */
+const SHIFT_LIMIT = 4;
+
+/**
+ * Move the whole instrument by whole equaves.
+ *
+ * Everything follows from re-labelling: the strip is rebuilt, so the pitches
+ * on the keys, the frequency table Play sounds from and the tooltips are one
+ * pass and cannot disagree.
+ *
+ * @returns the shift actually taken, which is the asked-for one clamped.
+ */
+function setEquaveShift(n) {
+  const v = Math.max(-SHIFT_LIMIT, Math.min(SHIFT_LIMIT, n | 0));
+  if (v !== T.equaveShift) { T.equaveShift = v; refresh(); }
+  return T.equaveShift;
 }
 
 /* ---------------------------------------------------------------------
@@ -273,6 +322,19 @@ function seg(id, key, after) {
 /** What the controls say, brought back into step with what T holds. */
 function syncUI(ji) {
   $('t-ref').textContent = NOMINALS[T.nominal] + ACCS[T.acc] + T.oct;
+
+  /* The transposition is set from the MIDI panel and from the arrow keys, so
+   * it can be moved without this fieldset being looked at — and it changes
+   * what every number above it is worth. It says so here, where 1/1 is
+   * defined, rather than only where it was pressed. */
+  const sh = T.equaveShift | 0;
+  const tr = $('t-transpose');
+  tr.style.display = sh ? '' : 'none';
+  if (sh) {
+    tr.innerHTML = `transposed <b>${sh > 0 ? '+' : ''}${sh}</b> equave` +
+      `${Math.abs(sh) === 1 ? '' : 's'} &mdash; 1/1 sounds at ` +
+      `<b>${(T.hz * Math.pow(2, sh)).toFixed(4)}</b> Hz`;
+  }
   $('t-edo').style.display = T.system === 'edo' ? '' : 'none';
   $('t-ji').style.display = T.system === 'ji' ? '' : 'none';
   $('t-sag').style.display = (T.system === 'ji' && T.jiRead === 'sagittal') ? '' : 'none';
@@ -334,7 +396,10 @@ function bind() {
   rot('t-ji-rot-dn', 'jiRot', -1);
 }
 
-window.XTuning = { label, refresh, settings: T, freqs: {}, notesEq: 32 };
+window.XTuning = {
+  label, refresh, setEquaveShift, SHIFT_LIMIT,
+  settings: T, freqs: {}, notesEq: 32, scaleNotes: 32,
+};
 bind();
 /* The module is deferred, so the layout is already standing by the time it
  * runs and the strip has been built once without any names on it. */

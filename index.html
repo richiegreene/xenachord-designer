@@ -15,7 +15,7 @@
      (v-theme), the left rail/drawer and the bottom viewer bar switch with
      it — everything inside them reads off these vars, so overriding the
      vars in scope is enough to recolor the whole subtree. */
-  body.bright #panel, body.bright #viewbar2, body.bright #strip{
+  body.bright #panel, body.bright #viewbar2, body.bright #strip, body.bright #stripHandle{
     --bg:#e9e9ec; --panel:#f2f2f4; --panel2:#e4e5e9; --panel-bright:#d8d9de;
     --line:#c9cad0; --text:#1b1c20; --dim:#5c5d66; --accent:#1f6feb;
     --strip-bg:#dcdde2; --palette-bg:#d8d9de; --scope-bg:#dcdde2;
@@ -175,6 +175,19 @@
   #strip{height:190px;border-top:1px solid var(--line);background:var(--strip-bg);
     overflow:auto;position:relative}
   #stripInner{position:relative;height:170px;margin:10px 0}
+  /* ---------- collapse handle ----------
+     Sits where the strip's own trailing buffer used to just be empty —
+     the same 10px a top margin gets, but tappable, so shutting the
+     keyboard view is the same gesture as shutting the side panel: a tap
+     on the strip you already have your eye on, not a new button to find. */
+  #stripHandle{height:14px;border-top:1px solid var(--line);
+    background:var(--strip-bg);cursor:pointer;
+    display:flex;align-items:center;justify-content:center}
+  #stripHandle:hover{background:var(--panel2)}
+  #stripHandle .grip{width:36px;height:3px;border-radius:2px;background:var(--line)}
+  #stripHandle:hover .grip{background:var(--dim)}
+  #stripHandle.collapsed{border-top:1px solid var(--line)}
+  body.strip-collapsed #strip, body.strip-collapsed #viewbar2{display:none}
   /* THE STRIP IS A MEASUREMENT, NOT A PICTURE.  Every box is placed at a
      millimetre position, so a border must not add to its width (border-box)
      and must not push its children in — an absolutely-positioned child is
@@ -370,6 +383,19 @@
   .rigmap button.hand span{color:var(--warn)}
   .rotbtns{display:flex;gap:5px}
   .rotbtns button{padding:2px 12px;font-size:12px;line-height:1.4}
+
+  /* ---------- MIDI I/O ----------
+     The octave can be moved from the arrow keys with the panel closed or
+     scrolled away, so the number says when it has changed rather than
+     leaving the only evidence to be that the instrument now sounds wrong. */
+  #play-midi .presswrap .hint:last-child{color:var(--dim);opacity:.8}
+  #m-last{font-variant-numeric:tabular-nums;margin:0 0 2px}
+  #m-oct-v.bump{animation:m-bump .28s ease-out}
+  @keyframes m-bump{from{transform:scale(1.45);color:var(--ok)}to{transform:none}}
+  #m-oct-v{display:inline-block;min-width:22px;text-align:center}
+  .midi-row{display:flex;align-items:center;justify-content:space-between;
+    gap:8px;margin-top:10px}
+  .midi-row label{margin:0}
 </style>
 </head>
 <body>
@@ -601,6 +627,10 @@
                 <label class="tune-inline" for="t-hz">1/1 (Hz)</label>
                 <input type="number" id="t-hz" value="261.6256" step="0.0001" min="1">
               </div>
+              <!-- Set from MIDI I/O's Octave Shift and from the arrow keys,
+                   and said here because it changes what 1/1 above is worth. -->
+              <p class="tune-read" id="t-transpose" style="display:none;margin-top:5px"
+                title="The MIDI Octave Shift. It moves the whole instrument, so the keys on the strip carry the transposed pitches whether a finger or a controller presses them."></p>
 
               <!-- ---- which kind of scale the keys carry ---- -->
               <div class="tune-h">Tuning System</div>
@@ -719,7 +749,57 @@
 
           <fieldset>
             <legend>MIDI I/O</legend>
-            <div id="play-midi"></div>
+            <div id="play-midi">
+              <!-- The port list is every musical device on the machine, so it
+                   is asked for on a press and never on load. -->
+              <button id="m-arm" class="primary" style="width:100%"
+                title="Ask the browser for access to the MIDI devices attached to this machine, so a controller can play this keyboard.">Connect a MIDI Controller</button>
+              <p class="hint" id="m-status">Not connected.</p>
+
+              <!-- ---- the octave, outside the connected block ----
+                   It transposes the instrument, not the cable: it moves the
+                   pitches on the strip and everything played from them, so it
+                   is offered whether or not a controller is attached. -->
+              <div class="presswrap" style="margin-top:12px"
+                title="Transposes the whole keyboard by one equave of the current scale — 17 notes on a 17-note keyboard, 19 on a 19. The strip's pitches move with it, so a key sounds the same whether a finger or a controller presses it, and the map from a MIDI number to a key never moves.">
+                <div class="pressrow">
+                  <label>&#8597; Octave Shift</label>
+                  <span class="rotbtns">
+                    <button id="m-oct-dn" title="Down one equave (&darr;)">&#9660;</button>
+                    <span id="m-oct-v" class="pressval">0</span>
+                    <button id="m-oct-up" title="Up one equave (&uarr;)">&#9650;</button>
+                  </span>
+                </div>
+                <p class="hint" id="m-oct-read"></p>
+                <p class="hint">&uarr; and &darr; transpose in Play, and whenever a
+                  controller is connected; &larr; and &rarr; still orbit the view.</p>
+              </div>
+
+              <div id="m-live" style="display:none">
+                <label for="m-in">Input</label>
+                <select id="m-in"
+                  title="Which attached device is listened to. All inputs takes notes from every one of them at once."></select>
+                <p class="hint" id="m-none" style="display:none;color:var(--warn)">
+                  Nothing is plugged in. Connect a controller &mdash; it is picked up
+                  without reloading.</p>
+
+                <div class="tune-h" style="margin-top:12px">Last note in</div>
+                <div class="tune-read" id="m-last">&mdash;</div>
+
+                <label for="m-origin">MIDI note that plays key 0</label>
+                <input id="m-origin" type="number" min="0" max="127" step="1" value="60"
+                  title="Where the controller is laid on the keyboard. The keys are read as one ascending run — one MIDI number per key, black notes included — so a controller's octave is not this instrument's. The octave shift transposes the keys rather than moving this.">
+                <p class="tune-read" id="m-map" style="margin-top:5px"></p>
+
+                <div class="midi-row">
+                  <label class="vis" for="m-vel"
+                    title="Take how hard each key was struck from the controller. Off, every note sounds at full.">
+                    <input type="checkbox" id="m-vel" checked>velocity</label>
+                  <button id="m-panic"
+                    title="Let go of every note MIDI is holding, and lift the sustain pedal.">panic</button>
+                </div>
+              </div>
+            </div>
           </fieldset>
         </div>
       </div>
@@ -743,6 +823,7 @@
       <div id="inspect"></div>
     </div>
     <div id="strip"><div id="stripInner"></div></div>
+    <div id="stripHandle" title="tap to hide the keyboard editor"><span class="grip"></span></div>
     <div id="viewbar2">
       <div class="grp" id="visgrp"></div>
       <div class="sep"></div>
@@ -772,6 +853,7 @@
 <script src="presets-shared.js"></script>
 <script type="module" src="tuning.js"></script>
 <script type="module" src="play.js"></script>
+<script type="module" src="midi.js"></script>
 <script src="profiles.js"></script>
 <script src="model.js"></script>
 <script src="core.js"></script>
@@ -1651,7 +1733,10 @@ function mkGrip(gid, title){
  * stands; the lift is stated as air rather than pretended away.  The 3D view
  * is where the rig is measured, and it draws the offsets as they are.
  */
-const ROW_H = 170;    // px one unit's band is — unchanged from the single strip
+const ROW_H = 142;    // px one unit's band is — sized to the tallest thing drawn
+                      // in it (a white key's 14px headroom + its 127.6px body),
+                      // so the band's own bottom margin is the only air left,
+                      // matching the one above it instead of stacking a second.
 const ROW_GAP = 12;   // px between two bands — the stack, said in a plan
 
 /* ===================== building the rig =====================
@@ -3966,6 +4051,24 @@ for(const btn of railPane.querySelectorAll('.rail-btn')){
   };
 }
 setMode(railPane.querySelector('.rail-btn[aria-expanded="true"]')?.dataset.drawer);
+
+/* ===================== strip collapse =====================
+ * The same move as the rail: tapping the bar you're already looking at
+ * shuts it and gives its height back to the 3D view, rather than a
+ * separate button elsewhere asking to be found. Remembered like the rest
+ * of the design is, so it stays shut across a reload if that's how the
+ * user left it. */
+const STRIP_LS = 'xenachord-strip-collapsed';
+function setStripCollapsed(on){
+  document.body.classList.toggle('strip-collapsed', on);
+  $('stripHandle').classList.toggle('collapsed', on);
+  $('stripHandle').title = on ? 'tap to show the keyboard editor'
+                              : 'tap to hide the keyboard editor';
+  try{ localStorage.setItem(STRIP_LS, on ? '1' : '0'); }catch(e){}
+}
+$('stripHandle').onclick = () =>
+  setStripCollapsed(!document.body.classList.contains('strip-collapsed'));
+setStripCollapsed(localStorage.getItem(STRIP_LS) === '1');
 
 /* The viewport is what the panel gives back, and it is measured rather than
  * computed — the width animates, so one redraw at the end would show a

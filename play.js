@@ -111,7 +111,15 @@ const sustained = new Set();
 /** What the synth currently has on, so it is told only about changes. */
 let ringing = new Set();
 
-let pedal = false;
+/**
+ * Who is holding the pedal down.
+ *
+ * A set rather than a flag because there are two of them — the Shift key and
+ * a sustain pedal plugged into a MIDI controller — and either one letting go
+ * must not lift the other's. The pedal is down while anything is on it.
+ */
+const pedals = new Set();
+const pedalDown = () => pedals.size > 0;
 
 function keyEls(note) {
   return document.querySelectorAll(`#stripInner [data-note="${note}"]`);
@@ -141,7 +149,7 @@ function settle() {
   if (typeof window.setSounding === 'function') window.setSounding(want);
 }
 
-function press(pointerId, note) {
+function press(pointerId, note, vel = 1) {
   if (note == null || held.get(pointerId) === note) return;
   release(pointerId);
   const hz = window.XTuning?.freqs?.[note];
@@ -150,7 +158,9 @@ function press(pointerId, note) {
   // and the note is re-struck rather than left ringing from before.
   sustained.delete(note);
   held.set(pointerId, note);
-  voice.noteOn(note, hz);
+  /* A pointer has no velocity to report and asks for a full one; a MIDI key
+   * has, and it is the whole difference between the two ways of playing. */
+  voice.noteOn(note, hz, vel);
   settle();
 }
 
@@ -158,17 +168,21 @@ function release(pointerId) {
   const note = held.get(pointerId);
   if (note == null) return;
   held.delete(pointerId);
-  if (pedal) sustained.add(note);
+  if (pedalDown()) sustained.add(note);
   settle();
 }
 
 function releaseAll() {
   held.clear();
   sustained.clear();
-  pedal = false;
+  pedals.clear();
   settle();
   voice.allOff();
   ringing = new Set();
+  /* Leaving Play drops every note at once, and anything keeping its own list
+   * of what it is holding — MIDI does, because a note-off has to let go of
+   * the key its note-on took — would otherwise go on believing it. */
+  window.dispatchEvent(new CustomEvent('xenachord:allnotesoff'));
 }
 
 /* ---------------------------------------------------------------------
@@ -183,22 +197,23 @@ function releaseAll() {
  *  is sounding for it to hold.
  * ------------------------------------------------------------------ */
 
-function setPedal(down) {
-  if (pedal === down) return;
-  pedal = down;
-  if (!pedal) { sustained.clear(); settle(); }
+function setPedal(src, down) {
+  const was = pedalDown();
+  if (down) pedals.add(src); else pedals.delete(src);
+  if (was === pedalDown()) return;
+  if (!pedalDown()) { sustained.clear(); settle(); }
 }
 
 window.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Shift' && inPlay()) setPedal(true);
+  if (ev.key === 'Shift' && inPlay()) setPedal('shift', true);
 });
 window.addEventListener('keyup', (ev) => {
-  if (ev.key === 'Shift') setPedal(false);
+  if (ev.key === 'Shift') setPedal('shift', false);
 });
 /* A pedal cannot be let up on a window that is not listening: leaving the
  * page with it down would come back to a keyboard holding notes with nothing
  * pressing them. */
-window.addEventListener('blur', () => setPedal(false));
+window.addEventListener('blur', () => setPedal('shift', false));
 
 /* ---------------------------------------------------------------------
  *  The strip, in Play
@@ -325,4 +340,23 @@ window.XPlay = {
     return true;
   },
   releaseAll,
+
+  /* ------------------------------------------------------------------
+   *  What a MIDI controller plays through
+   *
+   *  Not a second sound path: the same press/release/settle the strip and
+   *  the 3D view go through, handed an id of its own so a hardware key and
+   *  a finger holding the same note are two holders of it and the first to
+   *  let go does not stop the other. Everything that follows from a note
+   *  going down — the pitch Scale/Tuning gave it, the key lighting on the
+   *  strip and in the 3D view, the pedal — is had by being the same path,
+   *  rather than by being kept in step with it.
+   * --------------------------------------------------------------- */
+  midi: {
+    press: (id, note, vel) => press(id, note, vel),
+    release: (id) => release(id),
+    /** A sustain pedal on the controller, alongside Shift and not under it. */
+    pedal: (down) => setPedal('midi', down),
+    panic: releaseAll,
+  },
 };
