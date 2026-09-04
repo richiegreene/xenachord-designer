@@ -204,7 +204,11 @@
   #stripInner, #stripInner *{box-sizing:border-box}
   .kb-white{position:absolute;background:var(--spine);border:1px solid #55565f;
     border-radius:0 0 3px 3px;color:var(--key-text,#444);font-size:9px;text-align:center}
-  .kb-white .nm{position:absolute;bottom:2px;left:0;right:0;white-space:nowrap}
+  .kb-white .nm{position:absolute;bottom:18px;left:2px;right:2px;display:block;
+    white-space:nowrap;text-align:center}
+  .kb-m .nm{position:absolute;left:2px;right:2px;top:50%;display:block;
+    white-space:nowrap;text-align:center;color:#f0f0f2}
+  .kb-m.g .nm{color:#141419}
   .kb-slot{position:absolute;border-radius:3px;
     outline:1px dashed transparent;outline-offset:-1px}
   .kb-slot.empty{outline-color:#3a3b45;background:rgba(255,255,255,.03)}
@@ -215,11 +219,9 @@
   .kb-slot.end.empty{outline-color:#4b5568;outline-style:dashed;
     background:rgba(126,180,255,.05)}
   .kb-slot.over{outline-color:var(--accent);background:#2a3a4c}
-  .kb-m{position:absolute;border-radius:2px;cursor:pointer;border:1px solid rgba(0,0,0,.5);
-    outline:3px solid var(--strip-bg);outline-offset:0;z-index:2}
+  .kb-m{position:absolute;border-radius:2px;cursor:pointer;border:1px solid #55565f;
+    outline:0;z-index:2}
   .kb-m.b{background:var(--kb)} .kb-m.g{background:var(--kg)}
-  .kb-foot{position:absolute;background:#3d5f7d;border-radius:1px;opacity:.9}
-  .kb-foot.half-b{box-shadow:-2px 0 0 var(--accent)}
   .kb-spine{display:none}
   .kb-over{outline:2px solid var(--accent)}
   /* ---------- which keyboard of the rig a band is ----------
@@ -308,14 +310,17 @@
     white-space:nowrap;pointer-events:none;line-height:1;text-align:center}
   /* In Play the enumeration is not drawn, so the name takes the foot of the
      key it used to share — the same seat, and the whole of it. */
-  .kb-white .kb-tune{bottom:4px;color:var(--key-text,#26272c);font-size:10px}
-  .kb-m .kb-tune{bottom:4px;color:#f0f0f2;font-size:9px}
+  .kb-white .kb-tune{bottom:16px;color:var(--key-text,#26272c);font-size:10px}
+  .kb-m .kb-tune{color:#f0f0f2;font-size:9px}
   .kb-m.g .kb-tune{color:#141419}
   /* A key answers one question at a time: in Design it is the position it
      holds in the arrangement, in Play the pitch it carries. Both at once is
      two numbers in a 20px box and neither of them reads. */
-  body:not(.mode-play) .kb-tune{display:none}
-  body.mode-play .kb-white .nm{display:none}
+  body:not(.mode-play):not(.mode-export) .kb-tune{display:none}
+  body.mode-play .kb-white .nm,
+  body.mode-export .kb-white .nm,
+  body.mode-play .kb-m .nm,
+  body.mode-export .kb-m .nm{display:none}
   /* Holding and dragging across keys is how the 3D view is played (#gl is
      touch-action:none for the same reason); the strip needs the same so a
      touch glissando slides across notes instead of scrolling the strip. */
@@ -368,11 +373,13 @@
   body.mode-play .kb-band-tag .ed{display:none}
   body.mode-play .kb-band-veil{display:none}
   body.mode-play .kb-slot.empty,
-  body.mode-play .kb-slot.end.empty{outline-color:transparent;background:none}
+  body.mode-play .kb-slot.end.empty,
+  body.mode-export .kb-slot.empty,
+  body.mode-export .kb-slot.end.empty{outline-color:transparent;background:none}
   body.mode-play .kb-white,
   body.mode-play .kb-m{cursor:pointer}
   body.mode-play .kb-white.sounding{background:var(--accent)!important}
-  body.mode-play .kb-m.sounding{outline:2px solid var(--accent);outline-offset:-1px}
+  body.mode-play .kb-m.sounding{outline:0}
 
   /* ---------- the strip as a text field ----------
      Custom's editor arms the keys for typing rather than for playing, so the
@@ -387,7 +394,10 @@
   body.tune-edit .kb-m{cursor:text}
   body.tune-edit .kb-white.editing{outline:2px solid var(--ok);outline-offset:-1px;
     z-index:9}
-  body.tune-edit .kb-m.editing{outline:2px solid var(--ok);outline-offset:-1px;z-index:9}
+  body.tune-edit .kb-m.editing{outline:0;z-index:9}
+  body.tune-edit .editing .nm,
+  body.tune-edit .editing .kb-tune{text-decoration:underline;
+    text-decoration-color:var(--ok);text-decoration-thickness:2px;text-underline-offset:3px}
   /* A degree that has been typed reads differently from one still on its Auto
      value, so "what have I actually changed?" is answerable by looking. */
   body.mode-play .kb-white.tuned .kb-tune,
@@ -2071,6 +2081,13 @@ function applyLabelSizing(){
       label.style.fontSize = '';
       label.style.maxWidth = 'none';
       label.style.overflow = 'visible';
+      label.style.transform = key.classList.contains('kb-m')
+        ? 'translateY(-50%)' : 'none';
+      if (key.classList.contains('kb-m')) {
+        label.style.left = '2px';
+        label.style.right = '2px';
+        label.style.top = '50%';
+      }
       const base = label.classList.contains('kb-tune') && key.classList.contains('kb-white')
         ? 10 : 9;
       label.style.fontSize = (base * labelScale) + 'px';
@@ -2131,16 +2148,6 @@ function buildUnit(u, inner, rows){
               `${L.spineKind} type Spine - ${nm}, ${topLayer} layer on top`;
     inner.appendChild(d);
   }
-  // the 32 feet
-  L.feet.forEach((fx,i)=>{
-    const d = document.createElement('div'); d.className='kb-foot';
-    if (i===XM.FEET_PER_HALF) d.classList.add('half-b');
-    d.style.left = X(fx-XM.FOOT.w/2)+'px'; d.style.width=(XM.FOOT.w*PX)+'px';
-    d.style.top = Y(XM.FOOT.yCentre-XM.FOOT.d/2)+'px';
-    d.style.height = (XM.FOOT.d*1.5)+'px';
-    d.title = `foot ${i} (half ${i<XM.FEET_PER_HALF?'A':'B'})${of} @ x ${fx.toFixed(5)}`;
-    inner.appendChild(d);
-  });
   /* the front band of a white — below everything an accidental reaches —
    * is where its two boundary grips stand; see the .kb-grip note above */
   const GRIP_TOP = Y(0) + 54*1.5 + 4, GRIP_H = 85.0688*1.5 - 54*1.5 - 8;
@@ -2176,11 +2183,12 @@ function buildUnit(u, inner, rows){
   // slots
   for (const sl of L.slots){
     const d = document.createElement('div');
-    d.className = 'kb-slot' + (sl.members.length ? '' : ' empty');
+    const held = XM.pairOfSlot(sl.names);
+    d.className = 'kb-slot' + (sl.members.length ? '' : ' empty') +
+      (held ? ' split' : '');
     d.style.left = X(sl.x0-1)+'px'; d.style.width=((sl.w+2)*PX)+'px';
     d.style.top = Y(0)+'px'; d.style.height = (54*1.5)+'px';
     if (sl.end) d.classList.add('end');
-    const held = XM.pairOfSlot(sl.names);
     const lanes = !!sl.lanes;
     /* the two ends are gaps like any other, but "gap -1" is not what they
      * are to the person reading the strip */
@@ -2195,7 +2203,11 @@ function buildUnit(u, inner, rows){
                     : lanes ? '  ·  ' + sl.members.map(m => m.type.replace('Full Sized ',''))
                                           .join(' | ') + ', side by side'
                     : '');
-    const ordered = sl.members.slice().sort((a,b)=>b.spec.depth-a.spec.depth);
+    const ordered = sl.members.slice().sort((a,b)=>{
+      if (held) return a.spec.pairRole === 'rear' ? -1 : 1;
+      return b.spec.depth-a.spec.depth;
+    });
+    let splitTop = 0;
     for (const m of ordered){
       const k = document.createElement('div');
       k.className = 'kb-m ' + cssOf(m.type);
@@ -2206,8 +2218,12 @@ function buildUnit(u, inner, rows){
        * key, so nothing about the split slots moves. */
       k.style.left = ((m.x0 - sl.x0 + 1)*PX)+'px';
       k.style.width = (m.w*PX)+'px';
-      k.style.top = '0px';
-      k.style.height = (m.spec.depth*1.5)+'px';
+      k.style.top = (held ? splitTop : 0) + 'px';
+      const keyHeight = m.spec.depth * 1.5;
+      k.style.height = (held && m.spec.pairRole === 'front'
+        ? keyHeight - splitTop : keyHeight) + 'px';
+      if (held) splitTop += keyHeight;
+      k.innerHTML = `<span class="nm">${m.noteIndex != null ? note(m.noteIndex) : ''}</span>`;
       k.title = live ? (held ? `${held} (${m.type}) — click to remove the pair`
                              : lanes ? `${m.type} — click to remove it and leave the other`
                              : `${m.type} — click to remove`)
@@ -4481,6 +4497,7 @@ function openDrawer(name){
  * whether a key shows its position or its pitch. */
 function setMode(name){
   document.body.classList.toggle('mode-play', name === 'play');
+  document.body.classList.toggle('mode-export', name === 'export');
   // Nothing may be left ringing on the way out — a note that outlived the
   // mode that could stop it would have no key to let go of.
   if(name !== 'play' && window.XPlay) window.XPlay.releaseAll();
