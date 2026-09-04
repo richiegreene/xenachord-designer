@@ -3989,12 +3989,11 @@ function makeBufs(meshes){
   for(const k of Object.keys(meshes)){
     if(k==='spine'||k==='spineLayers') continue;      // spine goes in per layer
     if(k==='press'||k==='pressLayers') continue;      // press goes in per colour
-    /* The feet are no longer drawn.  Every pad face is now the bottom cap
-       of its own sensor press, in the same plane and the same outline, so
-       drawing both puts two coincident surfaces in the depth buffer and
-       they flicker against each other.  The feet are still built, still
-       exported and still written to the Blender log — they are simply not
-       a separate thing to look at once the press is there. */
+    /* There are no feet to draw, and no feet to skip: a sensor foot is not
+       an object anywhere any more.  Its pad face is the bottom cap of its
+       own sensor press and its pairing loop is the top, so the press IS the
+       foot, drawn once.  Kept as a guard because an older saved mesh set
+       may still carry the key. */
     if(k==='feet') continue;
     if(!Array.isArray(meshes[k])) continue;           // e.g. pressLayers, an object
     if(meshes[k].length) buffers[k]=meshToBuffer(meshes[k]);

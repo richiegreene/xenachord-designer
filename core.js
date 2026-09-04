@@ -972,21 +972,35 @@
   /* ------------------------------------------------------------------ *
    *  MESHES                                                             *
    * ------------------------------------------------------------------ */
-  /** the boss boxes, resolved per half and band, for the Python builder */
+  /**
+   * The boss/gusset spans, resolved per half and band, for the Python
+   * builder.  Each is the TONGUE's own z — the DRAFTED band clipped to the
+   * tongue of the colour that band prints in, not the band as separated by
+   * FIT.gap: that gap is a rule about the bands, which share the y < 0
+   * side, and both the boss and the gusset stand in front of the spine
+   * face where no other colour reaches.  See THE TONGUE ROOT IS THE WHOLE
+   * JOINT in model.js.
+   */
   function spineBossSpans(L) {
     const T = { gray: XM.Z.grayTongue, black: XM.Z.blackTongue,
                 white: XM.Z.whiteTongue };
     const out = [];
     for (const [hn, half] of XM.spineHalves())
-      for (const band of XM.spineBands(L.spineKind, hn))
+      for (const band of XM.spineBands(L.spineKind, hn)) {
+        /* by FILAMENT: a key's layer is its colour, a band's name is the
+         * sheet it came off ('all' / 'lower' / 'upper' / the colours) */
+        const part = XM.spineLayerPart(L.spineKind, band.name);
+        const t = T[part];
+        if (!t) continue;
         for (const k of keySpans(L)) {
-          if (k.layer !== band.name || !T[band.name]) continue;
+          if (k.layer !== part) continue;
           const a = Math.max(k.x0, half.x0), b = Math.min(k.x1, half.x1);
-          const z0 = Math.max(band.z0, T[band.name][0]);
-          const z1 = Math.min(band.z1, T[band.name][1]);
+          const z0 = Math.max(band.z0Drafted, t[0]);
+          const z1 = Math.min(band.z1Drafted, t[1]);
           if (b - a > 1e-4 && z1 - z0 > 1e-4)
             out.push({ layer: band.name, x0: a, x1: b, z0, z1 });
         }
+      }
     return out;
   }
 
@@ -1051,6 +1065,21 @@
   }
   const armKey = (type, cx) => type + '@' + Math.round(cx * 1e4);
 
+  /**
+   * Where each key's tongue laps into the spine — see THE TONGUE DOES NOT
+   * STOP AT THE SPINE FACE in model.js.  Keyed like armTargets so the key
+   * builders can look their own up.
+   */
+  function lapTargets(L, bkeys) {
+    const m = new Map();
+    for (const k of bkeys) {
+      const s = XM.keyBackSpan(k.cx, k.w, k.type, k.lb, k.rb);
+      const lap = s ? XM.tongueLaps(L.spineKind, k.layer, s) : [];
+      if (lap.length) m.set(armKey(k.type, k.cx), lap);
+    }
+    return m;
+  }
+
   /* ------------------------------------------------------------------ *
    *  WHICH HALF OF THE INSTRUMENT A PIECE BELONGS TO                    *
    *                                                                     *
@@ -1097,15 +1126,18 @@
      * bars to stand on the sensor press.  See THE KEY'S OWN ARMS. */
     const bkeys = pairKeys(L);
     const arms = armTargets(bkeys);
+    const laps = lapTargets(L, bkeys);
     for (const w of L.whites)
       mark('keys', 'white', w.half, arr =>
         arr.push(...XM.buildKey(w.cx, w.w, w.type, w.ctxL, w.ctxR, null,
-                                arms.get(armKey(w.type, w.cx)))));
+                                arms.get(armKey(w.type, w.cx)),
+                                laps.get(armKey(w.type, w.cx)))));
     for (const sl of L.slots) {
       for (const m of sl.members)
         mark('keys', m.spec.layer, m.half, arr =>
           arr.push(...XM.buildKey(m.cx, m.w, m.type, null, null, null,
-                                  arms.get(armKey(m.type, m.cx)))));
+                                  arms.get(armKey(m.type, m.cx)),
+                                  laps.get(armKey(m.type, m.cx)))));
     }
     /* The spine is the drafted one for this design's colour count — the
      * "<kind> type Spine - A / - B" pair.  Keep it whole for the STL, and
@@ -1130,10 +1162,11 @@
       (out.spans.spine[part] = out.spans.spine[part] || [])
         .push({ half: p.half, i0, i1: arr.length });
     }
-    /* A foot is its pad face plus the pairing face of the key it belongs
-     * to — the two loops the press is built between. */
-    out.feet = XM.buildFeet(bkeys);
-
+    /* NO FEET.  A foot used to be an object of its own — the pad face and
+     * the key's pairing face, two floating loops with nothing between them
+     * — but a face with no volume cannot go in an STL, so the exports never
+     * carried one and the Blender scene held 32 objects they did not.  The
+     * two loops are still built; they are the ends of the press below. */
     /* THE SENSOR PRESS.  Each key's loop pair, closed into a watertight
      * solid.  It prints as part of its key, in its key's filament — but it
      * is kept OUT of the key colour's mesh here and merged only at export
@@ -1556,8 +1589,8 @@
      * nothing about it would be describing a different instrument from the
      * one on screen. */
     /* ---- the rig this keyboard is one device of ----
-     * The log describes ONE device — its keys, its spine, its feet — because
-     * one device is what gets printed.  What it adds here is the desk that
+     * The log describes ONE device — its keys, its spine, its presses —
+     * because one device is what gets printed.  What it adds here is the desk that
      * device stands on: where the others are, and what each one's keys are
      * called in the run the rig is read as.  The devices may be different
      * keyboards, so the offsets and the numbering are stated for all of them
@@ -1631,6 +1664,9 @@
     p('# that slot is empty), because the drafted whites rib differently');
     p('# depending on what sits beside them.');
     p('# KEYS is always exactly 32 entries long. KEYS[i] belongs to FEET[i].');
+    p('# `lap` is where that key\'s tongue carries on THROUGH the spine face and');
+    p('# into its own band — (x0, x1, y0, y1, z0, z1) boxes, normally one, two');
+    p('# only for a key straddling the A/B seam.  See build_key.');
     p('# "arm_x" places the two arms of the key\'s underside "-| |-" on their');
     p('# own bars, in x: one value per stem line ("arm_a"/"arm_b" in the profile');
     p('# below), so the pair lands on the stems of the sensor press standing');
@@ -1640,6 +1676,9 @@
     p('# its centreline — neither survives a change of layout.  Nothing else of');
     p('# the key moves — see THE KEY\'S OWN ARMS in model.js.');
     p('KEYS = [');
+    /* the object name each key is given, so PARITY below can be written
+     * against the very names build() will hand to make_mesh_object */
+    const objName = new Map();
     /* the sibling land a split half needs before its press — and so its
      * arms — can be placed; pairKeys is where that pairing is worked out */
     const armSib = new Map();
@@ -1653,7 +1692,10 @@
       const nm = 'K' + String(n.index).padStart(2, '0') + '_' +
         (n.kind === 'white' ? 'W' + r.i
                             : 'A' + r.slot + '_' + (r.ord + 1));
+      objName.set(n.type + '@' + Math.round(r.cx * 1e4), nm);
       const lb = white ? r.ctxL : null, rb = white ? r.ctxR : null;
+      const bs = XM.keyBackSpan(r.cx, w, n.type, lb, rb);
+      const lap = bs ? XM.tongueLaps(L.spineKind, spec.layer, bs) : [];
       p('    ("', nm, '", "', n.type, '", ',
         pn(r.cx), ', ', pn(w), ', ', f(e.y1 - e.y0), ', "', n.profileKey, '", ',
         f(r.cx + W.x0, 4), ', ', f(W.y0, 4), ', ', f(e.z0 + W.z0), ', ',
@@ -1662,7 +1704,8 @@
           return P ? '(' + pn(P[0]) + ', ' + pn(P[1]) + ')' : 'None';
         })(r.foot == null ? null
            : XM.armPlaceFor(r.cx, w, n.type, lb, rb, r.foot, armSib.get(n.index))),
-        '),');
+        ', [', lap.map(q => '(' + [q.x0, q.x1, q.y0, q.y1, q.z0, q.z1]
+                                    .map(pn).join(', ') + ')').join(', '), ']),');
     }
     p(']');
     p('');
@@ -1699,8 +1742,21 @@
     p('    ],');
     p('    # Where each band reaches FORWARD into the keys of its own colour,');
     p('    # so that a comb unions into one solid instead of two coplanar');
-    p('    # faces a boolean solver cannot join.  (layer, x0, x1, z0, z1).');
+    p('    # faces a boolean solver cannot join.  (layer, x0, x1, z0, z1) —');
+    p('    # z is the TONGUE\'s own, the drafted band clipped to it.');
+    p('    #');
+    p('    # "fillet" is the 45-degree gusset laid in the corner where that');
+    p('    # tongue meets the spine — under it, over the same x span.');
+    p('    # The tongue is the ENTIRE joint between a key and the spine — a');
+    p('    # flange about a millimetre thick, five printed layers — and it');
+    p('    # used to butt into the band square, with air on both sides: the');
+    p('    # slicer had no corner to wrap and the sharp root was where the');
+    p('    # bending moment peaked.  The gusset costs no clearance: it is');
+    p('    # the band\'s own filament, in front of the spine face, over the');
+    p('    # key\'s own back span.');
     p('    "boss_depth": ', pn(XM.FIT.engage), ',');
+    p('    "fillet": ', pn(XM.FIT.fillet), ',');
+    p('    "gap":    ', pn(XM.FIT.gap), ',   # clearance between colours');
     p('    "boss": [');
     for (const b of spineBossSpans(L))
       p('        ("', b.layer, '", ', pn(b.x0), ', ', pn(b.x1), ', ',
@@ -1748,10 +1804,11 @@
     const bkeys = pairKeys(L);
     const audit = XM.pairAudit(bkeys);
     p('# --- FOOT LOOP PAIRS ----------------------------------------------------');
-    p('# A foot is TWO FLOATING FACES and nothing else.  There is no connector,');
-    p('# no plinth, no ramp and no weld into the key: the pair of loops states');
-    p('# the relationship between a key and ITS OWN sensor foot (KEYS[i] ->');
-    p('# FEET[i]), and stating it is all this stage does.');
+    p('# The two loops that state the relationship between a key and ITS OWN');
+    p('# sensor foot (KEYS[i] -> FEET[i]).  They are NOT objects: a loop has no');
+    p('# volume, so nothing here builds one on its own and no STL could carry');
+    p('# it.  They are the two ends of the sensor press, which is the solid');
+    p('# built between them — see build_press.');
     p('#');
     p('#   PAD FACE    the drafted "-| |-" exactly as "Feet - A" / "Feet - B"');
     p('#               draw it, flat at z = ', pn(XM.FOOT.z),
@@ -1828,6 +1885,29 @@
     p(']');
     p('assert len(PAIRS) == 32, "one loop pair per key"');
     p('');
+
+    /* ---- PARITY -----------------------------------------------------
+     * This file and the browser build the same objects out of the same
+     * numbers, and the STLs are those same objects folded at the spine
+     * seam and turned face-down for a bed — nothing else differs.  That
+     * only stays true if the two builders stay in step, and they are two
+     * separate bodies of code, so it is checked rather than trusted: one
+     * digest per object, computed on the browser's own triangles and
+     * recomputed here as each object is made.  Drift is caught at build
+     * time, by name, instead of in a slicer. */
+    p('# --- PARITY -------------------------------------------------------------');
+    p('# One checksum per object, over the browser\'s own triangles, quantised');
+    p('# to a nanometre.  make_mesh_object recomputes each as it builds and');
+    p('# stops on a mismatch: this file and the WebGL preview are meant to');
+    p('# produce the same meshes, and the exported STLs are those same meshes');
+    p('# folded at the spine seam and laid face-down on a bed.  If model.js and');
+    p('# this builder ever drift apart, the build says so here.');
+    p('PARITY = {');
+    for (const [nm, tris] of parityObjects(L, objName))
+      p('    "', nm, '": ', XM.meshChecksum(tris), ',');
+    p('}');
+    p('');
+
     if (L.warnings.length) {
       p('# --- warnings on this design -------------------------------------------');
       for (const w of L.warnings) p('#   ! ', w);
@@ -1857,6 +1937,34 @@
    *  and the profile table is copied verbatim from profiles.js, so       *
    *  Blender evaluates the identical doubles the browser did.           *
    * ------------------------------------------------------------------ */
+
+  /**
+   * EVERY OBJECT THE BLENDER BUILD MAKES, named as build() will name it and
+   * built exactly as buildMeshes builds it for the STLs — the keys with
+   * their arms placed, the spine with its bosses and root gussets, and the
+   * sensor presses.  Used only to write PARITY; the meshes themselves are
+   * thrown away.
+   */
+  function parityObjects(L, objName) {
+    const out = [];
+    const bkeys = pairKeys(L);
+    const arms = armTargets(bkeys);
+    const laps = lapTargets(L, bkeys);
+    const key = k => objName.get(k.type + '@' + Math.round(k.cx * 1e4));
+    for (const w of L.whites)
+      out.push([key(w), XM.buildKey(w.cx, w.w, w.type, w.ctxL, w.ctxR, null,
+                                    arms.get(armKey(w.type, w.cx)),
+                                    laps.get(armKey(w.type, w.cx)))]);
+    for (const sl of L.slots)
+      for (const m of sl.members)
+        out.push([key(m), XM.buildKey(m.cx, m.w, m.type, null, null, null,
+                                      arms.get(armKey(m.type, m.cx)),
+                                      laps.get(armKey(m.type, m.cx)))]);
+    for (const p of XM.spineParts(L.spineKind, keySpans(L)))
+      out.push([p.name, p.tris]);
+    for (const p of XM.pressParts(bkeys)) out.push([p.name, p.tris]);
+    return out.filter(e => e[0]);
+  }
 
   /** the profiles this design actually uses, keyed for the Python table */
   function usedProfiles(L) {
@@ -1930,12 +2038,25 @@
 # are written out.
 #
 # Run this in Blender and you get the WebGL preview: the same parts, the same
-# vertices, the same faces, in the same places.
+# vertices, the same faces, in the same places — and the same objects the
+# exported STLs carry, every one of them, checked object by object against
+# the browser's own checksums (see PARITY above).  An STL differs from this
+# scene ONLY in where the parts stand: it is folded at the spine seam into
+# two rows and turned playing-face down for a print bed, and it is merged
+# into one mesh per filament colour.  Nothing about the geometry changes in
+# the move, and there is nothing in the one that is not in the other.
+#
+# There is no "Feet" collection.  A sensor foot is not an object: its pad
+# face and the key's pairing loop have no thickness and no volume, so no
+# STL could carry them.  Both loops are still here as the two ends of the
+# sensor press, which is the solid built between them.
 #
 # Set USE_BLEND_CATEGORIES = True to duplicate the sandbox's own objects
 # instead.  That only works inside the drafting .blend, and it is no longer
 # more accurate than building from the profiles — it is the same geometry.
 # =========================================================================
+import math
+
 import bpy
 from mathutils import Vector
 
@@ -1951,6 +2072,7 @@ SHEET_X0, SHEET_Y0, SHEET_Z0 = ${pn(XM.WORLD.x0)}, ${pn(XM.WORLD.y0)}, ${pn(XM.W
 FOOT_W, FOOT_D   = ${pn(XM.FOOT.w)}, ${pn(XM.FOOT.d)}
 FOOT_YC, FOOT_Z  = ${pn(XM.FOOT.yCentre)}, ${pn(XM.FOOT.z)}
 FIT_ENGAGE       = ${pn(XM.FIT.engage)}   # overlap that makes a comb one solid
+FIT_LAP          = ${pn(XM.FIT.lap)}   # how far a tongue carries on past the spine face
 FIT_GAP          = ${pn(XM.FIT.gap)}   # clearance between the stacked bands
 
 # THE FOOT IS NOT A RECTANGLE.  "Feet - A" / "Feet - B" draw all 32 feet as
@@ -2092,12 +2214,124 @@ def triangulate_face(V, ring):
 # =========================================================================
 # KEY GEOMETRY — a drafted profile, instantiated
 # =========================================================================
-def build_key(cx, w, prof, arm_x=None):
+# =========================================================================
+# T-JUNCTIONS
+#
+# A drafted profile's faces do not all share their corners: one face's edge
+# can run past the corner of the face next to it, so the two meet along a
+# T rather than along a shared edge.  Triangulated as they are, that leaves
+# an edge used once on one side and twice on the other -- an open edge, and
+# a slicer will not call the part closed.  The fix is to split the long
+# edge at the point standing on it, which is what weld_t_junctions does.
+#
+# This is model.js's weldTJunctions, line for line, INCLUDING the quantised
+# point key: Math.round is floor(v + 0.5), not Python's banker's round, and
+# the edge key is compared as a STRING, so the two builders walk the open
+# edges in the same order and split them into the same triangles.
+# =========================================================================
+WELD_TOL = 1e-5
+
+
+def _weld_key(p):
+    return "%d,%d,%d" % (math.floor(p[0] / WELD_TOL + 0.5),
+                         math.floor(p[1] / WELD_TOL + 0.5),
+                         math.floor(p[2] / WELD_TOL + 0.5))
+
+
+def open_edge_set(t):
+    """the directed edges used exactly once by the triangle soup t"""
+    n = {}
+    for i in range(0, len(t), 3):
+        v = (_weld_key(t[i]), _weld_key(t[i + 1]), _weld_key(t[i + 2]))
+        for j in range(3):
+            a, b = v[j], v[(j + 1) % 3]
+            if a == b:
+                continue
+            u = (a + "|" + b) if a < b else (b + "|" + a)
+            n[u] = n.get(u, 0) + 1
+    return [u for u, c in n.items() if c == 1]
+
+
+def weld_t_junctions(t):
+    for _ in range(6):
+        opened = open_edge_set(t)
+        if not opened:
+            break
+        open_set = set(opened)
+        # the only points that can split an open edge are points already
+        # standing on one -- the far side of the same T
+        cand = {}
+        for i in range(0, len(t), 3):
+            for j in range(3):
+                k = _weld_key(t[i + j])
+                if k not in cand:
+                    cand[k] = t[i + j]
+        on_open = {}
+        for u in opened:
+            a, b = u.split("|")
+            on_open[a] = True
+            on_open[b] = True
+        pts = [(k, cand[k]) for k in on_open if k in cand]
+
+        out = []
+        changed = False
+        for i in range(0, len(t), 3):
+            V = (t[i], t[i + 1], t[i + 2])
+            KK = (_weld_key(V[0]), _weld_key(V[1]), _weld_key(V[2]))
+            best = None
+            for e in range(3):
+                a, b = V[e], V[(e + 1) % 3]
+                ka, kb = KK[e], KK[(e + 1) % 3]
+                u = (ka + "|" + kb) if ka < kb else (kb + "|" + ka)
+                if u not in open_set:
+                    continue
+                dx, dy, dz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
+                l2 = dx * dx + dy * dy + dz * dz
+                if l2 < WELD_TOL * WELD_TOL:
+                    continue
+                hit = []
+                for (qk, qp) in pts:
+                    if qk == ka or qk == kb:
+                        continue
+                    px, py, pz = qp[0] - a[0], qp[1] - a[1], qp[2] - a[2]
+                    sp = (px * dx + py * dy + pz * dz) / l2
+                    if not (sp > 1e-9 and sp < 1.0 - 1e-9):
+                        continue
+                    ex, ey, ez = px - sp * dx, py - sp * dy, pz - sp * dz
+                    if ex * ex + ey * ey + ez * ez > WELD_TOL * WELD_TOL:
+                        continue
+                    hit.append((sp, qp))
+                if hit and (best is None or len(hit) > len(best[1])):
+                    best = (e, hit)
+            if best is None:
+                out.append(V[0]); out.append(V[1]); out.append(V[2])
+                continue
+            changed = True
+            e, hit = best
+            # fan from the corner OPPOSITE the edge being split: every piece
+            # keeps the parent's winding and none of them is degenerate
+            hit.sort(key=lambda h: h[0])
+            a, b, c = V[e], V[(e + 1) % 3], V[(e + 2) % 3]
+            chain = [a] + [h[1] for h in hit] + [b]
+            for j in range(len(chain) - 1):
+                out.append(chain[j]); out.append(chain[j + 1]); out.append(c)
+        t = out
+        if not changed:
+            break
+    return t
+
+
+def build_key(cx, w, prof, arm_x=None, laps=()):
     """A drafted profile instantiated at this key's width, with the two arms
     of its underside "-| |-" placed at arm_x -- one x per stem line -- so they
     stand on the sensor press, the drafted stem width whatever this key's width
     is.  Only the vertices on the two stem lines move, and only in x; see THE
-    KEY'S OWN ARMS in model.js."""
+    KEY'S OWN ARMS in model.js.
+
+    laps are the boxes that carry this key's tongue on THROUGH the spine's
+    front face and into the band it belongs to, so the key's solid crosses
+    into the spine's instead of arriving at it on a coincident plane.  They
+    are part of the KEY, in the key's own filament."""
     v, n, mirror = prof["v"], prof["nv"], prof["mirror"]
     x_left = cx - w / 2.0
     V = [None] * n
@@ -2112,6 +2346,28 @@ def build_key(cx, w, prof, arm_x=None):
             for i in prof.get(line, ()):
                 V[i] = (x, V[i][1], V[i][2])
     t = []
+
+    def emit(tris):
+        # DEGENERATE TRIANGLES ARE DROPPED, NOT EMITTED.  A drafted face can
+        # collapse to a line once a profile is rectified -- the plain white's
+        # step wall does exactly that, because a rectangle has no step -- and
+        # a zero-area triangle is not a surface: it contributes a directed
+        # edge twice and breaks the watertight test a printable part has to
+        # pass.  Dropping it leaves the two faces that met at the wall
+        # meeting each other, which is what a rectified key actually is.
+        for (ia, ib, ic) in tris:
+            a, b, c = V[ia], V[ib], V[ic]
+            ux, uy, uz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
+            vx, vy, vz = c[0] - a[0], c[1] - a[1], c[2] - a[2]
+            nx = uy * vz - uz * vy
+            ny = uz * vx - ux * vz
+            nz = ux * vy - uy * vx
+            if nx * nx + ny * ny + nz * nz < 1e-18:
+                continue                        # zero area
+            t.append(a)
+            t.append(b)
+            t.append(c)
+
     f = prof["f"]
     k = 0
     while k < len(f):
@@ -2121,11 +2377,12 @@ def build_key(cx, w, prof, arm_x=None):
         k += m
         if mirror:
             ring = ring[::-1]          # mirroring flips face winding
-        for (a, b, c) in triangulate_face(V, ring):
-            t.append(V[a])
-            t.append(V[b])
-            t.append(V[c])
-    return t
+        emit(triangulate_face(V, ring))
+    # the lap into the spine -- part of the key, not of the band
+    for (lx0, lx1, ly0, ly1, lz0, lz1) in laps:
+        push_box(t, lx0, lx1, ly0, ly1, lz0, lz1)
+    # and said in a way that closes -- see T-JUNCTIONS above
+    return weld_t_junctions(t)
 
 
 # =========================================================================
@@ -2236,6 +2493,52 @@ def push_hole_annulus(t, h, z, up):
         tri(a, path[-1], b)
 
 
+def hole_box_loop(h):
+    """The hole's bounding box walked as ONE ring, in the order the annulus
+    fans it: every point where the obround touches the box, plus the box
+    corners between them.  It is the outer edge of the washer the annulus
+    lays, and push_hole_outer_wall shuts it."""
+    C = [(h["x1"], h["y1"]), (h["x0"], h["y1"]),
+         (h["x0"], h["y0"]), (h["x1"], h["y0"])]
+    out = []
+
+    def put(p):
+        if (not out or abs(out[-1][0] - p[0]) > 1e-9
+                    or abs(out[-1][1] - p[1]) > 1e-9):
+            out.append(p)
+
+    ring = h["ring"]
+    n = len(ring)
+    for i in range(n):
+        pa, sa = hole_box_point(h, ring[i])
+        pb, sb = hole_box_point(h, ring[(i + 1) % n])
+        put(pa)
+        s = sa
+        while s != sb:
+            put(C[s])
+            s = (s + 1) % 4
+        put(pb)
+    # the walk closes on itself; drop the repeat so the wall does not build
+    # a zero-width quad at the seam
+    while len(out) > 1:
+        a, b = out[0], out[-1]
+        if abs(a[0] - b[0]) > 1e-9 or abs(a[1] - b[1]) > 1e-9:
+            break
+        out.pop()
+    return out
+
+
+def push_hole_outer_wall(t, h, z0, z1):
+    loop = hole_box_loop(h)
+    n = len(loop)
+    for i in range(n):
+        a, b = loop[i], loop[(i + 1) % n]
+        # the ring is wound CCW seen from +z and the fan follows it, so this
+        # winding puts the skin's normals outward, away from the bore
+        push_quad(t, (a[0], a[1], z0), (b[0], b[1], z0),
+                     (b[0], b[1], z1), (a[0], a[1], z1))
+
+
 def push_hole_wall(t, h, z0, z1):
     ring = h["ring"]
     n = len(ring)
@@ -2246,8 +2549,10 @@ def push_hole_wall(t, h, z0, z1):
 
 
 def push_spine_slab(t, x0, x1, y0, y1, z0, z1, holes):
-    """NOT watertight on its own — rect_with_holes subdivides recursively and
-    its sub-rectangles meet at T-junctions.  A union of the comb closes it."""
+    """EACH HOLE'S WASHER IS A CLOSED BODY: lid, floor, the bore wall between
+    them on the inside, and the skin that shuts its outer edge.  Built as
+    four faces of one solid rather than as three loose surfaces — see
+    push_hole_outer_wall for what that was costing."""
     rect_with_holes(x0, x1, y0, y1,
                     [(h["x0"], h["x1"], h["y0"], h["y1"]) for h in holes],
                     lambda a, b, c, d: push_box(t, a, b, c, d, z0, z1))
@@ -2255,6 +2560,37 @@ def push_spine_slab(t, x0, x1, y0, y1, z0, z1, holes):
         push_hole_annulus(t, h, z1, +1)
         push_hole_annulus(t, h, z0, -1)
         push_hole_wall(t, h, z0, z1)
+        push_hole_outer_wall(t, h, z0, z1)
+
+
+def push_x_prism(t, x0, x1, poly):
+    """A closed prism: a section in (y, z), wound CCW there, swept along x."""
+    if x1 - x0 < 1e-5 or len(poly) < 3:
+        return
+    m = len(poly)
+    for k in range(m):
+        a, b = poly[k], poly[(k + 1) % m]
+        push_quad(t, (x0, a[0], a[1]), (x0, b[0], b[1]),
+                     (x1, b[0], b[1]), (x1, a[0], a[1]))
+    a, b, c = poly[0], poly[1], poly[2]      # the gusset sections are triangles
+    push_tri(t, (x1, a[0], a[1]), (x1, b[0], b[1]), (x1, c[0], c[1]))
+    push_tri(t, (x0, a[0], a[1]), (x0, c[0], c[1]), (x0, b[0], b[1]))
+
+
+def push_root_fillet(t, x0, x1, y_g, t0, t1, r):
+    """The gusset at a tongue root: a 45-degree ramp off the band's front
+    face onto the UNDERSIDE of the tongue, over the x span the key presents
+    at the spine.  t0/t1 are the TONGUE's own z.  Under and not over,
+    because the parts print playing-face down: this ramp starts full width
+    against the flange and narrows away, needing no support, where its
+    mirror above the tongue would begin as a thread in open air.  y_g is
+    the spine face on the bottom band, which the ramp fuses into, and the
+    spine face plus the inter-colour gap on any band above it, whose ramp
+    hangs down in front of the colour stacked underneath.
+    """
+    if r <= 1e-4 or x1 - x0 < 1e-5 or t1 - t0 < 1e-5:
+        return
+    push_x_prism(t, x0, x1, [(y_g, t0), (y_g, t0 - r), (y_g + r, t0)])
 
 
 def build_spine_slab(half, x0, x1, y_back, y_front, z0, z1, bottom):
@@ -2279,14 +2615,6 @@ def foot_outline(cx):
     y0 = FOOT_YC - FOOT_D / 2.0
     V = [(x0 + p[0], y0 + p[1]) for p in FOOT_SHAPE_V]
     return [[V[i] for i in ring] for ring in FOOT_SHAPE_F]
-
-
-def push_flat_face(t, ring, z):
-    """one flat n-gon, triangulated in place, winding preserved"""
-    V = [(p[0], p[1], 0.0) for p in ring]
-    for tri in triangulate_face(V, list(range(len(ring)))):
-        a, b, c = ring[tri[0]], ring[tri[1]], ring[tri[2]]
-        push_tri(t, (a[0], a[1], z), (b[0], b[1], z), (c[0], c[1], z))
 
 
 def poly_area2(ring):
@@ -2328,20 +2656,6 @@ def build_press(foot_x, rings):
     return t
 
 
-def build_foot(cx, pair=None):
-    """A foot is its pad face plus, when the key it belongs to is known, that
-    key's pair face — two floating loops in one object, nothing between."""
-    t = []
-    for ring in foot_outline(cx):
-        push_flat_face(t, ring, FOOT_Z)
-    for z, ring in (pair or []):
-        push_flat_face(t, ring, z)
-    return t
-
-
-# =========================================================================
-# BLENDER PLUMBING
-# =========================================================================
 def to_world(x, y, z):
     return (x + WORLD_X0, WORLD_Y0 - y, z + WORLD_Z0)
 
@@ -2398,10 +2712,38 @@ def get_spine_material(kind, layer_name):
     return m
 
 
+def mesh_checksum(tris):
+    """model.js's meshChecksum: a 32-bit digest of the triangle soup,
+    quantised to a nanometre, in design coordinates and in build order."""
+    h = 2166136261
+    for v in tris:
+        for c in v:
+            h = (h * 31 + math.floor(c * 1e6 + 0.5)) & 0xFFFFFFFF
+    return h
+
+
+def check_parity(name, tris):
+    """Stop the build if this object is not the one the browser built.  See
+    PARITY: the exported STLs are these same objects, folded at the spine
+    seam and turned face-down for the bed, so a mesh that differs here is a
+    mesh that differs there."""
+    want = PARITY.get(name)
+    if want is None:
+        return
+    got = mesh_checksum(tris)
+    if got != want:
+        raise RuntimeError(
+            "Xenachord: %s is not the mesh the browser built "
+            "(checksum %d, expected %d).  model.js and this generated "
+            "builder have drifted apart; the STLs and this scene would "
+            "not be the same objects." % (name, got, want))
+
+
 def make_mesh_object(name, tris, coll, mat):
     """tris is the flat triangle soup the browser hands to WebGL, in design
     coordinates.  design -> world flips Y, which mirrors handedness, so each
     face is emitted reversed to keep its normal pointing outward."""
+    check_parity(name, tris)
     verts, faces, index = [], [], {}
     for i in range(0, len(tris), 3):
         face = []
@@ -2496,7 +2838,7 @@ def build():
     scene = bpy.context.scene.collection
     root_coll = new_collection(TARGET_COLLECTION, scene)
     part = {}
-    for nm in ("Keys - White", "Keys - Black", "Keys - Gray", "Spine", "Feet",
+    for nm in ("Keys - White", "Keys - Black", "Keys - Gray", "Spine",
                "Sensor Press"):
         part[nm] = new_collection(nm, root_coll)
     root = make_root(root_coll)
@@ -2504,7 +2846,7 @@ def build():
 
     keys_from_sheet = 0
     for (name, ktype, cx, width, depth, profile,
-         wx, wy, wz, foot, arm_x) in KEYS:
+         wx, wy, wz, foot, arm_x, lap) in KEYS:
         coll = part[LAYER_PART[KEY_LAYER[ktype]]]
         if USE_BLEND_CATEGORIES:
             src = find_category(ktype)
@@ -2513,16 +2855,14 @@ def build():
                 keys_from_sheet += 1
                 continue
         make_mesh_object(name,
-                         build_key(cx, width, KEY_PROFILES[profile], arm_x),
+                         build_key(cx, width, KEY_PROFILES[profile], arm_x, lap),
                          coll, mats[KEY_LAYER[ktype]])
 
-    spine_from_sheet = feet_from_sheet = 0
+    spine_from_sheet = 0
     if USE_BLEND_CATEGORIES:
         kind = DESIGN["spine_type"].split()[0].capitalize()
         spine_from_sheet = (copy_sheet_collection(kind + " type Spine - A", part["Spine"]) +
                             copy_sheet_collection(kind + " type Spine - B", part["Spine"]))
-        feet_from_sheet = (copy_sheet_collection("Feet - A", part["Feet"]) +
-                           copy_sheet_collection("Feet - B", part["Feet"]))
 
     if not spine_from_sheet:
         # colour each band by the key type it belongs to (see
@@ -2542,7 +2882,8 @@ def build():
                 tris = build_spine_slab(hname, hx0, hx1, hy_back,
                                         hy_front, lz0, lz1, li == 0)
 
-                # carry this band forward into the keys of its own colour
+                # carry this band forward into the keys of its own colour,
+                # and gusset the corner the tongue roots in
                 for (blayer, bx0, bx1, bz0, bz1) in SPINE["boss"]:
                     if blayer != lname:
                         continue
@@ -2551,17 +2892,15 @@ def build():
                         continue
                     push_box(tris, a, b, hy_front,
                              hy_front + SPINE["boss_depth"], bz0, bz1)
+                    y_g = hy_front
+                    if bz0 - SPINE["fillet"] < lz0 - 1e-6:
+                        y_g += SPINE["gap"]
+                    push_root_fillet(tris, a, b, y_g, bz0, bz1,
+                                     SPINE["fillet"])
                 if lname not in spine_mats:
                     spine_mats[lname] = get_spine_material(spine_kind, lname)
                 make_mesh_object("Spine_%s_%s" % (hname, lname), tris,
                                  part["Spine"], spine_mats[lname])
-
-    if not feet_from_sheet:
-        pair_of = dict((round(fx, 4), rings) for _, _, fx, rings in PAIRS)
-        for i, fx in enumerate(FEET):
-            make_mesh_object("Foot_%s_%02d" % ("A" if i < 16 else "B", i % 16 + 1),
-                             build_foot(fx, pair_of.get(round(fx, 4))),
-                             part["Feet"], mats["feet"])
 
     for name, colour, foot_x, rings in PAIRS:
         # a press carries its KEY's material — same filament, same part
@@ -2583,10 +2922,12 @@ def build():
     # report where it actually landed
     meshes = [ob for ob in objects if ob.type == "MESH"]
     pts = [ob.matrix_world @ Vector(c) for ob in meshes for c in ob.bound_box]
-    print("Xenachord: %d keys, %d spine parts, %d feet  (%s)"
-          % (len(KEYS), len(part["Spine"].objects), len(part["Feet"].objects),
+    print("Xenachord: %d keys, %d spine parts, %d presses  (%s)"
+          % (len(KEYS), len(part["Spine"].objects),
+             len(part["Sensor Press"].objects),
              "sandbox objects" if USE_BLEND_CATEGORIES else
-             "drafted profiles — identical to the browser preview"))
+             "drafted profiles — identical to the browser preview and to "
+             "the exported STLs"))
     if pts:
         bx = (min(p.x for p in pts), max(p.x for p in pts))
         by = (min(p.y for p in pts), max(p.y for p in pts))

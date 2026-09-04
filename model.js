@@ -381,7 +381,7 @@
   const COLORS = {
     white: [1.0, 1.0, 1.0], black: [0.16, 0.16, 0.19],
     gray:  [0.55, 0.55, 0.58], spine: [0.30, 0.31, 0.36],
-    feet:  [0.24, 0.42, 0.60], press: [0.72, 0.45, 0.22]
+    press: [0.72, 0.45, 0.22]
   };
 
   const DRAFT = 0.1018;      // side draft above z = Z.whiteTop (5.8 degrees)
@@ -2532,6 +2532,19 @@
     return out;
   }
 
+  /**
+   * A deterministic 32-bit digest of a triangle soup, quantised to a
+   * nanometre.  The Blender log carries one of these per object and
+   * recomputes it as it builds, so the two builders cannot drift apart
+   * without saying so — see PARITY in pythonLog.
+   */
+  function meshChecksum(tris) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < tris.length; i++)
+      h = (Math.imul(h, 31) + Math.round(tris[i] * 1e6)) >>> 0;
+    return h;
+  }
+
   function weldTJunctions(t) {
     const K = v => Math.round(v / WELD_TOL);
     const key = (a, i) => K(a[i]) + ',' + K(a[i + 1]) + ',' + K(a[i + 2]);
@@ -2597,7 +2610,7 @@
     return t;
   }
 
-  function buildKey(cx, w, type, lb, rb, seats, armAt) {
+  function buildKey(cx, w, type, lb, rb, seats, armAt, laps) {
     const q = profileFor(type, lb, rb);
     const V = profilePoints(q.p, q.mirror, w, cx - w / 2);
     if (armAt != null) {
@@ -2677,6 +2690,11 @@
     }
     for (let i = 0; i < faces.length; i++)
       if (!claimed.has(i)) emit(triangulateFace(V, faces[i]));
+    /* THE LAP INTO THE SPINE.  Part of the key, not of the band: it is the
+     * key's tongue carrying on through the spine face.  See THE TONGUE
+     * DOES NOT STOP AT THE SPINE FACE. */
+    for (const L of (laps || []))
+      pushBox(t, L.x0, L.x1, L.y0, L.y1, L.z0, L.z1);
     /* and said in a way that closes — see T-JUNCTIONS above */
     return weldTJunctions(t);
   }
@@ -3175,19 +3193,39 @@
                         L.z0, L.z1, spineHoles(hn, true));
         }
         /* the boss: FIT.engage of this band, carried forward into every key
-         * of its own colour that stands on this half */
+         * of its own colour that stands on this half — and the gusset that
+         * turns that meeting from a butt into a joint.  See THE TONGUE
+         * ROOT IS THE WHOLE JOINT.
+         *
+         * Both are taken over the TONGUE's own z, which is the drafted
+         * band clipped to the tongue rather than the separated band: the
+         * FIT.gap that holds this band off the one below it is a rule
+         * about the bands, which share the y < 0 side, and the boss and
+         * the gusset are in front of that plane where no other colour
+         * reaches.  Clipping them to the pushed band cost 0.15 mm off a
+         * joint only 1 mm tall.  Bossing the band's FULL height would run
+         * into the key of the colour stacked next to it, which is the
+         * whole reason the tongues are banded in the first place. */
+        /* MATCHED BY FILAMENT, NOT BY THE BAND'S DRAFTED NAME.  A key's
+         * `layer` is its colour; a band is called after the sheet it came
+         * off, which on a one- or two-colour spine is 'all' / 'lower' /
+         * 'upper'.  Comparing the two directly meant those spines never
+         * matched a single key and got NO boss at all — every key on them
+         * met the spine as a bare coplanar face. */
+        const part = spineLayerPart(kind, L.name);
         if (keySpans) for (const k of keySpans) {
-          if (k.layer !== L.name) continue;
+          if (k.layer !== part) continue;
           const a = Math.max(k.x0, half.x0), b = Math.min(k.x1, half.x1);
           if (b - a <= 1e-4) continue;
-          /* only over the z the key's own tongue occupies — a band that
-           * bossed its full height would run into the key of the colour
-           * stacked next to it, which is the whole reason the tongues are
-           * banded in the first place */
-          const T = TONGUE_Z[L.name] || [L.z0, L.z1];
-          const z0 = Math.max(L.z0, T[0]), z1 = Math.min(L.z1, T[1]);
+          const T = TONGUE_Z[part] || [L.z0Drafted, L.z1Drafted];
+          const z0 = Math.max(L.z0Drafted, T[0]), z1 = Math.min(L.z1Drafted, T[1]);
           if (z1 - z0 <= 1e-4) continue;
           pushBox(tris, a, b, yF, half.yFront + FIT.engage, z0, z1);
+          /* flush on the bottom band, which the ramp fillets into; stood
+           * off FIT.gap on any band whose ramp hangs below its own z and
+           * so lies in front of the colour stacked under it */
+          const yG = (z0 - FIT.fillet < L.z0 - 1e-6) ? yF + FIT.gap : yF;
+          pushRootFillet(tris, a, b, yG, z0, z1, FIT.fillet);
         }
         /* THE 1.29 mm BETWEEN THE HALVES IS LEFT OPEN.  Half A ends at
          * 183.43233 and half B begins at 184.72359, and that gap is drafted,
@@ -3234,67 +3272,32 @@
   }
 
   /* ------------------------------------------------------------------ *
-   *  A FOOT IS TWO FLOATING FACES, AND NOTHING ELSE                     *
+   *  THE FOOT IS NOT AN OBJECT.  IT IS THE BOTTOM OF THE PRESS.         *
    *                                                                     *
-   *  PAD FACE    the drafted "-| |-" exactly as "Feet - A" / "Feet - B"  *
-   *              draw it, flat at z = FOOT.z.  No thickness, no walls,   *
-   *              no caps — the face the sensor sees, and only that.      *
-   *  PAIR FACE   the SAME 16 vertices, same order, same winding, lying   *
-   *              in the plane of the key's own underside deck.  Its      *
-   *              stems reach PAIR.stem past the drafted pad before it is *
-   *              seated, so the pair spans the deck rather than perching *
-   *              in the middle of it; seatTransform then fits it, and a  *
-   *              stem that runs off the deck is SHORTENED there.         *
+   *  There used to be a part per sensor foot: the drafted pad face and   *
+   *  the key's pairing face, both zero-thickness loops, floating with    *
+   *  nothing between them.  They are gone.  A face with no volume is     *
+   *  not a thing a printer can make, so no STL ever carried one, and     *
+   *  emitting them left the Blender scene holding 32 objects the         *
+   *  exports did not have — the two renderings were not of the same      *
+   *  instrument.  The preview had already stopped drawing them, because  *
+   *  every pad face is coincident with the bottom cap of its own press   *
+   *  and the two z-fought.                                              *
    *                                                                     *
-   *  Nothing joins the two.  There is no bridge, no plinth, no ramp and  *
-   *  no weld into the key: they are a pair of loops that describe the    *
-   *  relationship, and the relationship is all this stage produces.      *
+   *  The two loops themselves are very much alive; they are just not     *
+   *  parts any more.  pairFaces still returns them and buildPress still  *
+   *  builds the solid BETWEEN them, so                                   *
+   *                                                                     *
+   *    PAD FACE    the drafted "-| |-" exactly as "Feet - A" / "Feet -   *
+   *                B" draw it, flat at z = FOOT.z — the face the sensor  *
+   *                sees — is now the press's bottom cap, and             *
+   *    PAIR FACE   the SAME 16 vertices, same order, same winding, in    *
+   *                the plane of the key's own underside deck, is its     *
+   *                top.                                                 *
+   *                                                                     *
+   *  Nothing about either loop moved.  See PAIR FACE / seatTransform     *
+   *  below for how the second one is fitted to the key's belly.          *
    * ------------------------------------------------------------------ */
-
-  /** emit one flat n-gon as triangles in the plane z, keeping its winding */
-  function pushFlatFace(t, ring, z) {
-    const V = ring.map(p => [p[0], p[1], 0]);
-    const idx = ring.map((_, k) => k);
-    for (const tri of triangulateFace(V, idx)) {
-      const a = ring[tri[0]], b = ring[tri[1]], c = ring[tri[2]];
-      pushTri(t, [a[0], a[1], z], [b[0], b[1], z], [c[0], c[1], z]);
-    }
-  }
-
-  /**
-   * one part per sensor foot, named to match "Feet - A" / "Feet - B".
-   *
-   * `keys` is optional and is the list pairKeys() builds — when it is
-   * given, each foot also carries the pairing face for the key that foot
-   * belongs to.  Without it a foot is just its pad face, which is what the
-   * feet-only previews want.
-   */
-  function footParts(keys) {
-    const byFoot = new Map();
-    for (const k of (keys || [])) byFoot.set(Math.round(k.foot * 1e4), k);
-    return footCentres().map((cx, i) => {
-      const tris = [];
-      const pad = footOutline(cx);
-      for (const ring of pad) pushFlatFace(tris, ring, FOOT.z);
-
-      const k = byFoot.get(Math.round(cx * 1e4));
-      const pair = k ? pairFaces(k.cx, k.w, k.type, k.lb, k.rb, cx, k.sib) : null;
-      if (pair) for (const f of pair) pushFlatFace(tris, f.ring, f.z);
-
-      return {
-        name: 'Foot_' + (i < FEET_PER_HALF ? 'A' : 'B') + '_' +
-              String(i % FEET_PER_HALF + 1).padStart(2, '0'),
-        index: i, half: i < FEET_PER_HALF ? 'A' : 'B', cx,
-        pad, pair, tris
-      };
-    });
-  }
-
-  function buildFeet(keys) {
-    const t = [];
-    for (const p of footParts(keys)) t.push(...p.tris);
-    return t;
-  }
 
 
   /* ==================================================================== *
@@ -3352,13 +3355,150 @@
    *              Bands are pushed apart to leave FIT.gap.                 *
    * ==================================================================== */
   /* which z band each colour's tongue occupies — see Z above */
+  /* keyed by FILAMENT.  A band names itself after the drafted layer it is
+   * ('all', 'lower', 'upper', 'gray', 'black', 'white'); spineLayerPart
+   * turns that into the colour whose tongues plug into it, which is what
+   * decides the z the tongue actually occupies. */
   const TONGUE_Z = { gray: Z.grayTongue, black: Z.blackTongue,
-                     white: Z.whiteTongue, all: null, lower: null, upper: null };
+                     white: Z.whiteTongue };
 
+  /* ------------------------------------------------------------------ *
+   *  THE TONGUE ROOT IS THE WHOLE JOINT, AND IT WAS A BUTT JOINT        *
+   *                                                                     *
+   *  A key hangs off the spine by ONE thing: the tongue, a flange about *
+   *  a millimetre thick in z and TONGUE_Y deep in y, and everything     *
+   *  above and below it in z belongs to another colour's band.  So the  *
+   *  bonded section is that flange and nothing else — for a white key   *
+   *  z 6.089 .. 7.100, which at a 0.2 mm layer is FIVE LAYERS out of    *
+   *  the seventy the key is printed in.                                 *
+   *                                                                     *
+   *  Worse, it met the spine as a square butt: the tongue's top and     *
+   *  bottom faces ran into the band's front plane at ninety degrees,    *
+   *  with air on both sides.  A slicer has nothing to wrap there — the  *
+   *  outline steps from the band straight up the tongue — and the sharp *
+   *  re-entrant corner is exactly where the bending moment peaks, so    *
+   *  the joint both READS as two bodies touching and BREAKS as one.     *
+   *                                                                     *
+   *  FIT.fillet puts a 45-degree gusset in that corner, under the       *
+   *  tongue, over the key's own back span.  It is the band's own        *
+   *  filament, so it costs no clearance: the gusset lives in FRONT of   *
+   *  the spine face (y > 0), where the other colours' bands never go,   *
+   *  and its x span is the key's, which every other key clears by the   *
+   *  drafted 0.75 mm.  The joint goes from 1.0 mm of z to 1.6 mm, the   *
+   *  corner becomes a ramp the slicer has to follow round instead of a  *
+   *  step it can wall off, and the root gains section exactly where the *
+   *  moment peaks — while the flange's own thickness, which is what     *
+   *  lets the key bend at all, is untouched.  pushRootFillet says why   *
+   *  it is the underside and not both sides.                            *
+   * ------------------------------------------------------------------ */
   const FIT = {
     engage: 0.4,     // how far a band reaches into its own keys, to fuse
-    gap:    0.15     // clearance between anything of different colours
+    gap:    0.15,    // clearance between anything of different colours
+    fillet: 0.6,     // 45-degree gusset above and below each tongue root
+    lap:    2.0      // how far the tongue carries ON past the spine face
   };
+
+  /* ------------------------------------------------------------------ *
+   *  THE TONGUE DOES NOT STOP AT THE SPINE FACE, IT GOES THROUGH IT     *
+   *                                                                     *
+   *  The drafted tongue ends flush on y = 0, the plane the band's front  *
+   *  face is in, and the band grows FIT.engage forward to meet it.  So   *
+   *  the two solids do overlap — but everything about the meeting is     *
+   *  still pinned to that one plane, and a union asked to resolve two    *
+   *  bodies whose faces are exactly coincident is being asked the one    *
+   *  question a boolean solver gets wrong.                              *
+   *                                                                     *
+   *  FIT.lap carries the tongue's own section straight on THROUGH the    *
+   *  face and FIT.lap mm into the band, so the key's solid crosses into  *
+   *  the spine's rather than arriving at it.  The lap is the key's own   *
+   *  filament, and it is clipped to the z its own band occupies — the    *
+   *  SEPARATED z, not the drafted one, because past y = 0 it is in the   *
+   *  stack where FIT.gap between colours applies.  Within that slot the  *
+   *  band is the only thing there: the mounting bores start at y =       *
+   *  -3.162 and the PCB channel is under z = 2.911, both of which the    *
+   *  lap clears.                                                        *
+   *                                                                     *
+   *  It adds no outline: every millimetre of it is inside a band that    *
+   *  prints in the same filament, so no slice through the part changes   *
+   *  shape.  What it changes is the KIND of contact the joint is.        *
+   * ------------------------------------------------------------------ */
+  /**
+   * Where a key's tongue laps into the spine, as boxes in design mm — one
+   * per spine half the key's back span reaches, which is normally one and
+   * is two only for a key straddling the A/B seam.  `span` is keyBackSpan.
+   */
+  function tongueLaps(spine, layer, span) {
+    const kind = spineKindOf(spine);
+    const T = TONGUE_Z[layer];
+    if (!T || !span || !(FIT.lap > 1e-4)) return [];
+    const out = [];
+    for (const [hn, half] of spineHalves()) {
+      const x0 = Math.max(span.x0, half.x0), x1 = Math.min(span.x1, half.x1);
+      if (x1 - x0 <= 1e-4) continue;
+      for (const b of spineBands(kind, hn)) {
+        if (spineLayerPart(kind, b.name) !== layer) continue;
+        const z0 = Math.max(b.z0, T[0]), z1 = Math.min(b.z1, T[1]);
+        if (z1 - z0 <= 1e-4) continue;
+        /* forward to FIT.engage so the lap overlaps the tongue's own solid
+         * as well, rather than butting it on y = 0 and moving the
+         * coincident face one step along */
+        out.push({ x0, x1, y0: half.yFront - FIT.lap,
+                   y1: half.yFront + FIT.engage, z0, z1 });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * A closed prism, a section in (y, z) swept along x.  `poly` is [y, z]
+   * pairs wound CCW in that plane, so the x1 cap faces +x.
+   */
+  function pushXPrism(t, x0, x1, poly) {
+    if (x1 - x0 < 1e-5 || poly.length < 3) return;
+    const m = poly.length;
+    for (let k = 0; k < m; k++) {
+      const j = (k + 1) % m, a = poly[k], b = poly[j];
+      pushQuad(t, [x0, a[0], a[1]], [x0, b[0], b[1]],
+                  [x1, b[0], b[1]], [x1, a[0], a[1]]);
+    }
+    const V = poly.map(p => [p[0], p[1], 0]);
+    const idx = poly.map((_, k) => k);
+    for (const f of triangulateFace(V, idx)) {
+      const A = poly[f[0]], B = poly[f[1]], C = poly[f[2]];
+      pushTri(t, [x1, A[0], A[1]], [x1, B[0], B[1]], [x1, C[0], C[1]]);
+      pushTri(t, [x0, A[0], A[1]], [x0, C[0], C[1]], [x0, B[0], B[1]]);
+    }
+  }
+
+  /**
+   * The gusset at a tongue root: a 45-degree ramp off the band's front
+   * face onto the underside of the tongue, over the x span the key
+   * presents at the spine (keyBackSpan).  `t0`/`t1` are the tongue's OWN z
+   * extent — the drafted band clipped to the tongue — not the band's,
+   * which is pushed up by FIT.gap and would leave the ramp hanging a tenth
+   * of a millimetre off the flange it is meant to carry.
+   *
+   * UNDER THE TONGUE, NOT OVER IT, and that is a printing answer rather
+   * than a structural one.  Every part goes on the bed playing-face down
+   * (see bedAngle), so print z runs DOWN through design z: the ramp below
+   * t0 starts at its full width against the flange the layer before and
+   * narrows away, which needs no support at all, while the mirror of it
+   * above t1 would start as a knife edge in open air — a 21 mm thread
+   * laid over nothing, since the key's own back is TONGUE_Y forward of
+   * there — and only reach full width three layers later.  One good ramp
+   * beats two when the second one has to be printed in the air.
+   *
+   * `yG` is where the ramp's back face stands.  On the bottom band that is
+   * the spine face itself, and the ramp fuses to the band it fillets.  On
+   * any band above it the ramp hangs below its own band's z, so the plane
+   * it would lie flat against belongs to the colour STACKED UNDER this one
+   * — a separately printed part this key has to move in front of — and the
+   * caller stands it off by FIT.gap instead.  See CLEAR.
+   */
+  function pushRootFillet(t, x0, x1, yG, t0, t1, r) {
+    if (!(r > 1e-4) || x1 - x0 < 1e-5 || t1 - t0 < 1e-5) return;
+    pushXPrism(t, x0, x1, [[yG, t0], [yG, t0 - r], [yG + r, t0]]);
+  }
 
   /* ------------------------------------------------------------------ *
    *  THE FOOT IS NOT A RECTANGLE                                        *
@@ -4567,12 +4707,12 @@
     KEY_SCALE_MIN, KEY_SCALE_MAX, whiteScaleId, slotScaleId,
     keyScale, keyScaleCount,
     widthRatios, classWidth, classOfType,
-    pushTri, pushQuad, pushBox, rectWithHoles,
+    pushTri, pushQuad, pushBox, pushXPrism, pushRootFillet, rectWithHoles,
     ctxKey, profileFor, profilePoints, buildKey, keyPolygons,
     bevelProfile, bevelRoom, setBevel, getBevel, BEVEL_MAX, topFaces,
     triangulateFace, triangulateFaceWithHoles, pointInPoly2, faceHoldsSeat,
     keyDecks, mergeCoplanar, polyArea2, keyExtent,
-    buildSpine, buildFeet,
+    buildSpine,
     PAIR, FOOT_SHAPE,
     /* --- shims, so a page written against the old attaching-element API
      * keeps loading.  There are no attaching elements any more: the
@@ -4580,14 +4720,14 @@
      * under their old names.  Prefer the PAIR names in new code. --- */
     BRIDGE: PAIR, bridgeAudit: pairAudit,
     bridgeSeats: () => [], buildBridge: () => [], footOutline, footIslands,
-    keyBackSpan, keyPadSection, weldTJunctions,
-    pairPlan, pairFaces, pairLand, pairAudit, PAIR_SHAPE, pushFlatFace,
+    keyBackSpan, keyPadSection, weldTJunctions, meshChecksum,
+    pairPlan, pairFaces, pairLand, pairAudit, PAIR_SHAPE,
     mapRingToPair, buildPress, pressParts, pushPrism, isWatertight, meshVolume,
     armLines, armSpan, armPlace, armPlaceFor, pressArms, ARM_SHOULDER,
     spineKindOf, spineKindForColours, spineLayerCount,
     SPINE_LAYER_COLORS, spineLayerColor, spineLayerMaterial,
     SPINE_LAYER_PART, spineLayerPart,
-    spineHalves, spineParts, spineBands, spineZRange, footParts,
+    spineHalves, spineParts, spineBands, spineZRange, tongueLaps,
     FIT,
     footCentres, obroundRing, spineHoles, holeBoxPoint, HOLE_UNIT,
     pushHoleAnnulus, pushHoleWall, pushHoleOuterWall, holeBoxLoop, pushSpineSlab,
