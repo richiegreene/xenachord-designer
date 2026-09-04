@@ -561,13 +561,73 @@ Two smaller items behind it:
 
 ## Export
 
+Export is its own mode on the left rail, beneath Design and Play, because it
+asks a different question from either: not what the instrument is, but who
+gets it.
+
+### Print — one file per colour
+
+* **STL per colour** — `white`, `black`, `gray`. A file is everything that
+  prints in that filament, **fused**: the keys, the sensor press under each of
+  them, and the spine band their tongues plug into. Nothing is exported as a
+  component of its own — there is no `spine.stl` and no press file, because
+  neither is ever printed on its own, and the band's boss already reaches
+  `FIT.engage` into the keys that share its colour, so the pieces overlap into
+  one solid rather than merely touching.
+* Beveling, the ad-hoc widths and the sensor-press solve are all in the mesh
+  the button writes; the STL is the keyboard exactly as the preview draws it.
+* A colour the design does not use is not an empty file — the button greys out
+  and the zip leaves it out.
+* **Save STL files for all colours (.zip)** — the colours this keyboard uses
+  plus the Python log. On a rig, one folder per *distinct* keyboard.
+* Face winding is consistent across every primitive, so exported normals point
+  outward — slicers and Blender both read the solids the right way round.
+
+### Share this layout
+
+A design is a few hundred bytes — key types by slot, the four class widths, the
+ad-hoc adjustments, the scale and the bevel — and the geometry is rebuilt from
+those numbers at the other end by the same `core.js` that built it here. So a
+layout travels as text, and needs nothing to be up to travel:
+
+* **Copy Share Link** — the layout packed into the page's own address, as
+  `index.html#k=…` for one keyboard or `#r=…` for a whole rig, devices and the
+  shape they stand in. Paste it into a message; whoever opens it gets the
+  keyboard. Typically 150–900 characters. The address bar is set to the same
+  link, so refreshing the page brings the keyboard back.
+* **Save Layout File (.json)** — the same layout as a small readable file, for
+  where a long link is awkward. **Open Layout File…** reads one back, and also
+  reads a raw design of the kind `presets-shared.js` holds.
+* **Play travels with it.** On a microtonal keyboard the tuning is not a
+  setting that happens to be on beside the design — it is half of what was
+  designed, and a 17-note arrangement sent without what its 17 degrees sound
+  is a picture of an instrument. So the payload carries a `x` section beside
+  the keyboard: `t` all of Scale/Tuning (where 1/1 is written and what it
+  sounds at, Auto or Custom, the reading conventions, the rotation, the fill
+  list, every degree typed onto the strip, the transposition), `s` the synth
+  (timbre and ADSR), `m` how a controller is laid on the keys (the MIDI note
+  that plays key 0, and whether velocity is taken). Each section is read back
+  by the module that owns it — `XTuning.adopt`, `XPlay.adopt`, `XMidi.adopt`
+  — which normalises it exactly as it normalises a stored session.
+* What is carried: everything about the keyboard, and everything about playing
+  it. What is not: what a device is *called* (`noteBase` / `noteStep` belong to
+  the desk it stands on, so a layout you are sent never renumbers yours), the
+  preset name, and two things from the MIDI panel — whether this browser has
+  been let at the MIDI ports (a consent, not transferable) and which port it
+  was listening to (a socket on the machine it was saved on).
+* An arriving layout goes through the same rebuild every other edit does, so
+  ⌘Z brings back what was there before it. Opening a link on a browser that
+  already has work saved asks first.
+
+### Keep it here
+
+* **Save to Presets** — the layout, widths, scale **and bevel** into Design's
+  Layout Presets menu. A preset states its own edge break, 0 included; one
+  saved before presets carried the edge keeps whatever is on screen rather than
+  flattening it to square.
 * **Copy Python Log** — puts a complete, runnable Blender script on the
   clipboard. See below.
 * **Save design log (.py)** — the same thing as a file.
-* **STL** per colour layer, plus the spine and the feet, or all of it as a zip
-  (the zip includes the Python log). Face winding is consistent across every
-  primitive, so exported normals point outward — slicers and Blender both read
-  the solids the right way round.
 
 ### Where it lands in Blender
 

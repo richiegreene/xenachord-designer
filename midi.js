@@ -419,6 +419,35 @@ function bind() {
   window.addEventListener('xenachord:allnotesoff', () => down.clear());
 }
 
+/**
+ * WHAT OF THE MIDI PANEL TRAVELS WITH A SHARED LAYOUT, AND WHAT DOES NOT.
+ *
+ * `origin` and `velocity` do: where the controller is laid on the keyboard
+ * and whether it is allowed to say how hard is how the instrument is
+ * played, and it belongs with the instrument.
+ *
+ * `armed` and `input` DO NOT, and must not.  `armed` is this browser's
+ * record of having been let at the MIDI ports — a consent, which is not
+ * transferable and certainly not by opening a link somebody sent; and a
+ * port id names a socket on the machine it was saved on, which means
+ * nothing on anyone else's.  So they are neither packed nor read.
+ */
+function adopt(next) {
+  if (!next || typeof next !== 'object') return false;
+  const o = parseInt(next.origin, 10);
+  if (Number.isFinite(o) && o >= 0 && o <= 127) M.origin = o;
+  if (typeof next.velocity === 'boolean') M.velocity = next.velocity;
+  save();
+  syncUI();
+  return true;
+}
+
+window.XMidi = {
+  /** Only the two that are about playing, never `armed` or `input`. */
+  shared: () => ({ origin: M.origin, velocity: M.velocity }),
+  adopt,
+};
+
 bind();
 syncUI();
 status('', 'Not connected.');

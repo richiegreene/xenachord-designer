@@ -1075,9 +1075,17 @@
     const spine = XM.spineParts(L.spineKind, keySpans(L));
     out.spine = [];
     out.spineLayers = {};
+    /* AND KEYED BY THE FILAMENT IT PRINTS IN.  A band is not a part of its
+     * own: it prints in the colour of the keys whose tongues plug into it,
+     * fused to them, so the export asks for it by colour (see printMesh).
+     * The preview still draws the spine as its own toggle, out of
+     * out.spine / out.spineLayers, which is why both are kept. */
+    out.spineByPart = { white: [], black: [], gray: [] };
     for (const p of spine) {
       out.spine.push(...p.tris);
       (out.spineLayers[p.layer] = out.spineLayers[p.layer] || []).push(...p.tris);
+      const part = XM.spineLayerPart(L.spineKind, p.layer);
+      (out.spineByPart[part] = out.spineByPart[part] || []).push(...p.tris);
     }
     /* A foot is its pad face plus the pairing face of the key it belongs
      * to — the two loops the press is built between. */
@@ -1098,14 +1106,28 @@
   }
 
   /**
-   * One colour's mesh AS IT PRINTS: the keys plus every sensor press in
-   * that filament.  The preview keeps the two apart so each gets its own
-   * toggle; an STL has to hand the slicer one part, so it merges them.
+   * ONE COLOUR'S MESH AS IT PRINTS.  Not "the keys" — everything that
+   * leaves the printer in that filament, fused: the keys, the sensor press
+   * under each of them, and the spine band their tongues plug into.  That
+   * is one object on the bed and one object in the slicer, so it is one
+   * STL; the preview is the place where a press or a spine band is a thing
+   * of its own, and it keeps them apart under their own toggles.
+   *
+   * The three colours partition the whole instrument between them — every
+   * band belongs to exactly one of them (spineLayerPart) — so nothing is
+   * printed twice and nothing is left out.
    */
   function printMesh(meshes, part) {
-    const base = meshes[part] || [];
-    const extra = (meshes.pressLayers || {})[part];
-    return extra && extra.length ? base.concat(extra) : base;
+    const out = (meshes[part] || []).slice();
+    for (const src of [(meshes.pressLayers || {})[part],
+                       (meshes.spineByPart || {})[part]])
+      if (src && src.length) out.push(...src);
+    return out;
+  }
+
+  /** the colours this build actually has something to print in */
+  function printParts(meshes) {
+    return ['white', 'black', 'gray'].filter(p => printMesh(meshes, p).length);
   }
 
   /* ------------------------------------------------------------------ *
@@ -2335,7 +2357,7 @@ if __name__ == "__main__":
 
   const api = {
     presetDesign, clearedDesign, scaleOf, slotAt, designColours,
-    computeLayout, pairKeys, printMesh, buildMeshes, toSTL, makeZip,
+    computeLayout, pairKeys, printMesh, printParts, buildMeshes, toSTL, makeZip,
     pythonLog, summary, notesPerPeriod, layerCount, templateColours,
     whiteCount, widthAt, suggestScale,
     bounds, worldOffset, ORIGIN_MODES, bevelOf

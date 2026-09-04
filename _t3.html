@@ -897,7 +897,7 @@
             <legend>Print<span id="export-who"></span></legend>
             <div class="btns">
               <button class="wide" id="dl-zip"
-                title="Every colour this keyboard uses, as one STL each, plus the Blender log. On a rig, one folder per distinct keyboard.">⬇︎ Save STL Files for All Colors (.zip)</button>
+                title="Every colour this keyboard uses, as one STL each, plus the Blender log. On a rig, one folder per distinct keyboard.">⬇︎ Save STL Files for All Colours (.zip)</button>
             </div>
             <div class="btns three">
               <button data-part="white"
@@ -3154,7 +3154,7 @@ function rebuild(){
   const me = unitBuild(design);
   L = me.L; meshes = me.meshes;
   showBevel();                 // says what the edge is actually cut at
-  showParts();                 // and which colors there are files for
+  showParts();                 // and which colours there are files for
   const st = $('stats'), wn = $('warnings');
   if (me.err){ st.innerHTML=''; wn.innerHTML=`<div class="warning">${me.err.message}</div>`; return; }
 
@@ -3374,7 +3374,7 @@ function showParts(){
   info.innerHTML = have.size
     ? `${have.size} colour${have.size===1?'':'s'} — ` +
       [...have].map(p=>`<b>${p}</b>`).join(' · ') +
-      `. Each file is that color's keys, presses and spine band as one solid.`
+      `. Each file is that colour's keys, presses and spine band as one solid.`
     : '';
 }
 
@@ -4458,6 +4458,34 @@ if (document.readyState === 'loading')
   window.addEventListener('DOMContentLoaded', openSharedLink, { once: true });
 else openSharedLink();
 requestAnimationFrame(()=>{ fit(); requestAnimationFrame(fit); });
+</script>
+
+<script>
+window.__out=[]; const say=m=>{window.__out.push(m); document.title='T:'+window.__out.join(' | ');};
+window.onerror=(m)=>say('ERR '+m);
+setTimeout(()=>{ try{
+  say('modules ' + [!!window.XTuning,!!window.XPlay,!!window.XMidi].join(','));
+  XTuning.settings.hz = 432; XTuning.settings.system='custom';
+  XTuning.settings.custom = {0:{kind:'ratio',text:'3/2'}};
+  XTuning.settings.rot = 3;
+  XPlay.adopt({timbre: 900, adsr:{a:0.2,d:0.3,s:0.5,r:0.9}});
+  XMidi.adopt({origin: 48, velocity: false});
+  design.slots={'5':['Full Sized Gray']}; design.bevel=0.9; syncInputs(); rebuild();
+  const link = XShare.linkFor(design,false);
+  say('link='+link.length);
+  const payload = XShare.fromHash(link.split('#')[1]);
+  say('carries=' + Object.keys(payload.play||{}).join(''));
+  XTuning.adopt({hz:261.6256, system:'auto', custom:{}, rot:0});
+  XPlay.adopt({timbre: 400, adsr:{a:0.01,d:0.01,s:0.1,r:0.1}});
+  XMidi.adopt({origin: 60, velocity: true});
+  say('wiped hz='+XTuning.settings.hz+' timbre='+XPlay.settings.timbre+' origin='+XMidi.shared().origin);
+  takeShared(payload, 'test');
+  say('back hz='+XTuning.settings.hz+' sys='+XTuning.settings.system+' rot='+XTuning.settings.rot+
+      ' cus='+JSON.stringify(XTuning.settings.custom));
+  say('timbre='+XPlay.settings.timbre+' adsr='+JSON.stringify(XPlay.settings.adsr));
+  say('midi='+JSON.stringify(XMidi.shared())+' field='+document.getElementById('m-origin').value);
+  say('hzfield='+document.getElementById('t-hz').value+' bevel='+bevelNow().toFixed(2));
+}catch(e){ say('THROW '+e.message); } }, 900);
 </script>
 </body>
 </html>

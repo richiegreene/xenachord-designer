@@ -2887,6 +2887,25 @@
     return e ? e[space === 'linear' ? 'linear' : 'srgb'] : COLORS.spine;
   }
 
+  /* WHICH FILAMENT A SPINE BAND PRINTS IN.  The bands are drafted as
+   * layers of one spine, but a printed keyboard has no "spine part": every
+   * band is printed in the colour of the keys that plug into it, and it is
+   * exported fused to them.  This is that mapping, said once — the layer
+   * names of the three-type spine already ARE colours, the two-type spine
+   * calls them lower/upper, and the one-type spine's single slab carries
+   * the white keys (see SPINE_LAYER_COLORS above).                      */
+  const SPINE_LAYER_PART = {
+    one:   { all: 'white' },
+    two:   { lower: 'black', upper: 'white' },
+    three: { gray: 'gray', black: 'black', white: 'white' }
+  };
+
+  /** the key colour one spine layer prints in: 'white' | 'black' | 'gray' */
+  function spineLayerPart(spine, layerName) {
+    const k = SPINE_LAYER_PART[spineKindOf(spine)];
+    return (k && k[layerName]) || 'white';
+  }
+
   /** the material the drafting sandbox gives that layer, or null */
   function spineLayerMaterial(spine, layerName) {
     const k = SPINE_LAYER_COLORS[spineKindOf(spine)];
@@ -4356,6 +4375,7 @@
     armLines, armSpan, armPlace, armPlaceFor, pressArms, ARM_SHOULDER,
     spineKindOf, spineKindForColours, spineLayerCount,
     SPINE_LAYER_COLORS, spineLayerColor, spineLayerMaterial,
+    SPINE_LAYER_PART, spineLayerPart,
     spineHalves, spineParts, spineBands, spineZRange, footParts,
     FIT,
     footCentres, obroundRing, spineHoles, holeBoxPoint, HOLE_UNIT,

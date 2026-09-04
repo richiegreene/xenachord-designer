@@ -334,7 +334,41 @@ function noteOfHit(hit) {
   return hit.ref ? hit.ref.noteIndex : null;
 }
 
+/**
+ * THE SOUND ARRIVES WITH THE KEYBOARD.
+ *
+ * Export's share link carries the timbre and the envelope beside the layout
+ * and the tuning: what a shared instrument sounds like is part of what was
+ * shared, not a setting the receiver has to be told about separately.  Only
+ * the two things this panel actually holds are taken, and both are put
+ * through the same setters the controls use, so the picker, the curve, the
+ * numbers under it and the running voices all follow.
+ */
+function adopt(next) {
+  if (!next || typeof next !== 'object') return false;
+  if (Number.isFinite(+next.timbre)) {
+    S.timbre = +next.timbre;
+    picker.set(S.timbre);
+    voice.setTimbre(S.timbre);
+  }
+  const a = next.adsr;
+  if (a && typeof a === 'object') {
+    const num = (v, d, lo, hi) =>
+      Number.isFinite(+v) ? Math.max(lo, Math.min(hi, +v)) : d;
+    S.adsr = { a: num(a.a, S.adsr.a, 0, 10), d: num(a.d, S.adsr.d, 0, 10),
+               s: num(a.s, S.adsr.s, 0, 1),  r: num(a.r, S.adsr.r, 0, 10) };
+    voice.setAdsr(S.adsr);
+    showAdsr();
+    adsrEditor.redraw();
+  }
+  save();
+  return true;
+}
+
 window.XPlay = {
+  /** What the synth is set to, and how to set it from a shared layout. */
+  settings: S,
+  adopt,
   /** @returns true when this press has been taken as a note. */
   press(ev) {
     if (!playable() || typeof window.rayPick !== 'function') return false;

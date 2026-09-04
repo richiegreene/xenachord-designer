@@ -940,8 +940,48 @@ function bind() {
   rot('t-rot-up', +1);
 }
 
+/* ---------------------------------------------------------------------
+ *  A TUNING THAT ARRIVED FROM SOMEWHERE ELSE
+ *
+ *  Export's share link and layout file carry the tuning with the keyboard,
+ *  because a scale is not a setting that happens to be on beside a layout —
+ *  it is half of what a microtonal keyboard IS.  A 17-note arrangement sent
+ *  without what its 17 degrees sound is a picture of an instrument.
+ *
+ *  ONLY THE FIELDS T ALREADY HAS ARE TAKEN.  The default object above is
+ *  the whole vocabulary, so a payload from a newer build cannot write a key
+ *  this one does not understand, and every value that lands is put through
+ *  the same normalising an older stored session goes through.
+ * ------------------------------------------------------------------ */
+function adopt(next) {
+  if (!next || typeof next !== 'object') return false;
+  for (const k of Object.keys(T)) if (k in next) T[k] = next[k];
+
+  /* the same repairs a session off disk gets — a shared tuning is exactly
+   * as untrusted as a stored one, and for the same reason */
+  if (!isFinite(+T.hz) || +T.hz <= 0) T.hz = 261.6256;
+  T.hz = +T.hz;
+  T.nominal = Math.max(0, Math.min(6, T.nominal | 0));
+  T.acc = Math.max(0, Math.min(2, T.acc | 0));
+  T.oct = Math.max(-4, Math.min(7, T.oct | 0));
+  if (T.system !== 'auto' && T.system !== 'custom') T.system = 'auto';
+  if (!T.custom || typeof T.custom !== 'object') T.custom = {};
+  T.rot |= 0;
+  T.trStep = Number.isFinite(+T.trStep) && +T.trStep >= 1 && +T.trStep <= 128
+    ? (+T.trStep | 0) : null;
+  T.equaveShift = Math.max(-shiftLimit(), Math.min(shiftLimit(), T.equaveShift | 0));
+
+  /* nothing may be left ringing at a pitch that has just stopped existing,
+   * and the Custom editor must not stay armed over a scale it did not open */
+  window.XPlay?.releaseAll?.();
+  setArmed(false);
+  bind();            // the controls come back into step with T
+  refresh();         // ... and the strip, the freq table and localStorage
+  return true;
+}
+
 window.XTuning = {
-  label, refresh, setEquaveShift, shiftLimit,
+  label, refresh, adopt, setEquaveShift, shiftLimit,
   /** Play asks this before it sounds anything, and the mode switch calls the
    *  setter on its way out of Play. */
   editing: () => armed,
