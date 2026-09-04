@@ -2489,6 +2489,114 @@
    *          the key's own arms can slide along their bars to meet it —
    *          see THE KEY'S OWN ARMS.  Null leaves the boss as drafted.
    */
+  /* ------------------------------------------------------------------ *
+   *  T-JUNCTIONS                                                        *
+   *                                                                     *
+   *  A drafted key does not always meet itself vertex to vertex.  On the *
+   *  sheet, a belly runs the full width of the key as ONE edge while the *
+   *  three faces below it break the same line at two points — the face   *
+   *  is right, the neighbours are right, and there is no gap you could   *
+   *  measure — but the long edge is used once and the short ones are     *
+   *  used once each, so nothing pairs.  That is a T-junction, and to a   *
+   *  slicer it is a hole: it draws the model red, calls it not           *
+   *  watertight, and where a wall should have carried on it stitches a   *
+   *  guess instead.                                                      *
+   *                                                                     *
+   *  IT IS FIXED BY SPLITTING, NOT BY MOVING.  The long edge is cut at   *
+   *  the points its neighbours already break it at and the triangle it   *
+   *  belonged to is fanned from the corner opposite, so every edge in    *
+   *  the key ends up used exactly twice.  Not one vertex moves and not   *
+   *  one face changes shape — the surface is the drafted surface, said   *
+   *  in a way that closes.                                              *
+   *                                                                     *
+   *  Only the OPEN edges are looked at, and only vertices that already   *
+   *  sit on one are candidates to split them, so a key that meets itself *
+   *  properly costs one pass over its own triangles and nothing else.   *
+   * ------------------------------------------------------------------ */
+  const WELD_TOL = 1e-5;
+
+  /** undirected edges used exactly once, as "vi|vj" over a rounded index */
+  function openEdgeSet(t, key) {
+    const n = new Map();
+    for (let i = 0; i < t.length; i += 9) {
+      const v = [key(t, i), key(t, i + 3), key(t, i + 6)];
+      for (let j = 0; j < 3; j++) {
+        const a = v[j], b = v[(j + 1) % 3];
+        if (a === b) continue;
+        const u = a < b ? a + '|' + b : b + '|' + a;
+        n.set(u, (n.get(u) || 0) + 1);
+      }
+    }
+    const out = new Set();
+    for (const [u, c] of n) if (c === 1) out.add(u);
+    return out;
+  }
+
+  function weldTJunctions(t) {
+    const K = v => Math.round(v / WELD_TOL);
+    const key = (a, i) => K(a[i]) + ',' + K(a[i + 1]) + ',' + K(a[i + 2]);
+    for (let pass = 0; pass < 6; pass++) {
+      const open = openEdgeSet(t, key);
+      if (!open.size) break;
+      /* the only points that can split an open edge are points already
+       * standing on one — the far side of the same T */
+      const cand = new Map();
+      for (let i = 0; i < t.length; i += 9)
+        for (let j = 0; j < 3; j++) {
+          const k = key(t, i + j * 3);
+          if (!cand.has(k)) cand.set(k, [t[i + j*3], t[i + j*3 + 1], t[i + j*3 + 2]]);
+        }
+      const onOpen = new Set();
+      for (const u of open) { const p = u.split('|'); onOpen.add(p[0]); onOpen.add(p[1]); }
+      const pts = [];
+      for (const k of onOpen) if (cand.has(k)) pts.push({ k, p: cand.get(k) });
+
+      const out = [];
+      let changed = false;
+      for (let i = 0; i < t.length; i += 9) {
+        const V = [[t[i], t[i+1], t[i+2]], [t[i+3], t[i+4], t[i+5]],
+                   [t[i+6], t[i+7], t[i+8]]];
+        const KK = [key(t, i), key(t, i + 3), key(t, i + 6)];
+        let best = null;
+        for (let e = 0; e < 3; e++) {
+          const a = V[e], b = V[(e + 1) % 3];
+          const ka = KK[e], kb = KK[(e + 1) % 3];
+          const u = ka < kb ? ka + '|' + kb : kb + '|' + ka;
+          if (!open.has(u)) continue;
+          const dx = b[0]-a[0], dy = b[1]-a[1], dz = b[2]-a[2];
+          const L2 = dx*dx + dy*dy + dz*dz;
+          if (L2 < WELD_TOL * WELD_TOL) continue;
+          const hit = [];
+          for (const q of pts) {
+            if (q.k === ka || q.k === kb) continue;
+            const px = q.p[0]-a[0], py = q.p[1]-a[1], pz = q.p[2]-a[2];
+            const s = (px*dx + py*dy + pz*dz) / L2;
+            if (!(s > 1e-9 && s < 1 - 1e-9)) continue;
+            const ex = px - s*dx, ey = py - s*dy, ez = pz - s*dz;
+            if (ex*ex + ey*ey + ez*ez > WELD_TOL * WELD_TOL) continue;
+            hit.push({ s, p: q.p });
+          }
+          if (hit.length && (!best || hit.length > best.hit.length))
+            best = { e, hit };
+        }
+        if (!best) { for (let j = 0; j < 9; j++) out.push(t[i + j]); continue; }
+        changed = true;
+        /* fan from the corner OPPOSITE the edge being split: every piece
+         * keeps the parent's winding and none of them is degenerate */
+        best.hit.sort((x, y) => x.s - y.s);
+        const a = V[best.e], b = V[(best.e + 1) % 3], c = V[(best.e + 2) % 3];
+        const chain = [a].concat(best.hit.map(h => h.p), [b]);
+        for (let j = 0; j < chain.length - 1; j++)
+          out.push(chain[j][0], chain[j][1], chain[j][2],
+                   chain[j+1][0], chain[j+1][1], chain[j+1][2],
+                   c[0], c[1], c[2]);
+      }
+      t = out;
+      if (!changed) break;
+    }
+    return t;
+  }
+
   function buildKey(cx, w, type, lb, rb, seats, armAt) {
     const q = profileFor(type, lb, rb);
     const V = profilePoints(q.p, q.mirror, w, cx - w / 2);
@@ -2569,7 +2677,8 @@
     }
     for (let i = 0; i < faces.length; i++)
       if (!claimed.has(i)) emit(triangulateFace(V, faces[i]));
-    return t;
+    /* and said in a way that closes — see T-JUNCTIONS above */
+    return weldTJunctions(t);
   }
 
   /** the same key as the drafted polygons, un-triangulated (for Blender) */
@@ -2820,6 +2929,72 @@
     }
   }
 
+  /**
+   * THE ANNULUS'S OWN OUTER EDGE, in the order the fan above walks it.
+   *
+   * The fan runs from the ring out to the hole's bounding box, so its outer
+   * boundary is that box — but walked through every point a ring vertex
+   * projects onto, plus the four corners, rather than as four plain sides.
+   * Anything that has to MEET that boundary has to meet it at those same
+   * points or it leaves a seam, so the walk is written once, here, and both
+   * the wall below and the cap above take it from the same place.
+   */
+  function holeBoxLoop(h) {
+    const C = [[h.x1, h.y1], [h.x0, h.y1], [h.x0, h.y0], [h.x1, h.y0]];
+    const out = [];
+    const put = (p) => {
+      const q = out[out.length - 1];
+      if (!q || Math.abs(q[0] - p[0]) > 1e-9 || Math.abs(q[1] - p[1]) > 1e-9)
+        out.push(p);
+    };
+    const n = h.ring.length;
+    for (let i = 0; i < n; i++) {
+      const pa = holeBoxPoint(h, h.ring[i]);
+      const pb = holeBoxPoint(h, h.ring[(i + 1) % n]);
+      put(pa.p);
+      for (let s = pa.side; s !== pb.side; s = (s + 1) % 4) put(C[s]);
+      put(pb.p);
+    }
+    /* the walk closes on itself; drop the repeat so the wall does not build
+     * a zero-width quad at the seam */
+    while (out.length > 1) {
+      const a = out[0], b = out[out.length - 1];
+      if (Math.abs(a[0] - b[0]) > 1e-9 || Math.abs(a[1] - b[1]) > 1e-9) break;
+      out.pop();
+    }
+    return out;
+  }
+
+  /**
+   * WHAT MAKES THE WASHER A SOLID RATHER THAN TWO LOOSE LIDS.
+   *
+   * A slab with a hole in it is built here as rectangles around the hole's
+   * bounding box plus a fan filling box-minus-ring.  The fan was a pair of
+   * bare CAPS — a lid at z1 and a lid at z0 with the bore wall between
+   * them — so its outer edge went nowhere: 1216 open edges per spine, all
+   * of them ringing the eight mounting holes, which is exactly the ring of
+   * red a slicer draws round them and the reason it calls the model not
+   * watertight.  The two lids are the same loop at two heights; skinning
+   * between them closes the washer, and the piece becomes a solid like
+   * every other piece of the slab.
+   *
+   * The skin stands INSIDE the material — the rectangles around the hole
+   * are right up against it — so it adds no surface a print can see.  It
+   * is there so that every edge in the file belongs to a closed body,
+   * which is what lets the slicer union the lot into one outline per layer
+   * instead of stitching guesses.
+   */
+  function pushHoleOuterWall(t, h, z0, z1) {
+    const loop = holeBoxLoop(h);
+    for (let i = 0; i < loop.length; i++) {
+      const a = loop[i], b = loop[(i + 1) % loop.length];
+      /* the ring is wound CCW seen from +z and the fan follows it, so this
+       * winding puts the skin's normals outward, away from the bore */
+      pushQuad(t, [a[0], a[1], z0], [b[0], b[1], z0],
+                  [b[0], b[1], z1], [a[0], a[1], z1]);
+    }
+  }
+
   /** the inside wall of one hole, z0 .. z1, normals pointing into the bore */
   function pushHoleWall(t, h, z0, z1) {
     const n = h.ring.length;
@@ -2850,10 +3025,15 @@
   function pushSpineSlab(t, x0, x1, y0, y1, z0, z1, holes) {
     rectWithHoles(x0, x1, y0, y1, holes,
       (a, b, c, d) => pushBox(t, a, b, c, d, z0, z1));
+    /* EACH HOLE'S WASHER IS A CLOSED BODY: lid, floor, the bore wall
+     * between them on the inside, and the skin that shuts its outer edge.
+     * Built as four faces of one solid rather than as three loose surfaces
+     * — see pushHoleOuterWall for what that was costing. */
     for (const h of holes) {
       pushHoleAnnulus(t, h, z1, +1);
       pushHoleAnnulus(t, h, z0, -1);
       pushHoleWall(t, h, z0, z1);
+      pushHoleOuterWall(t, h, z0, z1);
     }
   }
 
@@ -3763,22 +3943,53 @@
    * once and its opposite exactly once.  A bare undirected count would
    * pass a cap wound the wrong way; this does not.
    */
+  /**
+   * TWO DIFFERENT THINGS GET CALLED "NOT WATERTIGHT", and only one of them
+   * is a fault.
+   *
+   *   OPEN     an edge used by ONE face.  A hole in the surface: there is
+   *            no inside and no outside there, a slicer's cross-section
+   *            will not close, and it stitches a guess across the gap.
+   *            This is a defect and there should be none.
+   *
+   *   INTERNAL an edge used by more than two.  Two closed bodies meeting
+   *            exactly along it — the rectangles a slab is built from, a
+   *            washer against the block around it.  Every face still has
+   *            an inside and an outside; the layer is closed either way,
+   *            and the slicer unions the pieces into one outline.  A
+   *            strict "every edge exactly twice" checker calls this
+   *            non-manifold, and for a print it is not a fault.
+   *
+   * `closed` is therefore about OPEN edges alone, and the internal count
+   * is reported beside it rather than folded into a single verdict.
+   */
   function isWatertight(tris) {
     const k4 = v => Math.round(v * 1e4);
-    const key = (t, i, j) => k4(t[i]) + ',' + k4(t[i+1]) + ',' + k4(t[i+2]) +
-                       '|' + k4(t[j]) + ',' + k4(t[j+1]) + ',' + k4(t[j+2]);
-    const dir = new Map();
-    for (let i = 0; i < tris.length; i += 9)
+    const vk = (t, i) => k4(t[i]) + ',' + k4(t[i+1]) + ',' + k4(t[i+2]);
+    const und = new Map(), dir = new Map();
+    for (let i = 0; i < tris.length; i += 9) {
+      const v = [vk(tris, i), vk(tris, i + 3), vk(tris, i + 6)];
       for (let k = 0; k < 3; k++) {
-        const e = key(tris, i + k * 3, i + ((k + 1) % 3) * 3);
-        dir.set(e, (dir.get(e) || 0) + 1);
+        const a = v[k], b = v[(k + 1) % 3];
+        if (a === b) continue;                       // degenerate
+        const u = a < b ? a + '|' + b : b + '|' + a;
+        und.set(u, (und.get(u) || 0) + 1);
+        const d = a + '>' + b;
+        dir.set(d, (dir.get(d) || 0) + 1);
       }
-    let bad = 0;
-    for (const e of dir.keys()) {
-      const p = e.split('|');
-      if (dir.get(e) !== 1 || (dir.get(p[1] + '|' + p[0]) || 0) !== 1) bad++;
     }
-    return { closed: bad === 0, badEdges: bad, edges: dir.size };
+    let open = 0, internal = 0;
+    for (const n of und.values()) { if (n === 1) open++; else if (n > 2) internal++; }
+    /* and every edge has to be walked the same number of times each way,
+     * or two faces that share it disagree about which side is out */
+    let flipped = 0;
+    for (const [e, n] of dir) {
+      const p = e.split('>');
+      if ((dir.get(p[1] + '>' + p[0]) || 0) !== n) flipped++;
+    }
+    return { closed: open === 0 && flipped === 0, openEdges: open,
+             internalEdges: internal, flippedEdges: flipped,
+             badEdges: open + flipped, edges: und.size };
   }
 
   /** signed volume of a closed soup — positive when the normals face out */
@@ -4369,7 +4580,7 @@
      * under their old names.  Prefer the PAIR names in new code. --- */
     BRIDGE: PAIR, bridgeAudit: pairAudit,
     bridgeSeats: () => [], buildBridge: () => [], footOutline, footIslands,
-    keyBackSpan, keyPadSection,
+    keyBackSpan, keyPadSection, weldTJunctions,
     pairPlan, pairFaces, pairLand, pairAudit, PAIR_SHAPE, pushFlatFace,
     mapRingToPair, buildPress, pressParts, pushPrism, isWatertight, meshVolume,
     armLines, armSpan, armPlace, armPlaceFor, pressArms, ARM_SHOULDER,
@@ -4379,7 +4590,7 @@
     spineHalves, spineParts, spineBands, spineZRange, footParts,
     FIT,
     footCentres, obroundRing, spineHoles, holeBoxPoint, HOLE_UNIT,
-    pushHoleAnnulus, pushHoleWall, pushSpineSlab,
+    pushHoleAnnulus, pushHoleWall, pushHoleOuterWall, holeBoxLoop, pushSpineSlab,
     toWorld: (x, y, z) => [x + WORLD.x0, WORLD.y0 - y, z + WORLD.z0]
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

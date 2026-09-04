@@ -1359,6 +1359,19 @@
       ((meshes.spineByPart || {})[p] || []).length);
   }
 
+  /**
+   * IS WHAT LEAVES HERE ACTUALLY A SOLID?  Asked of the file as it will be
+   * written — turned, folded and all — because that is the thing a slicer
+   * opens, and a part that reads as closed in the app frame and open in the
+   * bed frame would be a lie told in the one place it matters.
+   */
+  function printAudit(meshes, opts) {
+    const out = {};
+    for (const p of printParts(meshes))
+      out[p] = XM.isWatertight(printMesh(meshes, p, opts));
+    return out;
+  }
+
   /** the footprint an exported part lands in, so the UI can say it */
   function printBounds(meshes, part, opts) {
     const t = printMesh(meshes, part, opts);
@@ -2600,7 +2613,7 @@ if __name__ == "__main__":
 
   const api = {
     presetDesign, clearedDesign, scaleOf, slotAt, designColours,
-    computeLayout, pairKeys, printMesh, printParts, printBounds, bedAngle,
+    computeLayout, pairKeys, printMesh, printParts, printBounds, printAudit, bedAngle,
     buildMeshes, toSTL, makeZip,
     pythonLog, summary, notesPerPeriod, layerCount, templateColours,
     whiteCount, widthAt, suggestScale,

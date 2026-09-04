@@ -565,7 +565,7 @@ Export is its own mode on the left rail, beneath Design and Play, because it
 asks a different question from either: not what the instrument is, but who
 gets it.
 
-### Print — one file per colour
+### Print — one file per colour, laid out for the bed
 
 * **STL per colour** — `white`, `black`, `gray`. A file is everything that
   prints in that filament, **fused**: the keys, the sensor press under each of
@@ -575,16 +575,17 @@ gets it.
   `FIT.engage` into the keys that share its colour, so the pieces overlap into
   one solid rather than merely touching.
 * Beveling, the ad-hoc widths and the sensor-press solve are all in the mesh
-  the button writes; the STL is the keyboard exactly as the preview draws it.
-### Lay out for the print bed
+  the button writes.
+* A colour the design does not use is not an empty file — the button greys out
+  and the zip leaves it out.
+* **Save STL files for all colours (.zip)** — the colours this keyboard uses
+  plus the Python log. On a rig, one folder per *distinct* keyboard.
+* Face winding is consistent across every primitive, so exported normals point
+  outward — slicers and Blender both read the solids the right way round.
 
-On by default, because it is what the file is nearly always for. A keyboard is
-the wrong shape *and* the wrong way up for a printer, and the one box fixes
-both. Turn it off and the STL comes out exactly as the app draws it — upright,
-one long row — for a long bed, or for looking at the whole keyboard at once.
-It is a per-browser preference, not part of the design: not in a preset, a
-share link or the undo stack. The footprint and the turn are quoted under the
-buttons.
+**Every export is folded and turned for a printer, not left as the app draws
+it.** A keyboard laid out as it is played is the wrong shape *and* the wrong
+way up for a bed, and there is no reason to hand out a file that is either.
 
 **Wrong shape → folded in two.** Laid out as it is played the instrument is
 373 × 95 mm, which no common bed will take. But the AKM320 is *already* two
@@ -634,12 +635,60 @@ files. That is the right way round: the playing surface is the one that has to
 be flat, and the band's faces are glued, not touched. The fold is applied
 *after* the turn, in the bed's own frame; folded first, the row offset would be
 turned with everything else and half B would come out 3.5 mm off the bed.
-* A colour the design does not use is not an empty file — the button greys out
-  and the zip leaves it out.
-* **Save STL files for all colours (.zip)** — the colours this keyboard uses
-  plus the Python log. On a rig, one folder per *distinct* keyboard.
-* Face winding is consistent across every primitive, so exported normals point
-  outward — slicers and Blender both read the solids the right way round.
+
+### Closed, so the walls run through
+
+An exported colour is several closed bodies that overlap: each key, the sensor
+press under it, and the spine band whose boss reaches `FIT.engage` = 0.4 mm into
+the keys of its own colour. A slicer cuts each layer into closed outlines and
+unions them, so overlapping bodies come out as **one** outline per region and
+the wall lines carry straight through the joint between key and band. That only
+works if every body actually closes. Two defects used to stop it, and both are
+fixed:
+
+* **The mounting holes left the surface open.** A slab with a hole is built as
+  rectangles around the hole's bounding box plus a fan filling box-minus-ring.
+  The fan was a pair of bare *caps* — a lid at z1, a floor at z0, the bore wall
+  between them — so its outer edge went nowhere: **1216 open edges per spine**,
+  all of them ringing the eight screw holes. That is exactly the ring of red a
+  slicer draws around them, and the reason it called the model not watertight.
+  `pushHoleOuterWall` skins between the two lids along `holeBoxLoop` — the same
+  walk the fan itself takes, so it meets it point for point — and the washer
+  becomes a solid like every other piece. The skin stands inside the material
+  and adds no surface a print can see.
+
+* **The keys had T-junctions.** A drafted key does not always meet itself vertex
+  to vertex: a belly runs the full width as *one* edge while the three faces
+  below it break the same line at two points. No gap you could measure, but the
+  long edge is used once and the short ones once each, so nothing pairs — and to
+  a slicer a T-junction is a hole. `weldTJunctions` splits the long edge at the
+  points its neighbours already break it at and fans the triangle from the
+  opposite corner. Not one vertex moves and not one face changes shape. It looks
+  only at open edges, and only at vertices already sitting on one, so a key that
+  meets itself properly costs one pass and nothing else.
+
+`XD.printAudit` checks the file **as it will be written** — turned, folded and
+all — and the Export panel says the result. Every colour of every design tested
+comes out `closed: true, openEdges: 0, flippedEdges: 0`; slicing all 234 layers
+of a mixed 32-key design gives closed loops with **zero dangling ends**, so
+there is nothing left for a slicer to stitch. The spine slab's volume matches
+its analytic value (box minus eight obrounds) to 3 × 10⁻¹¹ mm³, so closing the
+washer changed the geometry not at all.
+
+`isWatertight` now separates the two things that get called "not watertight":
+
+| | | |
+|---|---|---|
+| **open** | an edge used by one face | a hole in the surface — a defect, and there are none |
+| **internal** | an edge used by more than two | two closed bodies meeting exactly along it, e.g. the rectangles a slab is built from |
+
+About 256 internal edges per colour remain, all inside the spine slab where its
+sub-blocks abut. Every face there still has an inside and an outside, each layer
+closes either way, and the slicer unions the pieces — so it does not affect the
+print. A checker that insists on *every edge exactly twice* (trimesh, and so the
+Mesh Tools plugin) will still call that non-manifold; removing it would mean
+triangulating the slab's caps as one conformal polygon-with-holes, which buys
+nothing a print can see.
 
 ### Share this layout
 
