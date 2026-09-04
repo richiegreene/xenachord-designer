@@ -204,7 +204,7 @@
   #stripInner, #stripInner *{box-sizing:border-box}
   .kb-white{position:absolute;background:var(--spine);border:1px solid #55565f;
     border-radius:0 0 3px 3px;color:var(--key-text,#444);font-size:9px;text-align:center}
-  .kb-white .nm{position:absolute;bottom:2px;left:0;right:0}
+  .kb-white .nm{position:absolute;bottom:2px;left:0;right:0;white-space:nowrap}
   .kb-slot{position:absolute;border-radius:3px;
     outline:1px dashed transparent;outline-offset:-1px}
   .kb-slot.empty{outline-color:#3a3b45;background:rgba(255,255,255,.03)}
@@ -215,7 +215,8 @@
   .kb-slot.end.empty{outline-color:#4b5568;outline-style:dashed;
     background:rgba(126,180,255,.05)}
   .kb-slot.over{outline-color:var(--accent);background:#2a3a4c}
-  .kb-m{position:absolute;border-radius:2px;cursor:pointer;border:1px solid rgba(0,0,0,.5)}
+  .kb-m{position:absolute;border-radius:2px;cursor:pointer;border:1px solid rgba(0,0,0,.5);
+    outline:3px solid var(--strip-bg);outline-offset:0;z-index:2}
   .kb-m.b{background:var(--kb)} .kb-m.g{background:var(--kg)}
   .kb-foot{position:absolute;background:#3d5f7d;border-radius:1px;opacity:.9}
   .kb-foot.half-b{box-shadow:-2px 0 0 var(--accent)}
@@ -973,6 +974,9 @@
           <input type="checkbox" id="flush">flush</label>
       </div>
       <div class="sep" id="flushsep" style="display:none"></div>
+      <div class="grp"><label for="labelsize" style="margin:0;color:var(--dim)">label sizing</label>
+        <input id="labelsize" type="range" min="50" max="200" step="1" value="100">
+        <span id="labelsizeval" style="color:var(--dim);width:34px">100%</span></div>
       <div class="grp"><span style="color:var(--dim)">separate combs</span>
         <input id="explode" type="range" min="0" max="60" step="1" value="0">
         <span id="explodeval" style="color:var(--dim);width:34px">0 mm</span></div>
@@ -2055,6 +2059,29 @@ function buildStrip(){
   /* The strip is torn down and rebuilt whole every time, so the names a
    * tuning writes on it are put back here rather than kept alive across it. */
   if (window.XTuning) window.XTuning.label(L);
+  applyLabelSizing();
+}
+
+let labelScale = 1;
+function applyLabelSizing(){
+  const inner = $('stripInner');
+  if (!inner) return;
+  for (const key of inner.querySelectorAll('.kb-white, .kb-m')){
+    for (const label of key.querySelectorAll('.nm, .kb-tune')){
+      label.style.fontSize = '';
+      label.style.maxWidth = 'none';
+      label.style.overflow = 'visible';
+      const base = label.classList.contains('kb-tune') && key.classList.contains('kb-white')
+        ? 10 : 9;
+      label.style.fontSize = (base * labelScale) + 'px';
+      const room = Math.max(0, key.clientWidth - 4);
+      const width = label.getBoundingClientRect().width;
+      if (width > room && width > 0)
+        label.style.fontSize = (base * labelScale * room / width) + 'px';
+      label.style.maxWidth = room + 'px';
+      label.style.overflow = 'hidden';
+    }
+  }
 }
 
 /**
@@ -3431,37 +3458,47 @@ $('dl-py').onclick = ()=>{
 };
 const svgEscape = s => String(s).replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
-function savePlaySvg(){
+function base64Bytes(bytes){
+  let out = '';
+  for(let i=0; i<bytes.length; i+=0x8000)
+    out += String.fromCharCode(...bytes.subarray(i, i+0x8000));
+  return btoa(out);
+}
+async function inlineSvgFonts(css){
+  const paths = [...new Set([...css.matchAll(/url\(["']?(fonts\/[^)"']+)/g)].map(m=>m[1]))];
+  const embedded = await Promise.all(paths.map(async path=>{
+    try{
+      const res = await fetch(new URL(path, location.href));
+      if(!res.ok) return [path, null];
+      const type = res.headers.get('content-type') || 'application/octet-stream';
+      return [path, `data:${type};base64,${base64Bytes(new Uint8Array(await res.arrayBuffer()))}`];
+    }catch(e){ return [path, null]; }
+  }));
+  for(const [path, data] of embedded) if(data)
+    css = css.split(path).join(data);
+  return css;
+}
+async function savePlaySvg(){
   if(!L) return;
   const inner = $('stripInner'), box = inner.getBoundingClientRect();
-  const xOf = r => r.left - box.left + inner.scrollLeft;
-  const yOf = r => r.top - box.top + inner.scrollTop;
-  const parts = [];
-  const rects = inner.querySelectorAll('.kb-white,.kb-m,.kb-foot');
-  for(const el of rects){
-    const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
-    parts.push(`<rect x="${xOf(r).toFixed(2)}" y="${yOf(r).toFixed(2)}" `+
-      `width="${r.width.toFixed(2)}" height="${r.height.toFixed(2)}" `+
-      `rx="${cs.borderRadius.split(' ')[0]}" fill="${svgEscape(cs.backgroundColor)}" `+
-      `stroke="${svgEscape(cs.borderTopColor)}" stroke-width="${cs.borderTopWidth}"/>`);
-  }
-  for(const el of inner.querySelectorAll('[data-note] .kb-tune')){
-    const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
-    parts.push(`<text x="${(xOf(r)+r.width/2).toFixed(2)}" `+
-      `y="${(yOf(r)+r.height).toFixed(2)}" text-anchor="middle" `+
-      `fill="${svgEscape(cs.color)}" font-size="${cs.fontSize}" `+
-      `font-family="${svgEscape(cs.fontFamily)}">${svgEscape(el.textContent)}</text>`);
-  }
-  for(const el of inner.querySelectorAll('.kb-band-tag')){
-    const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
-    parts.push(`<text x="${xOf(r).toFixed(2)}" y="${(yOf(r)+r.height-3).toFixed(2)}" `+
-      `fill="${svgEscape(cs.color)}" font-size="${cs.fontSize}" `+
-      `font-family="${svgEscape(cs.fontFamily)}">${svgEscape(el.textContent)}</text>`);
-  }
   const width = Math.ceil(inner.scrollWidth), height = Math.ceil(inner.scrollHeight);
+  const clone = inner.cloneNode(true);
+  clone.style.width = width + 'px'; clone.style.height = height + 'px';
+  const bodyStyle = getComputedStyle(document.body), vars = [];
+  for(let i=0; i<bodyStyle.length; i++){
+    const name = bodyStyle[i];
+    if(name.startsWith('--')) vars.push(`${name}:${bodyStyle.getPropertyValue(name)}`);
+  }
+  let css = [...document.querySelectorAll('style')].map(s=>s.textContent).join('\n');
+  css = css.replace(/\bbody(?=[.#:\[])/g, '.export-root');
+  css = await inlineSvgFonts(css);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" `+
     `viewBox="0 0 ${width} ${height}"><title>${svgEscape(baseName())} Play layout</title>`+
-    parts.join('') + '</svg>';
+    `<style>${css}\n.export-root{${vars.join(';')}}`+
+    `</style><foreignObject width="${width}" height="${height}">`+
+    `<div xmlns="http://www.w3.org/1999/xhtml" class="export-root mode-play bright" `+
+    `style="width:${width}px;height:${height}px;overflow:visible">${clone.outerHTML}</div>`+
+    `</foreignObject></svg>`;
   download(`${baseName()}-design-layout.svg`, svg, 'image/svg+xml');
 }
 $('dl-svg').onclick = savePlaySvg;
@@ -3810,6 +3847,12 @@ $('explode').oninput=e=>{
   explode=+e.target.value;
   $('explodeval').textContent=explode+' mm';
   draw();
+};
+
+$('labelsize').oninput=e=>{
+  labelScale = +e.target.value / 100;
+  $('labelsizeval').textContent = e.target.value + '%';
+  applyLabelSizing();
 };
 
 /* ---- matrix helpers ---- */
