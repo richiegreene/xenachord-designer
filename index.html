@@ -947,8 +947,10 @@
               <button class="wide" id="save-preset"
                 title="Save the current layout, widths, scale and bevel as a named preset in Design's Layout Presets menu">⬇︎ Save to Presets</button>
               <button class="wide" id="dl-py">⬇︎ Save design log (.py)</button>
-              <button class="wide" id="dl-svg"
-                title="Save the layout currently displayed in Play, including its selected tuning and notation">⬇︎ Save design layout (.svg)</button>
+              <button id="dl-svg"
+                title="Save the layout currently displayed in Play, including its selected tuning and notation">⬇︎ Save design (.svg)</button>
+              <button id="dl-png"
+                title="Save the layout currently displayed in Play as a PNG image">⬇︎ Save design (.png)</button>
             </div>
           </fieldset>
         </div>
@@ -3472,6 +3474,21 @@ $('dl-py').onclick = ()=>{
   download(`${baseName()}-design-log.py`,
            new TextEncoder().encode(XD.pythonLog(L, logOpts())), 'text/x-python');
 };
+/* ===================== the layout as a picture =====================
+ *
+ * A DESIGN IS DRAWN AS SHAPES, NOT AS A SCREENSHOT OF THE APP.  The strip
+ * is already a measurement — every key is at a millimetre position — so the
+ * export walks it and writes plain <rect>/<path>/<text>: what comes out is
+ * an SVG any drawing program can open and edit, and it is the only kind a
+ * browser will rasterise (an SVG carrying a <foreignObject> taints a canvas
+ * in Chrome and Safari, so the PNG could never be read back out of one).
+ *
+ * The picture is the strip AS PLAY DRAWS IT, whichever panel is open: the
+ * body's mode classes are swapped for the duration of the walk and put back
+ * before anything can be painted, so a design exported from the Design panel
+ * still comes out with its tuning names on and its drag-and-drop scaffolding
+ * — the gap outlines, the resize grips — off.
+ */
 const svgEscape = s => String(s).replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
 function base64Bytes(bytes){
@@ -3480,44 +3497,233 @@ function base64Bytes(bytes){
     out += String.fromCharCode(...bytes.subarray(i, i+0x8000));
   return btoa(out);
 }
-async function inlineSvgFonts(css){
-  const paths = [...new Set([...css.matchAll(/url\(["']?(fonts\/[^)"']+)/g)].map(m=>m[1]))];
-  const embedded = await Promise.all(paths.map(async path=>{
+/* The fonts a name is written in are the app's own files, and an SVG image
+ * is not allowed to go and fetch anything, so the faces the picture actually
+ * uses travel inside it. Only those: all five would be a megabyte of otf. */
+async function inlineSvgFonts(families){
+  const css = [...document.querySelectorAll('style')].map(s=>s.textContent).join('\n');
+  const faces = [...css.matchAll(/@font-face\s*\{[^}]*\}/g)].map(m=>m[0]).filter(face=>{
+    const name = /font-family\s*:\s*["']?([^;"']+)/.exec(face);
+    return name && families.has(name[1].trim());
+  });
+  return (await Promise.all(faces.map(async face=>{
+    const url = /url\(["']?([^)"']+)/.exec(face);
+    if(!url) return face;
     try{
-      const res = await fetch(new URL(path, location.href));
-      if(!res.ok) return [path, null];
+      const res = await fetch(new URL(url[1], location.href));
+      if(!res.ok) return null;
       const type = res.headers.get('content-type') || 'application/octet-stream';
-      return [path, `data:${type};base64,${base64Bytes(new Uint8Array(await res.arrayBuffer()))}`];
-    }catch(e){ return [path, null]; }
-  }));
-  for(const [path, data] of embedded) if(data)
-    css = css.split(path).join(data);
-  return css;
+      const data = `data:${type};base64,${base64Bytes(new Uint8Array(await res.arrayBuffer()))}`;
+      return face.split(url[1]).join(data);
+    }catch(e){ return null; }
+  }))).filter(Boolean).join('\n');
 }
-async function savePlaySvg(){
-  if(!L) return;
-  const inner = $('stripInner'), box = inner.getBoundingClientRect();
-  const width = Math.ceil(inner.scrollWidth), height = Math.ceil(inner.scrollHeight);
-  const clone = inner.cloneNode(true);
-  clone.style.width = width + 'px'; clone.style.height = height + 'px';
-  const bodyStyle = getComputedStyle(document.body), vars = [];
-  for(let i=0; i<bodyStyle.length; i++){
-    const name = bodyStyle[i];
-    if(name.startsWith('--')) vars.push(`${name}:${bodyStyle.getPropertyValue(name)}`);
+
+const svgNum = n => Math.round(n*1000)/1000;
+function svgColor(value){
+  if(!value) return null;
+  const m = /rgba?\(([^)]+)\)/.exec(value);
+  if(!m) return value === 'transparent' ? null : { fill:value, alpha:1 };
+  const p = m[1].split(/[\s,\/]+/).filter(Boolean).map(parseFloat);
+  const alpha = p.length > 3 ? p[3] : 1;
+  if(!(alpha > 0)) return null;
+  return { fill:`rgb(${p[0]},${p[1]},${p[2]})`, alpha };
+}
+/* One path rather than a <rect>, because a key is rounded at the foot and
+ * square at the shoulder and rx/ry cannot say that. */
+function boxPath(x, y, w, h, radii){
+  const lim = Math.min(w, h)/2;
+  const [tl, tr, br, bl] = radii.map(r => Math.max(0, Math.min(r, lim)));
+  const n = svgNum;
+  return `M${n(x+tl)},${n(y)}H${n(x+w-tr)}${tr?`A${n(tr)},${n(tr)} 0 0 1 ${n(x+w)},${n(y+tr)}`:''}`+
+         `V${n(y+h-br)}${br?`A${n(br)},${n(br)} 0 0 1 ${n(x+w-br)},${n(y+h)}`:''}`+
+         `H${n(x+bl)}${bl?`A${n(bl)},${n(bl)} 0 0 1 ${n(x)},${n(y+h-bl)}`:''}`+
+         `V${n(y+tl)}${tl?`A${n(tl)},${n(tl)} 0 0 1 ${n(x+tl)},${n(y)}`:''}Z`;
+}
+const px = v => parseFloat(v) || 0;
+
+/* Draw the strip's DOM into SVG source. Returns null when there is nothing
+ * to draw, which is the same answer as "no layout is open". */
+function traceStrip(){
+  const inner = $('stripInner');
+  if(!inner || !inner.firstChild) return null;
+  const out = [], families = new Set();
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const grow = r => {
+    if(r.width <= 0 && r.height <= 0) return;
+    x0 = Math.min(x0, r.left); y0 = Math.min(y0, r.top);
+    x1 = Math.max(x1, r.right); y1 = Math.max(y1, r.bottom);
+  };
+  const attr = (o, alpha) => (alpha < 1 ? ` opacity="${svgNum(alpha)}"` : '') +
+    Object.entries(o).map(([k,v]) => ` ${k}="${v}"`).join('');
+
+  const drawBox = (el, cs, alpha) => {
+    const r = el.getBoundingClientRect();
+    if(r.width <= 0 || r.height <= 0) return;
+    const radii = ['borderTopLeftRadius','borderTopRightRadius',
+                   'borderBottomRightRadius','borderBottomLeftRadius'].map(k => px(cs[k]));
+    const fill = svgColor(cs.backgroundColor);
+    /* border-box everywhere in the strip, so a border is drawn INSIDE the
+     * measured edge — a stroke centred on the box would fatten the key by
+     * half a pixel on each side and the run of keys would stop adding up. */
+    const bw = px(cs.borderTopWidth);
+    const even = ['borderRightWidth','borderBottomWidth','borderLeftWidth']
+      .every(k => Math.abs(px(cs[k]) - bw) < 0.01);
+    const stroke = bw > 0 && even && cs.borderTopStyle !== 'none'
+      ? svgColor(cs.borderTopColor) : null;
+    if(fill || stroke){
+      const i = stroke ? bw/2 : 0;
+      const d = boxPath(r.left+i, r.top+i, r.width-2*i, r.height-2*i,
+                        radii.map(v => Math.max(0, v - i)));
+      const a = {d};
+      a.fill = fill ? fill.fill : 'none';
+      if(fill && fill.alpha < 1) a['fill-opacity'] = svgNum(fill.alpha);
+      if(stroke){
+        a.stroke = stroke.fill; a['stroke-width'] = svgNum(bw);
+        if(stroke.alpha < 1) a['stroke-opacity'] = svgNum(stroke.alpha);
+      }
+      out.push(`<path${attr(a, alpha)}/>`);
+      grow(r);
+    }
+    /* An empty slot is an OUTLINE, not a border — it is drawn outside layout
+     * so that a dashed box round a gap cannot shift the keys beside it. */
+    const ow = px(cs.outlineWidth), oc = svgColor(cs.outlineColor);
+    if(ow > 0 && oc && cs.outlineStyle !== 'none'){
+      const off = px(cs.outlineOffset) + ow/2;
+      const a = {
+        d: boxPath(r.left-off, r.top-off, r.width+2*off, r.height+2*off,
+                   radii.map(v => v && v + off)),
+        fill:'none', stroke: oc.fill, 'stroke-width': svgNum(ow)
+      };
+      if(cs.outlineStyle === 'dashed') a['stroke-dasharray'] = `${svgNum(ow*2)},${svgNum(ow*2)}`;
+      if(oc.alpha < 1) a['stroke-opacity'] = svgNum(oc.alpha);
+      out.push(`<path${attr(a, alpha)}/>`);
+      grow(r);
+    }
+  };
+
+  const drawText = (node, cs, alpha) => {
+    const text = node.nodeValue.replace(/\s+/g, ' ');
+    if(!text.trim()) return;
+    const range = document.createRange();
+    range.selectNode(node);
+    const rects = [...range.getClientRects()].filter(r => r.width > 0);
+    range.detach && range.detach();
+    if(!rects.length) return;
+    const box = rects.reduce((a, r) => ({
+      left: Math.min(a.left, r.left), right: Math.max(a.right, r.right),
+      top: Math.min(a.top, r.top), bottom: Math.max(a.bottom, r.bottom)
+    }), {left:Infinity, right:-Infinity, top:Infinity, bottom:-Infinity});
+    const color = svgColor(cs.color);
+    if(!color) return;
+    for(const family of cs.fontFamily.split(','))
+      families.add(family.trim().replace(/^["']|["']$/g, ''));
+    const a = {
+      x: svgNum((box.left + box.right)/2), y: svgNum((box.top + box.bottom)/2),
+      'text-anchor':'middle', 'dominant-baseline':'central',
+      'font-family': svgEscape(cs.fontFamily), 'font-size': svgNum(px(cs.fontSize)),
+      fill: color.fill
+    };
+    if(cs.fontWeight !== '400' && cs.fontWeight !== 'normal') a['font-weight'] = cs.fontWeight;
+    if(cs.fontStyle !== 'normal') a['font-style'] = cs.fontStyle;
+    if(cs.letterSpacing && cs.letterSpacing !== 'normal')
+      a['letter-spacing'] = svgNum(px(cs.letterSpacing));
+    if(cs.textDecorationLine && cs.textDecorationLine !== 'none')
+      a['text-decoration'] = cs.textDecorationLine;
+    if(color.alpha < 1) a['fill-opacity'] = svgNum(color.alpha);
+    out.push(`<text${attr(a, alpha)}>${svgEscape(text)}</text>`);
+    grow({left:box.left, top:box.top, right:box.right, bottom:box.bottom,
+          width:box.right-box.left, height:box.bottom-box.top});
+  };
+
+  const walk = (el, alpha) => {
+    const cs = getComputedStyle(el);
+    if(cs.display === 'none' || cs.visibility === 'hidden') return;
+    const own = parseFloat(cs.opacity);
+    const a = alpha * (isNaN(own) ? 1 : own);
+    if(!(a > 0)) return;
+    drawBox(el, cs, a);
+    for(const node of el.childNodes){
+      if(node.nodeType === 1) walk(node, a);
+      else if(node.nodeType === 3) drawText(node, cs, a);
+    }
+  };
+  for(const child of inner.children) walk(child, 1);
+  if(!isFinite(x0)) return null;
+  return { body: out, families, x0, y0, x1, y1 };
+}
+
+/* The strip as Play draws it, whatever panel is open. The class swap and the
+ * measuring happen in one turn of the event loop, so nothing is painted in
+ * between and the screen never flickers through Play on its way to a file. */
+function inPlayStyling(fn){
+  const body = document.body, was = body.className;
+  body.classList.remove('mode-export', 'tune-edit', 'resizing');
+  body.classList.add('mode-play', 'bright');
+  try {
+    applyLabelSizing();
+    return fn();
+  } finally {
+    body.className = was;
+    applyLabelSizing();
   }
-  let css = [...document.querySelectorAll('style')].map(s=>s.textContent).join('\n');
-  css = css.replace(/\bbody(?=[.#:\[])/g, '.export-root');
-  css = await inlineSvgFonts(css);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" `+
-    `viewBox="0 0 ${width} ${height}"><title>${svgEscape(baseName())} Play layout</title>`+
-    `<style>${css}\n.export-root{${vars.join(';')}}`+
-    `</style><foreignObject width="${width}" height="${height}">`+
-    `<div xmlns="http://www.w3.org/1999/xhtml" class="export-root mode-play bright" `+
-    `style="width:${width}px;height:${height}px;overflow:visible">${clone.outerHTML}</div>`+
-    `</foreignObject></svg>`;
-  download(`${baseName()}-design-layout.svg`, svg, 'image/svg+xml');
 }
-$('dl-svg').onclick = savePlaySvg;
+
+/* NO GROUND UNDER IT.  The strip's own backdrop is the app's furniture, not
+ * part of the design, so the picture is the keys and nothing else: it drops
+ * onto a slide, a page or a dark README and sits on whatever is already
+ * there. Transparency is also the only honest edge for a shape this ragged —
+ * a band tag overhangs the keyboard it names, and a rectangle behind the lot
+ * would draw a box round the overhang. */
+async function buildPlaySvg(){
+  const traced = inPlayStyling(traceStrip);
+  if(!traced) return null;
+  const pad = 10;
+  const x = traced.x0 - pad, y = traced.y0 - pad;
+  const width = Math.ceil(traced.x1 - traced.x0 + pad*2);
+  const height = Math.ceil(traced.y1 - traced.y0 + pad*2);
+  const fonts = await inlineSvgFonts(traced.families);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" `+
+    `viewBox="${svgNum(x)} ${svgNum(y)} ${width} ${height}">`+
+    `<title>${svgEscape(baseName())} layout</title>`+
+    (fonts ? `<style>${fonts}</style>` : '')+
+    traced.body.join('') + `</svg>`;
+  return { svg, width, height };
+}
+$('dl-svg').onclick = async ()=>{
+  const out = await buildPlaySvg();
+  if(!out) return toast('nothing to export — open a layout first');
+  download(`${baseName()}-design-layout.svg`, out.svg, 'image/svg+xml');
+};
+$('dl-png').onclick = async ()=>{
+  const out = await buildPlaySvg();
+  if(!out) return toast('nothing to export — open a layout first');
+  /* PRINT SIZE, NOT SCREEN SIZE.  A keyboard is a wide, thin thing whose
+   * names are 10px, so at 1x the PNG is a smudge and at 2x it is only just a
+   * screenshot; 6x is a strip about a metre wide at 150dpi, which survives a
+   * slide, a poster and a zoom. The ceilings are the browser's, not a taste:
+   * a canvas over ~16k on a side, or a few tens of megapixels in area, comes
+   * back blank on some machines rather than failing, so a very wide rig is
+   * given whatever scale does fit instead of a picture of nothing. */
+  const MAX_SIDE = 12000, MAX_AREA = 60e6;
+  const scale = Math.max(1, Math.min(6, MAX_SIDE/out.width, MAX_SIDE/out.height,
+                                     Math.sqrt(MAX_AREA/(out.width*out.height))));
+  const url = URL.createObjectURL(new Blob([out.svg], {type:'image/svg+xml'}));
+  const image = new Image();
+  image.onload = ()=>{
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(out.width*scale); canvas.height = Math.round(out.height*scale);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+    canvas.toBlob(blob=>{
+      if(blob) download(`${baseName()}-design-layout.png`, blob, 'image/png');
+      else toast('could not render PNG export');
+    }, 'image/png');
+  };
+  image.onerror = ()=>{ URL.revokeObjectURL(url); toast('could not render PNG export'); };
+  image.src = url;
+};
 $('copy-py').onclick = async ()=>{
   if(!L) return;
   const txt = XD.pythonLog(L, logOpts());
