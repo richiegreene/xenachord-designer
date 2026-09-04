@@ -2724,7 +2724,71 @@
     return t;
   }
 
-  function buildKey(cx, w, type, lb, rb, seats, armAt, laps) {
+  /* ==================================================================== *
+   *  A TONGUE THAT READS NO SPINE IS NOT A TONGUE                        *
+   *                                                                      *
+   *  A key hangs off the spine half its own colour's band is on, and the *
+   *  two halves are 1.29 mm apart with nothing bridging them.  A key      *
+   *  standing over the seam still gets its full drafted tongue, so the    *
+   *  part of it past its own half's end hangs in that air — and then over *
+   *  the OTHER half, whose band is a different piece it must never touch. *
+   *  The same is true at the two outer ends of the instrument.            *
+   *                                                                      *
+   *  So the tongue is cut off flush at its half's edge.  Every key type   *
+   *  draws it as the same thing — an axis-aligned box behind the key's    *
+   *  back face, y 0 .. TONGUE_Y, over the colour's own TONGUE_Z band, and *
+   *  the ONLY thing any key has behind that face — so the cut is exact:   *
+   *  the box is rebuilt over the span that is left, and the back face is  *
+   *  closed across the span the tongue no longer passes through.          *
+   * ==================================================================== */
+  /**
+   * Clip a key's tongue to `span` ({x0, x1}) in x.  `t` is the key's
+   * triangle soup; returns it with the overhang gone, still closed.
+   */
+  function clipTongueX(t, span) {
+    if (!span) return t;
+    const EPS = 1e-4;
+    /* the tongue is everything BEHIND the back face; its own section is
+     * read off the y = 0 end, which is the one place nothing else reaches */
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, any = false;
+    const keep = [];
+    for (let i = 0; i < t.length; i += 9) {
+      let behind = false;
+      for (let k = 0; k < 3; k++) if (t[i + k * 3 + 1] < TONGUE_Y - EPS) behind = true;
+      if (!behind) { for (let j = 0; j < 9; j++) keep.push(t[i + j]); continue; }
+      any = true;
+      for (let k = 0; k < 3; k++) {
+        if (t[i + k * 3 + 1] > EPS) continue;         // the y = 0 end only
+        const x = t[i + k * 3], z = t[i + k * 3 + 2];
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (z < z0) z0 = z; if (z > z1) z1 = z;
+      }
+    }
+    if (!any || !(x1 - x0 > EPS) || !(z1 - z0 > EPS)) return t;
+    const a = Math.max(x0, span.x0), b = Math.min(x1, span.x1);
+    if (a - x0 < EPS && x1 - b < EPS) return t;        // nothing overhangs
+    const T = TONGUE_Y;
+    /* the tongue, rebuilt over what is left — an OPEN prism, because the
+     * back face it grows out of is still the key's own */
+    if (b - a > EPS) {
+      pushQuad(keep, [b, 0, z1], [a, 0, z1], [a, 0, z0], [b, 0, z0]);   // y = 0 cap
+      pushQuad(keep, [b, 0, z0], [a, 0, z0], [a, T, z0], [b, T, z0]);   // floor
+      pushQuad(keep, [a, 0, z1], [b, 0, z1], [b, T, z1], [a, T, z1]);   // roof
+      pushQuad(keep, [b, T, z1], [b, 0, z1], [b, 0, z0], [b, T, z0]);   // +x wall
+      pushQuad(keep, [a, 0, z0], [a, 0, z1], [a, T, z1], [a, T, z0]);   // -x wall
+    }
+    /* and the back face closes over every millimetre the tongue used to
+     * pass through and no longer does — which is the whole of it when the
+     * key reaches no spine at all */
+    const patch = (p, q) => {
+      if (q - p > EPS)
+        pushQuad(keep, [q, T, z1], [p, T, z1], [p, T, z0], [q, T, z0]);
+    };
+    if (b - a > EPS) { patch(x0, a); patch(b, x1); } else patch(x0, x1);
+    return keep;
+  }
+
+  function buildKey(cx, w, type, lb, rb, seats, armAt, laps, span) {
     const q = profileFor(type, lb, rb);
     const V = profilePoints(q.p, q.mirror, w, cx - w / 2);
     if (armAt != null) {
@@ -2807,10 +2871,14 @@
     /* THE LAP INTO THE SPINE.  Part of the key, not of the band: it is the
      * key's tongue carrying on through the spine face.  See THE TONGUE
      * DOES NOT STOP AT THE SPINE FACE. */
+    /* THE TONGUE IS CUT BEFORE THE LAP IS ADDED.  The lap is already the
+     * half's own — tongueLaps clips it — and it lives behind the back face
+     * too, so cutting after it would read it as part of the tongue. */
+    const cut = clipTongueX(t, span);
     for (const L of (laps || []))
-      pushBox(t, L.x0, L.x1, L.y0, L.y1, L.z0, L.z1);
+      pushBox(cut, L.x0, L.x1, L.y0, L.y1, L.z0, L.z1);
     /* and said in a way that closes — see T-JUNCTIONS above */
-    return weldTJunctions(t);
+    return weldTJunctions(cut);
   }
 
   /** the same key as the drafted polygons, un-triangulated (for Blender) */
@@ -3155,6 +3223,13 @@
    * cracks instead of as doubled walls.
    */
   function pushSpineSlab(t, x0, x1, y0, y1, z0, z1, holes) {
+    /* ONLY THE BORES THIS RECTANGLE ACTUALLY CONTAINS.  A slab drawn in
+     * more than one x segment — see THE RIBBON CABLE — asks for the whole
+     * half's bore list each time, and a washer built for a bore that is
+     * not in this rectangle is a second copy of a body already there. */
+    holes = (holes || []).filter(h =>
+      Math.min(x1, h.x1) - Math.max(x0, h.x0) > 1e-4 &&
+      Math.min(y1, h.y1) - Math.max(y0, h.y0) > 1e-4);
     rectWithHoles(x0, x1, y0, y1, holes,
       (a, b, c, d) => pushBox(t, a, b, c, d, z0, z1));
     /* EACH HOLE'S WASHER IS A CLOSED BODY: lid, floor, the bore wall
@@ -3240,6 +3315,12 @@
     ? n
     : (SPINE_KIND_BY_LAYERS[n] || (n >= 3 ? 'three' : n === 2 ? 'two' : 'one'));
 
+  /** the x span of one spine half, by name — what a tongue on it may reach */
+  function spineHalfSpan(hn) {
+    for (const [n, h] of spineHalves()) if (n === hn) return { x0: h.x0, x1: h.x1 };
+    return null;
+  }
+
   /** the halves of the one and only spine, in build order */
   const spineHalves = () => [['A', SPINE.halfA], ['B', SPINE.halfB]];
 
@@ -3269,6 +3350,46 @@
     return out;
   }
 
+  /* ==================================================================== *
+   *  THE RIBBON CABLE COMES OUT OF THE BACK OF HALF A                    *
+   *                                                                      *
+   *  The AKM320's PCB runs down the channel in the bottom band, and its  *
+   *  ribbon has to leave the instrument somewhere.  The channel's back    *
+   *  wall is 1.40005 mm of solid and every band above it is solid to the  *
+   *  back edge, so as drafted there is nowhere for it to go.              *
+   *                                                                      *
+   *  So one rectangle is taken out of half A's BACK EDGE — the full       *
+   *  height of the stack, so the notch reads the same in every band and   *
+   *  every colour of filament, and RIBBON.depth deep, which is more than  *
+   *  the channel's back wall: the channel opens straight out of the back  *
+   *  over that span rather than into a blind pocket.                      *
+   *                                                                      *
+   *  HALF A ONLY.  Half B's back edge is untouched — one exit, on the     *
+   *  side the cable is on.                                               *
+   *                                                                      *
+   *  WHERE IT IS.  The right edge sits on sensor 6's centreline and it    *
+   *  runs one ribbon back from there: 25.4 mm, a 20-way 0.05 in cable.    *
+   *  That lands it in the longest hole-free stretch half A has — its      *
+   *  mounting bores are at x 31.13 and 71.16, and the notch clears both.  *
+   * ==================================================================== */
+  const RIBBON = { half: 'A', x0: 42.4, x1: 67.8, depth: 1.8 };
+
+  /**
+   * The x segments a half's slab is drawn in, and the back edge each one
+   * stands on: three where the ribbon notch bites into it, one otherwise.
+   */
+  function backSegments(hn, half) {
+    const whole = [{ x0: half.x0, x1: half.x1, yBack: half.yBack }];
+    if (hn !== RIBBON.half) return whole;
+    const a = Math.max(half.x0, RIBBON.x0), b = Math.min(half.x1, RIBBON.x1);
+    if (b - a <= 1e-4) return whole;
+    const out = [];
+    if (a - half.x0 > 1e-4) out.push({ x0: half.x0, x1: a, yBack: half.yBack });
+    out.push({ x0: a, x1: b, yBack: half.yBack + RIBBON.depth });
+    if (half.x1 - b > 1e-4) out.push({ x0: b, x1: half.x1, yBack: half.yBack });
+    return out;
+  }
+
   /**
    * One spine.  `keySpans` is optional: [{ layer, x0, x1 }] for every key in
    * the design.  Given it, each band grows a FIT.engage boss forward over
@@ -3294,17 +3415,26 @@
       const yF = half.yFront;
       layers.forEach((L, i) => {
         const tris = [];
+        /* every band steps back the same way, so the ribbon notch reads
+         * as one rectangle through the whole stack — see THE RIBBON CABLE */
+        const segs = backSegments(hn, half);
         if (i === 0) {
           /* The bottom layer carries the PCB channel.  Below the ceiling it
            * is two strips, front and back; above it, the full section with
-           * the wide bore.  The channel runs out through both x ends.     */
-          pushBox(tris, half.x0, half.x1, half.yBack, ch.y0, L.z0, zc);
+           * the wide bore.  The channel runs out through both x ends — and
+           * out of the BACK too, where the notch has taken the back strip
+           * away entirely.                                               */
+          for (const g of segs) {
+            if (ch.y0 - g.yBack > 1e-4)
+              pushBox(tris, g.x0, g.x1, g.yBack, ch.y0, L.z0, zc);
+            pushSpineSlab(tris, g.x0, g.x1, g.yBack, yF,
+                          zc, L.z1, spineHoles(hn, false));
+          }
           pushBox(tris, half.x0, half.x1, ch.y1, yF, L.z0, zc);
-          pushSpineSlab(tris, half.x0, half.x1, half.yBack, yF,
-                        zc, L.z1, spineHoles(hn, false));
         } else {
-          pushSpineSlab(tris, half.x0, half.x1, half.yBack, yF,
-                        L.z0, L.z1, spineHoles(hn, true));
+          for (const g of segs)
+            pushSpineSlab(tris, g.x0, g.x1, g.yBack, yF,
+                          L.z0, L.z1, spineHoles(hn, true));
         }
         /* the boss: FIT.engage of this band, carried forward into every key
          * of its own colour that stands on this half — and the gusset that
@@ -3329,17 +3459,19 @@
         const part = spineLayerPart(kind, L.name);
         if (keySpans) for (const k of keySpans) {
           if (k.layer !== part) continue;
+          /* AND ON THE HALF THE KEY IS ACTUALLY ON.  A key over the seam is
+           * drafted wider than its own half, and asking every half whether
+           * that span reaches it put a boss on the half the key does NOT
+           * belong to — a tab standing off the far side of the gap with no
+           * tongue over it, which is exactly what the tongue clip took
+           * away.  See A TONGUE THAT READS NO SPINE IS NOT A TONGUE. */
+          if (k.half && k.half !== hn) continue;
           const a = Math.max(k.x0, half.x0), b = Math.min(k.x1, half.x1);
           if (b - a <= 1e-4) continue;
           const T = TONGUE_Z[part] || [L.z0Drafted, L.z1Drafted];
           const z0 = Math.max(L.z0Drafted, T[0]), z1 = Math.min(L.z1Drafted, T[1]);
           if (z1 - z0 <= 1e-4) continue;
           pushBox(tris, a, b, yF, half.yFront + FIT.engage, z0, z1);
-          /* flush on the bottom band, which the ramp fillets into; stood
-           * off FIT.gap on any band whose ramp hangs below its own z and
-           * so lies in front of the colour stacked under it */
-          const yG = (z0 - FIT.fillet < L.z0 - 1e-6) ? yF + FIT.gap : yF;
-          pushRootFillet(tris, a, b, yG, z0, z1, FIT.fillet);
         }
         /* THE 1.29 mm BETWEEN THE HALVES IS LEFT OPEN.  Half A ends at
          * 183.43233 and half B begins at 184.72359, and that gap is drafted,
@@ -3541,12 +3673,16 @@
    * per spine half the key's back span reaches, which is normally one and
    * is two only for a key straddling the A/B seam.  `span` is keyBackSpan.
    */
-  function tongueLaps(spine, layer, span) {
+  function tongueLaps(spine, layer, span, only) {
     const kind = spineKindOf(spine);
     const T = TONGUE_Z[layer];
     if (!T || !span || !(FIT.lap > 1e-4)) return [];
     const out = [];
     for (const [hn, half] of spineHalves()) {
+      /* the key's OWN half, when the caller knows it: a key over the seam
+       * reaches the other one, and a lap there is a filament of a key that
+       * does not belong to that piece */
+      if (only && only !== hn) continue;
       const x0 = Math.max(span.x0, half.x0), x1 = Math.min(span.x1, half.x1);
       if (x1 - x0 <= 1e-4) continue;
       for (const b of spineBands(kind, hn)) {
@@ -3609,6 +3745,11 @@
    * — a separately printed part this key has to move in front of — and the
    * caller stands it off by FIT.gap instead.  See CLEAR.
    */
+  /* NOTHING BUILDS THIS ANY MORE.  The tongue root used to carry a fillet
+   * — a diagonal gusset run along the spine face under every tongue — and
+   * it is gone: the joint is the boss and the lap, and the gusset only put
+   * a visible ramp on a face that should read flush.  Kept because it is
+   * exported, so a page written against the old API still loads. */
   function pushRootFillet(t, x0, x1, yG, t0, t1, r) {
     if (!(r > 1e-4) || x1 - x0 < 1e-5 || t1 - t0 < 1e-5) return;
     pushXPrism(t, x0, x1, [[yG, t0], [yG, t0 - r], [yG + r, t0]]);
@@ -4842,6 +4983,7 @@
     SPINE_LAYER_COLORS, spineLayerColor, spineLayerMaterial,
     SPINE_LAYER_PART, spineLayerPart,
     spineHalves, spineParts, spineBands, spineZRange, tongueLaps,
+    RIBBON, spineHalfSpan, clipTongueX,
     FIT,
     footCentres, obroundRing, spineHoles, holeBoxPoint, HOLE_UNIT,
     pushHoleAnnulus, pushHoleWall, pushHoleOuterWall, holeBoxLoop, pushSpineSlab,

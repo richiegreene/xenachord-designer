@@ -1009,7 +1009,8 @@
     const out = [];
     for (const k of pairKeys(L)) {
       const s = XM.keyBackSpan(k.cx, k.w, k.type, k.lb, k.rb);
-      if (s) out.push({ layer: k.layer, x0: s.x0, x1: s.x1, index: k.index });
+      if (s) out.push({ layer: k.layer, half: k.half,
+                        x0: s.x0, x1: s.x1, index: k.index });
     }
     return out;
   }
@@ -1023,7 +1024,7 @@
         layer: XM.KEY_TYPES[n.type].layer,
         cx: r.cx, w: r.w || (white ? L.wW : L.aW),
         lb: white ? r.ctxL : null, rb: white ? r.ctxR : null,
-        foot: r.foot
+        half: r.half, foot: r.foot
       };
     }).filter(k => k.foot != null);
 
@@ -1074,7 +1075,7 @@
     const m = new Map();
     for (const k of bkeys) {
       const s = XM.keyBackSpan(k.cx, k.w, k.type, k.lb, k.rb);
-      const lap = s ? XM.tongueLaps(L.spineKind, k.layer, s) : [];
+      const lap = s ? XM.tongueLaps(L.spineKind, k.layer, s, k.half) : [];
       if (lap.length) m.set(armKey(k.type, k.cx), lap);
     }
     return m;
@@ -1127,17 +1128,23 @@
     const bkeys = pairKeys(L);
     const arms = armTargets(bkeys);
     const laps = lapTargets(L, bkeys);
+    /* A KEY'S TONGUE IS CLIPPED TO ITS OWN HALF.  The key belongs to one
+     * spine half; the tongue may be drafted wider than that half reaches,
+     * and past its edge there is no band to plug into.  See A TONGUE THAT
+     * READS NO SPINE IS NOT A TONGUE. */
     for (const w of L.whites)
       mark('keys', 'white', w.half, arr =>
         arr.push(...XM.buildKey(w.cx, w.w, w.type, w.ctxL, w.ctxR, null,
                                 arms.get(armKey(w.type, w.cx)),
-                                laps.get(armKey(w.type, w.cx)))));
+                                laps.get(armKey(w.type, w.cx)),
+                                XM.spineHalfSpan(w.half))));
     for (const sl of L.slots) {
       for (const m of sl.members)
         mark('keys', m.spec.layer, m.half, arr =>
           arr.push(...XM.buildKey(m.cx, m.w, m.type, null, null, null,
                                   arms.get(armKey(m.type, m.cx)),
-                                  laps.get(armKey(m.type, m.cx)))));
+                                  laps.get(armKey(m.type, m.cx)),
+                                  XM.spineHalfSpan(m.half))));
     }
     /* The spine is the drafted one for this design's colour count — the
      * "<kind> type Spine - A / - B" pair.  Keep it whole for the STL, and
