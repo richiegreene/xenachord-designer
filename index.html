@@ -3652,11 +3652,6 @@ function openSharedLink(){
   const got = XShare.fromHash();
   if (!got) return false;
   if (!got.value){ toast('that share link is damaged — nothing opened'); return false; }
-  const what = got.kind === 'rig' ? 'a rig' : 'a keyboard';
-  if (!isFreshLoad && !confirm(
-      `This link carries ${what}.\n\nOpening it replaces the design in this ` +
-      `browser. Cmd-Z brings yours back, and "Save to Presets" keeps it for good.`))
-    return false;
   return takeShared(got, 'opened from a share link');
 }
 
