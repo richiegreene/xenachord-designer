@@ -77,10 +77,19 @@ const bound = new Set();        // ports already listened to, so none is twice
  *  What the keyboard currently is
  * ------------------------------------------------------------------ */
 
-/** Notes to the equave in the scale as it stands — the size of one shift. */
+/** Notes to the equave in the scale as it stands — the size of one shift,
+ *  counted in keys. */
 function equave() {
   const n = window.XTuning?.scaleNotes | 0;
   return n > 1 ? n : 12;
+}
+
+/** What one shift is worth as an interval. Not always an octave: the Equave
+ *  field below says how many keys one press moves, and the tuning says what
+ *  that many keys come to. */
+function shiftCents() {
+  const c = +window.XTuning?.shiftCents;
+  return (isFinite(c) && c !== 0) ? c : 1200;
 }
 
 /** The lowest and highest key the strip is currently offering, or null when
@@ -96,7 +105,7 @@ function range() {
 /**
  * The key a MIDI number plays. May be off either end.
  *
- * The octave shift is deliberately absent: it transposes the keys rather than
+ * The transposition is deliberately absent: it moves the keys' pitches rather than
  * choosing different ones, so this map is fixed and the same 32 keys stay
  * under the same 32 MIDI numbers however far the instrument is moved.
  */
@@ -110,7 +119,7 @@ const keyOf = (midi) => midi - M.origin;
  * Which key each held MIDI note was given.
  *
  * Kept rather than recomputed, because the map can move underneath a held
- * note — the octave shifted, the scale re-read, a key deleted in Design — and
+ * note — the instrument transposed, the scale re-read, a key deleted in Design — and
  * a note-off that recomputed would let go of a key the note-on never took,
  * leaving the real one sounding for ever. What went down is what comes up.
  */
@@ -310,7 +319,7 @@ function shiftBy(d) {
 /* The shift can be moved from the keyboard while the panel is not even
  * looked at, so the number says so when it changes. */
 function flashShift() {
-  const el = $('m-oct-v');
+  const el = $('m-tr-v');
   if (!el) return;
   el.classList.remove('bump');
   void el.offsetWidth;      // restart the animation rather than let it run on
@@ -328,14 +337,8 @@ function syncUI() {
       : 'Connected to MIDI — nothing plugged in yet');
   }
 
-  const N = equave(), sh = shift();
-  $('m-oct-v').textContent = (sh > 0 ? '+' : '') + sh;
-  /* What one press is worth, and — because the shift transposes rather than
-   * remaps — what the whole instrument has moved by, in the notes of the
-   * scale that is actually loaded. */
-  $('m-oct-read').innerHTML =
-    `one shift = <b>${N}</b> note${N === 1 ? '' : 's'}` +
-    (sh ? ` &middot; whole keyboard <b>${sh > 0 ? '+' : ''}${sh * N}</b> notes` : '');
+  const sh = shift();
+  $('m-tr-v').textContent = (sh > 0 ? '+' : '') + sh;
 
   const r = range();
   $('m-origin').value = M.origin;
@@ -359,8 +362,8 @@ function bind() {
     save();
   };
 
-  $('m-oct-up').onclick = () => shiftBy(+1);
-  $('m-oct-dn').onclick = () => shiftBy(-1);
+  $('m-tr-up').onclick = () => shiftBy(+1);
+  $('m-tr-dn').onclick = () => shiftBy(-1);
 
   const origin = $('m-origin');
   origin.oninput = () => {

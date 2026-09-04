@@ -36,6 +36,23 @@ import * as voice from './synth/voice.js';
 const $ = (id) => document.getElementById(id);
 const inPlay = () => document.body.classList.contains('mode-play');
 
+/**
+ * Armed for typing, the strip has stopped being an instrument.
+ *
+ * Scale/Tuning's Custom editor turns the keys into text fields, and a key
+ * cannot be both — a double-click that sounded the note twice on its way to
+ * opening the box would be the same confusion Design and Play are kept apart
+ * to avoid. So nothing sounds while it is armed, and the browser's own focus
+ * and double-click behaviour is left alone (no preventDefault) so the box can
+ * take the caret. Design's handlers stay shut out either way: the event is
+ * stopped from going any further down whichever mode is on.
+ */
+const arming = () => document.body.classList.contains('tune-edit');
+const playable = () => inPlay() && !arming();
+/** The editor's own box, which must get the pointer untouched. */
+const inEditor = (ev) => !!(ev.target && ev.target.closest &&
+                            ev.target.closest('.kb-edit'));
+
 const STORE = 'xenachord.synth.v1';
 const S = {
   timbre: FILTERED_MIN + 200,          // filtered saw, the default
@@ -205,7 +222,7 @@ function setPedal(src, down) {
 }
 
 window.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Shift' && inPlay()) setPedal('shift', true);
+  if (ev.key === 'Shift' && playable()) setPedal('shift', true);
 });
 window.addEventListener('keyup', (ev) => {
   if (ev.key === 'Shift') setPedal('shift', false);
@@ -258,9 +275,10 @@ function noteAt(ev) {
  * this — the width grips, the click-to-remove, the gap's drop target — ever
  * sees the pointer. */
 strip.addEventListener('pointerdown', (ev) => {
-  if (!inPlay()) return;
-  ev.preventDefault();
+  if (!inPlay() || inEditor(ev)) return;
   ev.stopPropagation();
+  if (!playable()) return;
+  ev.preventDefault();
   const note = noteAt(ev);
   if (note == null) return;
   try { strip.setPointerCapture(ev.pointerId); } catch (e) {}
@@ -277,7 +295,7 @@ strip.addEventListener('pointermove', (ev) => {
 
 for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
   strip.addEventListener(type, (ev) => {
-    if (!inPlay()) return;
+    if (!inPlay() || inEditor(ev)) return;
     ev.stopPropagation();
     release(ev.pointerId);
   }, true);
@@ -287,9 +305,9 @@ for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
  * handlers are actually bound to, so it is stopped in its own right. */
 for (const type of ['click', 'dragover', 'drop', 'dragstart']) {
   strip.addEventListener(type, (ev) => {
-    if (!inPlay()) return;
-    ev.preventDefault();
+    if (!inPlay() || inEditor(ev)) return;
     ev.stopPropagation();
+    if (playable()) ev.preventDefault();
   }, true);
 }
 
@@ -319,7 +337,7 @@ function noteOfHit(hit) {
 window.XPlay = {
   /** @returns true when this press has been taken as a note. */
   press(ev) {
-    if (!inPlay() || typeof window.rayPick !== 'function') return false;
+    if (!playable() || typeof window.rayPick !== 'function') return false;
     const note = noteOfHit(window.rayPick(ev));
     if (note == null) return false;
     press(ev.pointerId, note);
@@ -327,7 +345,8 @@ window.XPlay = {
   },
   /** A held press dragged onto another key changes to that key. */
   move(ev) {
-    if (!held.has(ev.pointerId) || typeof window.rayPick !== 'function') return false;
+    if (!playable() || !held.has(ev.pointerId) ||
+        typeof window.rayPick !== 'function') return false;
     const note = noteOfHit(window.rayPick(ev));
     // Dragged off the keyboard: the note it was on holds, rather than
     // cutting out over the background and coming back on the far side.
@@ -353,7 +372,7 @@ window.XPlay = {
    *  rather than by being kept in step with it.
    * --------------------------------------------------------------- */
   midi: {
-    press: (id, note, vel) => press(id, note, vel),
+    press: (id, note, vel) => { if (playable()) press(id, note, vel); },
     release: (id) => release(id),
     /** A sustain pedal on the controller, alongside Shift and not under it. */
     pedal: (down) => setPedal('midi', down),

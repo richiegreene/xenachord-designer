@@ -16,7 +16,8 @@
      (v-theme), the left rail/drawer and the bottom viewer bar switch with
      it — everything inside them reads off these vars, so overriding the
      vars in scope is enough to recolor the whole subtree. */
-  body.bright #panel, body.bright #viewbar2, body.bright #strip, body.bright #stripHandle{
+  body.bright #panel, body.bright #viewbar2, body.bright #strip, body.bright #stripHandle,
+  body.bright .navgizmo-wrap{
     --bg:#e9e9ec; --panel:#f2f2f4; --panel2:#e4e5e9; --panel-bright:#d8d9de;
     --line:#c9cad0; --text:#1b1c20; --dim:#5c5d66; --accent:#1f6feb;
     --strip-bg:#dcdde2; --palette-bg:#d8d9de; --scope-bg:#dcdde2;
@@ -61,9 +62,9 @@
   #navgizmo{width:88px;height:88px;cursor:grab;touch-action:none}
   #navgizmo:active{cursor:grabbing}
   .navgizmo-row{display:flex;gap:4px}
-  .navgizmo-mini{background:rgba(30,31,37,.82);backdrop-filter:blur(4px);
+  .navgizmo-mini{background:var(--panel);border:1px solid var(--line);color:var(--text);
     font-size:10px;padding:3px 7px}
-  #v-theme{background:rgba(30,31,37,.82);backdrop-filter:blur(4px);
+  #v-theme{background:var(--panel);border:1px solid var(--line);
     width:22px;height:22px;padding:0;border-radius:50%;
     display:flex;align-items:center;justify-content:center;
     font-size:12px;line-height:1}
@@ -367,6 +368,36 @@
   body.mode-play .kb-m{cursor:pointer}
   body.mode-play .kb-white.sounding{background:var(--accent)!important}
   body.mode-play .kb-m.sounding{outline:2px solid var(--accent);outline-offset:-1px}
+
+  /* ---------- the strip as a text field ----------
+     Custom's editor arms the keys for typing rather than for playing, so the
+     strip has to LOOK like something you write on: the pointer is a caret,
+     nothing sounds under it, and the key being typed is ringed the way the
+     sounding ring works so the two readings of "this key" are one shape.
+     The input itself is far wider than the ~20px key it names — a ratio does
+     not fit in a key and cropping it to one would be the wrong answer to the
+     wrong question — so it overhangs its neighbours and takes the top of the
+     stack while it is open. */
+  body.tune-edit .kb-white,
+  body.tune-edit .kb-m{cursor:text}
+  body.tune-edit .kb-white.editing{outline:2px solid var(--ok);outline-offset:-1px;
+    z-index:9}
+  body.tune-edit .kb-m.editing{outline:2px solid var(--ok);outline-offset:-1px;z-index:9}
+  /* A degree that has been typed reads differently from one still on its Auto
+     value, so "what have I actually changed?" is answerable by looking. */
+  body.mode-play .kb-white.tuned .kb-tune,
+  body.mode-play .kb-m.tuned .kb-tune{text-decoration:underline;
+    text-decoration-color:var(--accent);text-underline-offset:2px}
+  .kb-edit{position:absolute;z-index:12;transform:translateX(-50%);
+    display:flex;flex-direction:column;gap:2px;align-items:stretch}
+  .kb-edit input{width:132px;background:var(--panel-bright,#22232b);color:var(--text);
+    border:1px solid var(--accent);border-radius:5px;padding:4px 6px;
+    font-size:12px;font-family:ui-monospace,Menlo,monospace;text-align:center;
+    box-shadow:0 3px 12px rgba(0,0,0,.55);outline:none}
+  .kb-edit .tip{font-size:9.5px;line-height:1.25;text-align:center;color:var(--dim);
+    background:var(--strip-bg);border-radius:4px;padding:1px 4px;white-space:nowrap}
+  .kb-edit .tip.bad{color:var(--warn)}
+  .kb-edit .tip.ok{color:var(--ok)}
   /* ---------- the rig, as a map you can press ----------
      Laid out the way the devices actually stand — upper row above lower,
      left column left — so choosing one is pointing at it rather than
@@ -391,9 +422,10 @@
      leaving the only evidence to be that the instrument now sounds wrong. */
   #play-midi .presswrap .hint:last-child{color:var(--dim);opacity:.8}
   #m-last{font-variant-numeric:tabular-nums;margin:0 0 2px}
-  #m-oct-v.bump{animation:m-bump .28s ease-out}
+  #m-tr-v.bump{animation:m-bump .28s ease-out}
   @keyframes m-bump{from{transform:scale(1.45);color:var(--ok)}to{transform:none}}
-  #m-oct-v{display:inline-block;min-width:22px;text-align:center}
+  #m-tr-v{display:inline-block;min-width:22px;text-align:center}
+  #m-tr-step{font-variant-numeric:tabular-nums}
   .midi-row{display:flex;align-items:center;justify-content:space-between;
     gap:8px;margin-top:10px}
   .midi-row label{margin:0}
@@ -479,10 +511,10 @@
       </div>
       <p class="hint" id="preset-pending" style="display:none"></p>
       <button class="wide" id="preset-write" style="width:100%;margin-top:7px;display:none"
-        title="Writes presets-shared.js from the current preset list, so local saves/deletions apply for every user. Saves in place if the browser allows it, otherwise downloads for you to put beside index.html.">⬇ Write Presets File</button>
+        title="Writes presets-shared.js from the current preset list, so local saves/deletions apply for every user. Saves in place if the browser allows it, otherwise downloads for you to put beside index.html.">⬇︎ Write Presets File</button>
       <button class="primary wide" id="clear-all" style="width:100%;margin-top:9px"
         title="32 identical white keys, narrowed so that all 32 fit inside spine half A + half B">
-        ↺ Clear All (32 White Keys)</button>
+        ↺︎ Clear All (32 White Keys)</button>
       <p class="fixed-note" style="display:none"><b>32 keys, always.</b> One AKM320 — spine half A
         and half B, 16 sensor feet each. Drop a key into a gap and whites come
         off the right-hand end to pay for it; everything then re-widens so the
@@ -505,7 +537,7 @@
         </div>
         <input id="period" type="range" min="2" max="32" step="1" value="32">
         <div class="pressrow" style="margin-top:9px">
-          <label>↕ Rotate Pattern by Step</label>
+          <label>↕︎ Rotate Pattern by Step</label>
           <span class="rotbtns">
             <button id="rot-dn" title="Rotate the pattern one step down — every key type moves one scale step to the left, and what falls off the bottom comes back on at the top">◀</button>
             <button id="rot-up" title="Rotate the pattern one step up — every key type moves one scale step to the right, and what falls off the top comes back on at the bottom">▶</button>
@@ -520,10 +552,10 @@
       <div id="wtable" style="display:none"></div>
       <button class="primary wide" id="wreset" style="width:100%;margin-top:9px"
         title="Relative widths of the four key classes. Drag a divider to trade width between two; the rest of the keyboard re-fits. Accidentals cap at 0.86× a white.">
-        ↺ Reset to Standard Scaling</button>
+        ↺︎ Reset to Standard Scaling</button>
       <button class="primary wide" id="kreset" style="width:100%;margin-top:6px"
         title="Reset keys widths set in draggable bottom bar and/or senor press optimization">
-        ↺ Clear Ad Hoc Adjustments</button>
+        ↺︎ Clear Ad Hoc Adjustments</button>
       <div class="presswrap"
         title="0% is your own arrangement · 100% stands every key as square over its sensor pad as the widths allow.">
         <div class="pressrow">
@@ -545,27 +577,25 @@
       <div class="presswrap"
         title="Rounds over the top edge of each key's playing surface only (not the spine, feet, sensor press, or underside). Runs up to 2mm, capped by each key's own wall clearance (whites 1.539mm, accidentals 4.5mm) — the line below the slider shows the actual cut. Sharp corners in a key's outline may block the full round; flagged when that happens.">
         <div class="pressrow">
-          <label for="bevel">Edge Break</label>
+          <label for="bevel">Bevel</label>
           <span id="bevel-v" class="pressval">square</span>
         </div>
         <input id="bevel" type="range" min="0" max="2" step="0.025" value="2">
         <p class="hint" id="bevelinfo"></p>
       </div>
-      <button class="primary wide" id="bevel-reset" style="width:100%;margin-top:9px"
-        title="Back to the drafted square arris.">↺ Leave the Edge Square</button>
     </fieldset>
 
     <fieldset>
       <legend>Export<span id="export-who"></span></legend>
       <div class="btns">
-        <button class="wide" id="dl-zip">⬇ Save STL Files for All Parts (.zip)</button>
-        <button data-part="white">white .stl</button>
-        <button data-part="black">black .stl</button>
-        <button data-part="gray">gray .stl</button>
-        <button data-part="spine">spine .stl</button>
+        <button class="wide" id="dl-zip">⬇︎ Save STL Files for All Parts (.zip)</button>
+        <button data-part="white">white.stl</button>
+        <button data-part="black">black.stl</button>
+        <button data-part="gray">gray.stl</button>
+        <button data-part="spine">spine.stl</button>
         <button class="primary wide" id="copy-py" title="A runnable Blender script that rebuilds the design from the Key Type Categories collection.">⧉ Copy Python Log</button>
-        <button class="wide" id="dl-py">⬇ Save design log (.py)</button>
-        <button class="wide" id="save-preset" title="Save the current layout, widths and scale as a named preset in the Layout Presets menu above">⬇ Save to Presets</button>
+        <button class="wide" id="dl-py">⬇︎ Save design log (.py)</button>
+        <button class="wide" id="save-preset" title="Save the current layout, widths and scale as a named preset in the Layout Presets menu above">⬇︎ Save to Presets</button>
       </div>
     </fieldset>
 
@@ -628,26 +658,69 @@
                 <label class="tune-inline" for="t-hz">1/1 (Hz)</label>
                 <input type="number" id="t-hz" value="261.6256" step="0.0001" min="1">
               </div>
-              <!-- Set from MIDI I/O's Octave Shift and from the arrow keys,
+              <!-- Set from MIDI I/O's Transpose and from the arrow keys,
                    and said here because it changes what 1/1 above is worth. -->
               <p class="tune-read" id="t-transpose" style="display:none;margin-top:5px"
-                title="The MIDI Octave Shift. It moves the whole instrument, so the keys on the strip carry the transposed pitches whether a finger or a controller presses them."></p>
+                title="MIDI I/O's Transpose. It moves the whole instrument by whole equaves, so the keys on the strip carry the transposed pitches whether a finger or a controller presses them."></p>
 
-              <!-- ---- which kind of scale the keys carry ---- -->
+              <!-- ---- where the pitches come from ----
+                   Two answers, side by side, because they are two whole
+                   readings of the same keyboard rather than points on a
+                   scale: Auto takes the division off the arrangement and
+                   spells it, Custom lets every degree be typed. -->
               <div class="tune-h">Tuning System</div>
-              <select id="t-system" title="EDO divides the equave into equal steps; JI spells it as ratios">
-                <option value="edo" selected>EDO</option>
-                <option value="ji">JI</option>
-              </select>
+              <div class="seg" id="t-system-seg">
+                <button data-v="auto" class="on"
+                  title="The equal division Design already implies: the arrangement's Notes in Scale is the number of steps, and every key is the step its place in the run gives it.">Auto</button>
+                <button data-v="custom"
+                  title="Type the pitches onto the keys yourself. Every degree starts at its Auto reading; the ones you edit carry whatever you give them — a ratio, a cents figure or a step of any division — in any order you like.">Custom</button>
+              </div>
 
-              <!-- ============ EDO ============ -->
-              <div id="t-edo" style="margin-top:10px">
+              <!-- ============ AUTO ============ -->
+              <div id="t-auto" style="margin-top:10px">
                 <!-- The division is not asked for twice: the keyboard already
                      knows how many notes there are in an equave, so the EDO is
                      read off Design rather than typed in beside it. -->
-                <div class="tune-read">
-                  <b id="t-edo-n">32</b>-EDO &mdash; read from Design&rsquo;s <b>Notes in Scale</b><span id="t-edo-who"></span><span id="t-edo-rig"></span>
+                <div class="tune-read" style="display:none">
+                  <b id="t-edo-n">32</b> equal steps &mdash; read from Design&rsquo;s <b>Notes in Scale</b><span id="t-edo-who"></span><span id="t-edo-rig"></span>
                 </div>
+              </div>
+
+              <!-- ============ CUSTOM ============ -->
+              <!--
+                THE KEYBOARD IS THE EDITOR.  A scale typed into a box beside
+                the strip has to be read back onto it in your head; typed ONTO
+                the strip it is already where it will be played, and a layout
+                whose degrees do not ascend — the whole reason for being here
+                — is as easy to write as one that does.
+              -->
+              <div id="t-custom" style="margin-top:10px;display:none">
+                <div class="tune-read" id="t-cus-read" style="display:none"></div>
+                <button id="t-cus-edit" style="width:100%"
+                  title="Arm the strip for typing. While it is armed the keys do not sound: double-click one to type its pitch, Enter commits it and moves to the next key, Esc leaves it alone.">&#9998; Edit Keys on the Strip</button>
+                <p class="hint" id="t-cus-help">Double-click a key to type
+                  <b>3/2</b> (a ratio), <b>702c</b> (cents from 1/1),
+                  <b>7\12</b> (a step of a division) or <b>392hz</b>.
+                  Enter moves to the next key.</p>
+                <div class="tune-read" id="t-cus-sel" style="margin-top:6px"></div>
+
+                <div class="tune-h">Fill from list</div>
+                <textarea id="t-scale" rows="8" spellcheck="false"
+                  title="One degree per line, from degree 0 up — this is what the keys carry, right now. Edit a line the way you would type onto its key: a ratio, a cents figure or a step of a division. A blank line puts that degree back to Auto."></textarea>
+                <div class="tune-read" id="t-scale-read" style="margin-top:6px"></div>
+                <div class="row" style="gap:6px">
+                  <button id="t-cus-reset" style="flex:1"
+                    title="Throw away every typed pitch and put all the degrees back to their Auto reading.">Reset all to Auto</button>
+                </div>
+              </div>
+
+              <!-- ---- how a pitch is written on a key ----
+                   One group per KIND of pitch, because a division's step and
+                   a ratio are not spelled by the same notation.  In Auto
+                   every degree is a step, so only the first group is asked
+                   about; in Custom a key may be either and both are. -->
+              <div class="tune-h">Notation</div>
+              <div id="t-not-edo">
                 <div class="seg" id="t-edo-seg">
                   <button data-v="updown" class="on"
                     title="Ups and Downs: the nominal, plus the arrows and sharps that say how far from it the step lies">Ups and Downs</button>
@@ -665,25 +738,12 @@
                   <button data-v="show"
                     title="Allow half-sharp and half-flat spellings where the division has them">show halves</button>
                 </div>
-                <div class="presswrap"
-                  title="EDO step of the first key. Rotating slides the run along the keyboard.">
-                  <div class="pressrow">
-                    <label>&#8597; Rotate by EDO Step</label>
-                    <span class="rotbtns">
-                      <button id="t-edo-rot-dn" title="Rotate one step down">&#9664;</button>
-                      <span id="t-edo-rot-v" class="pressval">0</span>
-                      <button id="t-edo-rot-up" title="Rotate one step up">&#9654;</button>
-                    </span>
-                  </div>
-                </div>
               </div>
-
-              <!-- ============ JI ============ -->
-              <div id="t-ji" style="margin-top:10px;display:none">
+              <div id="t-not-ji" style="display:none">
                 <div class="seg" id="t-ji-seg">
                   <button data-v="heji" class="on" title="Helmholtz-Ellis Just Intonation">HEJI</button>
                   <button data-v="sagittal" title="Sagittal">Sagittal</button>
-                  <button data-v="ratio" title="The ratio itself">ratio</button>
+                  <button data-v="ratio" title="The ratio itself">Ratio</button>
                 </div>
 
                 <div id="t-sag" style="display:none">
@@ -698,23 +758,21 @@
                     <button data-v="evo" title="Sagittal beside a conventional sharp or flat">evo</button>
                   </div>
                 </div>
+              </div>
 
-                <div class="tune-h">Custom Scale</div>
-                <textarea id="t-scale" rows="3" spellcheck="false"
-                  title="One octave of ratios, separated by spaces, commas or newlines. Folded into [1, 2) and sorted; 1/1 always included."
-                  placeholder="e.g. 1/1 9/8 5/4 4/3 3/2 5/3 15/8">1/1 9/8 5/4 4/3 3/2 5/3 15/8</textarea>
-                <div class="tune-read" id="t-scale-read" style="margin-top:6px"></div>
-
-                <div class="presswrap"
-                  title="Scale degree of the first key. Rotating slides the scale along the keyboard.">
-                  <div class="pressrow">
-                    <label>&#8597; Rotate 1/1 by Step</label>
-                    <span class="rotbtns">
-                      <button id="t-ji-rot-dn" title="Rotate one degree down">&#9664;</button>
-                      <span id="t-ji-rot-v" class="pressval">0</span>
-                      <button id="t-ji-rot-up" title="Rotate one degree up">&#9654;</button>
-                    </span>
-                  </div>
+              <!-- ---- the mode ----
+                   One rotation for both readings, because it is the same
+                   move on the same run of degrees: which degree comes to
+                   rest under key 0. -->
+              <div class="presswrap"
+                title="Scale degree of the first key. Rotating slides the whole run along the keyboard — it chooses the mode, and does not transpose.">
+                <div class="pressrow">
+                  <label>&#8597; Rotate by Scale Step</label>
+                  <span class="rotbtns">
+                    <button id="t-rot-dn" title="Rotate one step down">&#9664;</button>
+                    <span id="t-rot-v" class="pressval">0</span>
+                    <button id="t-rot-up" title="Rotate one step up">&#9654;</button>
+                  </span>
                 </div>
               </div>
             </div>
@@ -757,24 +815,38 @@
                 title="Ask the browser for access to the MIDI devices attached to this machine, so a controller can play this keyboard.">Connect a MIDI Controller</button>
               <p class="hint" id="m-status">Not connected.</p>
 
-              <!-- ---- the octave, outside the connected block ----
+              <!-- ---- the transposition, outside the connected block ----
                    It transposes the instrument, not the cable: it moves the
                    pitches on the strip and everything played from them, so it
-                   is offered whether or not a controller is attached. -->
+                   is offered whether or not a controller is attached.
+
+                   WHAT IT MOVES BY IS ONLY REPORTED HERE.  An equave is
+                   whatever interval the scale repeats at, and that is a fact
+                   about the SCALE — it decides how the keys are spelled — so
+                   it is set in Scale/Tuning and read back here.  These two
+                   arrows change nothing but the register: no name on the
+                   strip moves when they are pressed, which is the whole point
+                   of a transposition and the reason this is the one control
+                   in Play that is purely about playback. -->
               <div class="presswrap" style="margin-top:12px"
                 title="Transposes the whole keyboard by one equave of the current scale — 17 notes on a 17-note keyboard, 19 on a 19. The strip's pitches move with it, so a key sounds the same whether a finger or a controller presses it, and the map from a MIDI number to a key never moves.">
-                <div class="pressrow">
-                  <label>&#8597; Octave Shift</label>
+                <div class="pressrow"
+                  title="&uarr; and &darr; transpose in Play, and whenever a controller is connected; &larr; and &rarr; still orbit the view.">
+                  <label>&#8597; Transpose</label>
                   <span class="rotbtns">
-                    <button id="m-oct-dn" title="Down one equave (&darr;)">&#9660;</button>
-                    <span id="m-oct-v" class="pressval">0</span>
-                    <button id="m-oct-up" title="Up one equave (&uarr;)">&#9650;</button>
+                    <button id="m-tr-dn" title="Down one equave (&darr;)">&#9660;</button>
+                    <span id="m-tr-v" class="pressval">0</span>
+                    <button id="m-tr-up" title="Up one equave (&uarr;)">&#9650;</button>
                   </span>
                 </div>
-                <p class="hint" id="m-oct-read"></p>
-                <p class="hint">&uarr; and &darr; transpose in Play, and whenever a
-                  controller is connected; &larr; and &rarr; still orbit the view.</p>
-              </div>
+
+                <div class="row" style="align-items:center;margin-top:11px">
+                  <label class="tune-inline" for="m-tr-step"
+                    title="How far one press moves, counted in keys — which is what a MIDI note number counts in too. Design's Notes in Scale is the equave, and is the default.">Equave</label>
+                  <input id="m-tr-step" type="number" min="1" max="128" step="1" style="width:5em"
+                    title="One press moves every pitch by the interval that many keys span from 1/1. Leave it at the Notes in Scale and one press is an equave; set it to 7 on a 12-note keyboard and one press is a fifth. Clear the field to follow Notes in Scale again.">
+                  <p class="tune-read" id="m-tr-step-read" style="margin:0"></p>
+                </div>
 
               <div id="m-live" style="display:none">
                 <label for="m-in">Input</label>
@@ -789,7 +861,7 @@
 
                 <label for="m-origin">MIDI note that plays key 0</label>
                 <input id="m-origin" type="number" min="0" max="127" step="1" value="60"
-                  title="Where the controller is laid on the keyboard. The keys are read as one ascending run — one MIDI number per key, black notes included — so a controller's octave is not this instrument's. The octave shift transposes the keys rather than moving this.">
+                  title="Where the controller is laid on the keyboard. The keys are read as one ascending run — one MIDI number per key, black notes included — so a controller's octave is not this instrument's. Transpose moves the keys' pitches rather than moving this.">
                 <p class="tune-read" id="m-map" style="margin-top:5px"></p>
 
                 <div class="midi-row">
@@ -816,9 +888,6 @@
           <button id="v-proj" class="navgizmo-mini" title="Toggle Perspective / Orthographic">persp</button>
           <button id="v-fit" class="navgizmo-mini">fit</button>
         </div>
-        <div class="navgizmo-row">
-          <button id="v-theme" title="Toggle background brightness">⏾</button>
-        </div>
       </div>
       <div id="camread"></div>
       <div id="inspect"></div>
@@ -841,6 +910,9 @@
       <div class="grp"><span style="color:var(--dim)">separate combs</span>
         <input id="explode" type="range" min="0" max="60" step="1" value="0">
         <span id="explodeval" style="color:var(--dim);width:34px">0 mm</span></div>
+      <div class="grp" style="margin-left:auto">
+        <button id="v-theme" title="Toggle background brightness">⏾</button>
+      </div>
     </div>
   </div>
   </div>
@@ -2843,14 +2915,6 @@ function showBevel(){
     rebuild();
     showBevel();
   });
-  const rst = $('bevel-reset');
-  if (rst) rst.onclick = () => {
-    delete design.bevel;
-    sl.value = 0;
-    rebuild();
-    showBevel();
-    toast('the playing edge is back to the drafted square arris');
-  };
 })();
 
 /* ===================== rebuild ===================== */
@@ -4042,6 +4106,10 @@ function setMode(name){
   // Nothing may be left ringing on the way out — a note that outlived the
   // mode that could stop it would have no key to let go of.
   if(name !== 'play' && window.XPlay) window.XPlay.releaseAll();
+  // And nothing may be left armed for typing: outside Play the strip is a
+  // drawing again, and a key that took a caret instead of a click would be
+  // the Design/Play confusion the modes exist to prevent.
+  if(name !== 'play' && window.XTuning) window.XTuning.disarmEdit();
 }
 
 for(const btn of railPane.querySelectorAll('.rail-btn')){

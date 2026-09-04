@@ -5,37 +5,71 @@
  * Design says how the keyboard is ARRANGED; this says what it SOUNDS.  The
  * two are kept apart on purpose: a layout is a run of 32 keys with an equave
  * measured off the first seven whites and the gaps among them, and nothing in
- * it knows a frequency.  Here that run is handed a scale — an equal division
- * or a list of ratios — and every key comes away with a pitch, a name, and
- * the enumeration it already had to hang them on. A key shows one of the two
- * at a time: its position while you are in Design, its pitch while you are in
- * Play, because both at once is two numbers in twenty pixels.
+ * it knows a frequency.  Here that run is handed a scale — an equal division,
+ * or a pitch typed onto every degree — and every key comes away with a pitch,
+ * a name, and the enumeration it already had to hang them on. A key shows one
+ * of the two at a time: its position while you are in Design, its pitch while
+ * you are in Play, because both at once is two numbers in twenty pixels.
+ *
+ * AUTO AND CUSTOM ARE ONE MECHANISM, NOT TWO.  Every degree carries an
+ * ENTRY — a ratio, a cents figure, or a step of some division — and the two
+ * systems differ only in where the entry comes from.  Auto reads it off the
+ * arrangement: degree d is step d of the division Design already implies, and
+ * there is nothing to type.  Custom starts from exactly those entries and
+ * lets any of them be replaced by hand.  So switching between the two is not
+ * a change of tuning, it is a change of who is allowed to write on it, and a
+ * Custom scale you have not edited sounds identical to Auto — which is what
+ * makes editing it feel like editing rather than starting over.
+ *
+ * THAT IS WHY THE EDITOR IS THE KEYBOARD.  A scale typed into a box beside
+ * the strip has to be read back onto the strip in your head, and the layouts
+ * worth reaching for here are the ones whose degrees DON'T ascend in order.
+ * Typed onto the key it will be played from, a nonsequential layout is no
+ * harder to write than a sequential one.
  *
  * THE NOTATION IS NOT REIMPLEMENTED.  The spellers under ./notation are the
  * Notation app's own engines, copied across whole: the same Ups-and-Downs
  * table, the same C-anchored HEJI speller and the same Sagittal calculator,
  * drawing the same glyphs out of the same fonts at the same sizes the Tuner
- * draws them.  A name spelled here is the name that app would spell.
+ * draws them.  A name spelled here is the name that app would spell.  Which
+ * of them a key is spelled with follows from WHAT WAS TYPED on it: a ratio is
+ * spelled in HEJI, Sagittal or as itself, a step of a division in ups and
+ * downs or as its number, and a bare cents figure as cents, because there is
+ * no notation that answers all three and pretending otherwise would put a
+ * name on a key that the key does not have.
  *
- * WHAT A TRANSPOSITION IS, AND WHY IT IS NOT A ROTATION.  The octave shift in
- * the MIDI panel is here rather than there, because it is a fact about the
- * instrument and not about a cable: shifted up one, every key on the strip
- * carries a pitch an equave higher, the names and the Hz on them say so, and
- * a key sounds the same whether a finger or a controller pressed it.
+ * WHAT A TRANSPOSITION IS, AND WHY IT CHANGES NO NAME.  Transpose, in the
+ * MIDI panel, is here rather than there, because it is a fact about the
+ * instrument and not about a cable: a key sounds the same whether a finger or
+ * a controller pressed it, so the shift has to live where the pitches are
+ * settled.  What it does is multiply every pitch on the instrument by ONE
+ * interval.  Every key keeps the degree it had and therefore keeps the name
+ * it had; only the Hz move.  That is the whole of what a transposition is,
+ * and it is why this is the one control in Play that cannot change a
+ * spelling — the strip reads identically at +2 as it does at 0.
  *
- * It cannot be expressed as a rotation, though a rotation by a whole equave
- * would sound identical: the rotations below are folded back into the scale
- * on every pass, precisely so that "which degree is under key 0" stays a
+ * AND THE INTERVAL IS CHOSEN IN KEYS, because keys are what a MIDI note
+ * number counts in.  One press moves by however far `n` keys reach from 1/1,
+ * and `n` defaults to Design's Notes in Scale — at which it is exactly an
+ * equave, which is why the control is called one.  Set it smaller and the
+ * instrument transposes by a fifth, or a step, without any of the keys
+ * changing what they are.  It is NOT a rotation: a rotation slides the scale
+ * along the keyboard and puts a different degree under your finger; this
+ * leaves every finger on the degree it was on and moves the register.
+ *
+ * A rotation by a whole equave WOULD sound identical, which is exactly why
+ * the two are kept apart: the rotation below is folded back into the scale on
+ * every pass, precisely so that "which degree is under key 0" stays a
  * question with N answers rather than infinitely many.  So the shift is its
- * own term, added to the equave AFTER the fold, and the two controls do not
- * interfere: rotate to choose the mode, transpose to choose the register.
+ * own term, added after the fold, and the two controls do not interfere:
+ * rotate to choose the mode, transpose to choose the register.
  *
  * WHAT A ROTATION IS.  Not a transposition and not a re-ordering: the scale
  * keeps its degrees in their order and keeps their frequencies, and the whole
  * run slides along the keyboard, so a different degree comes to rest under
  * key 0.  Sliding by a whole scale carries you up an equave, which is why the
  * offset is read as a signed index into an infinite ascending run rather than
- * folded first — key 0 at rotation N is an octave above key 0 at rotation 0.
+ * folded first — key 0 at rotation N is an equave above key 0 at rotation 0.
  *
  * The pitches this settles are held on window.XTuning.freqs, keyed by the
  * enumeration, because sounding them is Play's next job and it will want them
@@ -54,38 +88,52 @@ const STORE = 'xenachord.tuning.v1';
 const T = {
   nominal: 1, acc: 1, oct: 4,     // 1/1 is written C natural 4 ...
   hz: 261.6256,                   // ... and sounds here
-  system: 'edo',
+  system: 'auto',                 // 'auto' — read off Design — or 'custom'
   edoRead: 'updown',
   edoHalves: 'exclude',
-  edoRot: 0,
   jiRead: 'heji',
   sagPrecision: 'medium',
   sagFlavour: 'revo',
-  scale: '1/1 9/8 5/4 4/3 3/2 5/3 15/8',
-  jiRot: 0,
-  equaveShift: 0,                 // the octave shift, in equaves — see below
+  rot: 0,                         // which degree comes to rest under key 0
+  scale: '1/1 9/8 5/4 4/3 3/2 5/3 15/8',   // the fill list, not the tuning
+  custom: {},                     // degree -> entry, in Custom only
+  trStep: null,                   // keys one Transpose moves; null follows Design
+  equaveShift: 0,                 // how many of those have been taken
 };
 
 try { Object.assign(T, JSON.parse(localStorage.getItem(STORE) || '{}')); } catch (e) {}
-// Johnston was offered once and is not any more; a session that chose it comes
-// back to the default rather than to a toggle with nothing pressed.
+/* ---- what an older session left behind ----
+ * Johnston was offered once and is not any more; EDO and JI were two systems
+ * and are now two ways of filling one.  A stored session comes back as the
+ * nearest thing that still exists rather than as a control with nothing
+ * pressed — and a JI scale comes back as the custom entries it always was,
+ * written onto the degrees in the order it listed them. */
 if (T.jiRead === 'johnston') T.jiRead = 'heji';
+/* One rotation now where there were two — and which of the two it inherits
+ * is the one the session was actually looking at. */
+if (T.rot === 0) {
+  const old = T.system === 'ji' ? T.jiRot : T.edoRot;
+  if (old != null) T.rot = old | 0;
+}
+if (T.system === 'edo') T.system = 'auto';
+if (T.system === 'ji') {
+  T.system = 'custom';
+  if (!T.custom || !Object.keys(T.custom).length) T.custom = fillFromScale({});
+}
+if (T.system !== 'auto' && T.system !== 'custom') T.system = 'auto';
+delete T.equave;                  // the equave was an interval once; it is a count now
+if (!T.custom || typeof T.custom !== 'object') T.custom = {};
+delete T.edoRot; delete T.jiRot;
+
 const save = () => { try { localStorage.setItem(STORE, JSON.stringify(T)); } catch (e) {} };
 
 const NOMINALS = ['F', 'C', 'G', 'D', 'A', 'E', 'B'];
 const ACCS = ['♭', '♮', '♯'];
 
 /* ---------------------------------------------------------------------
- *  The scale
+ *  The shape of the keyboard
  * ------------------------------------------------------------------ */
 
-/**
- * How many notes there are in the scale before it repeats.
- *
- * Design's own control, read rather than asked for again: the EDO and the
- * arrangement are the same number, and a keyboard that repeats every N notes
- * has nowhere to put an N+1th degree.
- */
 /**
  * How many notes there are to the equave.
  *
@@ -97,10 +145,10 @@ const ACCS = ['♭', '♮', '♯'];
  * That is the whole of why a stacked rig sounds different rather than merely
  * standing differently. Stacking is an INTERCHANGE: the lower device takes
  * the even steps and the upper one the odd steps between them, so two 17-note
- * layouts standing one above the other ARE 34-EDO. Without the equave
- * following the step, the interleaved numbering would fold back into the
- * design's own 17 and every key on the lower keyboard would change pitch —
- * precisely the reading the stack denies.
+ * layouts standing one above the other ARE 34 notes to the equave. Without
+ * the equave following the step, the interleaved numbering would fold back
+ * into the design's own 17 and every key on the lower keyboard would change
+ * pitch — precisely the reading the stack denies.
  *
  * Side-by-side does not come into it: a second device beside the first is a
  * CONTINUATION, 32 notes higher in the same division, and the division is
@@ -135,75 +183,231 @@ function anchorPeriod() {
   return (n > 1) ? n : 32;
 }
 
-/** The JI degrees, folded into one octave and sorted, as the Tuner builds them. */
-function jiDegrees() {
-  return buildJiScale('custom', { custom: T.scale });
+/* ---------------------------------------------------------------------
+ *  An interval, however it was written
+ *
+ *  One grammar, used in three places — the equave field, the fill list, and
+ *  the box that opens on a key — so that what you may type does not depend on
+ *  where you are typing it.  Everything reduces to CENTS, which is the only
+ *  form all three notations share; what was typed is kept beside it, because
+ *  it is what decides how the key is spelled and what the box says when you
+ *  come back to edit it.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Read one interval.
+ *
+ * @param text  '3/2' or '3:2' (a ratio) · '702c' (cents from 1/1) ·
+ *              '7\12' (step of a division of the equave; '7\' takes the
+ *              keyboard's own division) · '392hz' (an absolute frequency,
+ *              which is kept as the cents it comes to) · a bare integer as
+ *              a ratio over 1 · a bare decimal as cents.
+ * @param N     the division a bare backslash means.
+ * @returns an entry, or null when it is not an interval at all.
+ */
+function parseInterval(text, N) {
+  const s = String(text == null ? '' : text).replace(/\s+/g, '');
+  if (!s) return null;
+  let m;
+  if ((m = s.match(/^(\d+)[/:](\d+)$/))) {
+    const num = +m[1], den = +m[2];
+    return (num > 0 && den > 0) ? { kind: 'ratio', num, den } : null;
+  }
+  if ((m = s.match(/^(-?\d+(?:\.\d+)?)\\(\d+(?:\.\d+)?)?$/))) {
+    const step = +m[1], edo = m[2] === undefined ? N : +m[2];
+    return (edo > 0) ? { kind: 'edo', step, edo } : null;
+  }
+  if ((m = s.match(/^(-?\d+(?:\.\d+)?)(?:cents?|c|¢)$/i))) {
+    return { kind: 'cents', cents: +m[1] };
+  }
+  if ((m = s.match(/^(-?\d+(?:\.\d+)?)hz$/i))) {
+    const f = +m[1];
+    return (f > 0) ? { kind: 'cents', cents: 1200 * Math.log2(f / T.hz) } : null;
+  }
+  if ((m = s.match(/^(\d+)$/))) return { kind: 'ratio', num: +m[1], den: 1 };
+  if ((m = s.match(/^(-?\d+\.\d+)$/))) return { kind: 'cents', cents: +m[1] };
+  return null;
+}
+
+/**
+ * What an entry is worth, in cents above 1/1.
+ *
+ * A step of a division is a division of the OCTAVE — 7\12 is seven twelfths
+ * of 2/1, which is what everyone already means by it and what the ups-and-
+ * downs speller assumes when it comes to write the step down.
+ */
+function entryCents(e) {
+  if (!e) return 0;
+  if (e.kind === 'ratio') return 1200 * Math.log2(e.num / e.den);
+  if (e.kind === 'cents') return e.cents;
+  return e.step * 1200 / e.edo;
+}
+
+/** An entry written back out the way it would be typed. */
+function entryText(e) {
+  if (!e) return '';
+  if (e.kind === 'ratio') return `${e.num}/${e.den}`;
+  if (e.kind === 'cents') return `${num(e.cents)}c`;
+  return `${num(e.step)}\\${num(e.edo)}`;
+}
+
+/** A number with no trailing zeroes — 702, not 702.0000.  Four places is
+ *  what a typed interval is kept to, which is finer than anyone hears and
+ *  coarse enough to round-trip through the box unchanged. */
+const num = (v) => String(Math.round(v * 1e4) / 1e4);
+
+/** The same, at the precision a KEY is read at.  A cents figure off an
+ *  arbitrary frequency has as many digits as the division does, and twenty
+ *  pixels of key is the wrong place for the last four of them. */
+const num2 = (v) => String(Math.round(v * 100) / 100);
+
+/* ---------------------------------------------------------------------
+ *  The scale
+ * ------------------------------------------------------------------ */
+
+/** What Auto gives degree `d`: step d of the division the arrangement
+ *  implies.  Custom's degrees start here too, and stay here until typed on. */
+const autoEntry = (d, N) => ({ kind: 'edo', step: d, edo: N });
+
+/** The entry degree `d` actually carries. */
+function entryOf(d, N) {
+  if (T.system === 'custom') {
+    const e = T.custom[d];
+    if (e && e.kind) return e;
+  }
+  return autoEntry(d, N);
+}
+
+/** True when this degree has been typed rather than read off the arrangement. */
+const isTyped = (d) => T.system === 'custom' && !!(T.custom[d] && T.custom[d].kind);
+
+/** How many degrees of the scale as it stands have been typed on. */
+function typedCount() {
+  const N = equaveNotes();
+  let n = 0;
+  for (let d = 0; d < N; d++) if (isTyped(d)) n++;
+  return n;
 }
 
 /**
  * What key `i` carries.
  *
  * `slot` walks the scale from key 0 with the rotation applied; the degree is
- * that position folded into the scale and the equave is how many times it
- * wrapped, so pitch stays monotonic along the keyboard however far it is
- * rotated.
+ * that position folded into the scale and the equave count is how many times
+ * it wrapped, so a key an equave up the strip is an equave up in pitch
+ * however far the scale is rotated — and however far from ascending the
+ * degrees inside one equave happen to run.
  */
-function pitchOf(i, ji) {
-  if (T.system === 'edo') {
-    const N = equaveNotes();
-    const slot = i + T.edoRot;
-    const step = mod(slot, N), equave = Math.floor(slot / N) + T.equaveShift;
-    return { kind: 'edo', step, equave, edo: N,
-             hz: T.hz * Math.pow(2, step / N + equave) };
-  }
-  const M = ji.length;
-  if (!M) return null;
-  const slot = i + T.jiRot;
-  const deg = mod(slot, M), equave = Math.floor(slot / M) + T.equaveShift;
-  const d = ji[deg];
-  return { kind: 'ji', deg, equave, num: d.num, den: d.den, supported: d.supported,
-           hz: T.hz * (d.num / d.den) * Math.pow(2, equave) };
+function pitchOf(i) {
+  const N = equaveNotes();
+  const slot = i + T.rot;
+  const deg = mod(slot, N), eq = Math.floor(slot / N);
+  const e = entryOf(deg, N);
+  const cents = entryCents(e);
+  /* The transposition is ONE interval added to every key alike, so it moves
+   * the pitch and touches neither the degree nor the entry the name is
+   * spelled from. */
+  return { deg, eq, entry: e, typed: isTyped(deg), cents, edoN: N,
+           hz: T.hz * Math.pow(2,
+             (cents + eq * 1200 + T.equaveShift * shiftCents()) / 1200) };
+}
+
+/* ---------------------------------------------------------------------
+ *  What one press of Transpose is worth
+ *
+ *  Counted in KEYS, because that is the unit a MIDI note number is in and
+ *  the unit the player's hand is in.  `n` keys up from 1/1 is whatever the
+ *  scale actually puts there — degree n of it, plus an equave for every time
+ *  the count wrapped — so on an equal division it is n steps and on a typed
+ *  scale it is the interval that scale really spans.  At the default, which
+ *  is Design's Notes in Scale, that is exactly one equave.
+ * ------------------------------------------------------------------ */
+
+/** Keys per press.  Null, or anything out of range, follows the keyboard. */
+function shiftKeys() {
+  const n = T.trStep | 0;
+  return (n >= 1 && n <= 128) ? n : equaveNotes();
+}
+
+/** True while the step is the one Design implies rather than one typed in. */
+const shiftAuto = () => !(T.trStep >= 1 && T.trStep <= 128);
+
+/** What those keys come to, in cents. */
+function shiftCents() {
+  const K = shiftKeys(), N = equaveNotes();
+  return entryCents(entryOf(mod(K, N), N)) + Math.floor(K / N) * 1200;
 }
 
 /* ---------------------------------------------------------------------
  *  The name that pitch is written with
+ *
+ *  Chosen by WHAT THE DEGREE IS, not by a global reading: the three notation
+ *  groups in the panel are three answers to three different questions, and a
+ *  key answers whichever one it is an instance of.  A cents figure is an
+ *  instance of none of them and is written as itself, because inventing a
+ *  spelling for an arbitrary interval would be a name the key does not have.
  * ------------------------------------------------------------------ */
 
 function nameHtml(p) {
-  if (!p) return '';
-  if (p.kind === 'edo') {
-    if (T.edoRead === 'step') return String(p.step);
-    const sp = edoName(p.step, p.edo, {
-      showEnh: false,
-      excludeHalves: T.edoHalves === 'exclude',
-    }).spellings[0];
-    if (!sp) return '';
-    return `<span class="edo-name">${esc(sp.base)}${esc(sp.acc)}</span>`;
-  }
-  if (T.jiRead === 'ratio') return `${p.num}/${p.den}`;
-  if (!p.supported) return `${p.num}/${p.den}`;   // outside the 89-limit: unspellable
-  const monzo = ratioMonzo(p.num, p.den);
+  const e = p.entry;
+  if (e.kind === 'cents') return `${num2(e.cents)}<span class="tune-letter">¢</span>`;
+  if (e.kind === 'edo') return edoHtml(e, p.edoN);
+  if (T.jiRead === 'ratio') return `${e.num}/${e.den}`;
+  const spellable = within(e.num) && within(e.den);
+  if (!spellable) return `${e.num}/${e.den}`;   // outside the 89-limit
+  const monzo = ratioMonzo(e.num, e.den);
   if (T.jiRead === 'heji') {
     const n = hejiName(monzo);
-    return n ? `${letter(n.letter)}${n.html}` : `${p.num}/${p.den}`;
+    return n ? `${letter(n.letter)}${n.html}` : `${e.num}/${e.den}`;
   }
-  const sp = sagittalSpellings(p.num, p.den, {
+  const sp = sagittalSpellings(e.num, e.den, {
     precision: T.sagPrecision,
     useEvo: T.sagFlavour === 'evo',
     useUnicode: true,      // the glyph, never the ASCII transliteration
     showEnh: false,
   })[0];
-  if (!sp) return `${p.num}/${p.den}`;
+  if (!sp) return `${e.num}/${e.den}`;
   return `${letter(sp.letter)}<span class="sag-symbol">${sp.symbol}</span>`;
+}
+
+/**
+ * A step of a division, written.
+ *
+ * A step of some other division than the keyboard's own keeps its
+ * denominator, because 7 alone would not say which seven — and a step that
+ * is not a whole number of a whole division has no ups-and-downs spelling at
+ * all, so it stays as it was written.
+ */
+function edoHtml(e, N) {
+  const bare = Number.isInteger(e.step) && Number.isInteger(e.edo);
+  const plain = (bare && e.edo === N) ? String(e.step) : entryText(e);
+  if (T.edoRead === 'step' || !bare) return plain;
+  const sp = edoName(e.step, e.edo, {
+    showEnh: false,
+    excludeHalves: T.edoHalves === 'exclude',
+  }).spellings[0];
+  if (!sp || sp.base === 'n/a') return plain;
+  return `<span class="edo-name">${esc(sp.base)}${esc(sp.acc)}</span>`;
+}
+
+/** Whether a whole number factors inside the table the spellers know. */
+const PRIMES89 = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53,
+                  59, 61, 67, 71, 73, 79, 83, 89];
+function within(x) {
+  let n = x;
+  for (const p of PRIMES89) while (n % p === 0) n /= p;
+  return n === 1;
 }
 
 /** Plain text for a tooltip, where the glyph fonts cannot reach. */
 function nameText(p) {
-  if (!p) return '';
-  if (p.kind === 'edo') return `step ${p.step} of ${p.edo}` +
-    (p.equave ? ` ${p.equave > 0 ? '+' : ''}${p.equave} equave` : '');
-  return `${p.num}/${p.den}` +
-    (p.equave ? ` ${p.equave > 0 ? '+' : ''}${p.equave} equave` : '');
+  const e = p.entry;
+  const what = e.kind === 'ratio' ? `${e.num}/${e.den}`
+             : e.kind === 'cents' ? `${num2(e.cents)}¢`
+             : `step ${num(e.step)} of ${num(e.edo)}`;
+  return `degree ${p.deg} · ${what}` +
+    (p.typed ? ' (typed)' : '') +
+    (p.eq ? ` · ${p.eq > 0 ? '+' : ''}${p.eq} equave` : '');
 }
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
@@ -226,23 +430,22 @@ const letter = (s) => `<span class="tune-letter">${esc(s)}</span>`;
 function label() {
   const inner = document.getElementById('stripInner');
   if (!inner) return;
-  /* Both rotations are folded before anything is computed off them, so what
-   * the readout shows and what the keys carry can never be a pass apart. */
-  const ji = jiDegrees();
-  T.edoRot = mod(T.edoRot, equaveNotes());
-  if (ji.length) T.jiRot = mod(T.jiRot, ji.length);
-  syncUI(ji);
+  /* The rotation is folded before anything is computed off it, so what the
+   * readout shows and what the keys carry can never be a pass apart. */
+  T.rot = mod(T.rot, equaveNotes());
+  syncUI();
   const freqs = {};
 
   for (const el of inner.querySelectorAll('[data-note]')) {
     const i = +el.dataset.note;
-    const p = pitchOf(i, ji);
-    if (!p) continue;
+    const p = pitchOf(i);
     freqs[i] = p.hz;
     const span = document.createElement('span');
     span.className = 'kb-tune';
     span.innerHTML = nameHtml(p);
     el.appendChild(span);
+    el.dataset.deg = p.deg;
+    if (p.typed) el.classList.add('tuned');
     /* The title the key already carries says what it IS; this says what it
      * sounds. Appended rather than replaced so neither answer is lost. */
     el.title = (el.title ? el.title + '  ·  ' : '') +
@@ -250,14 +453,21 @@ function label() {
   }
   window.XTuning.freqs = freqs;
   window.XTuning.notesEq = equaveNotes();
-  /* How many notes it takes to come back to the same pitch class — 17, 19,
-   * 34 on an interchanged rig, or however many degrees a custom scale was
-   * read as. Not the same question as the layout's period once a JI scale of
-   * some other length is laid over it, which is why it is answered here
-   * rather than left for a reader to guess from notesEq. */
-  window.XTuning.scaleNotes =
-    (T.system === 'ji' && ji.length) ? ji.length : equaveNotes();
-  /* Anything downstream that has to restate a pitch — MIDI's octave readout —
+  /* How many notes it takes to come back to the same pitch class.  Custom
+   * keeps the arrangement's own period — a typed degree replaces a degree
+   * rather than adding one — so this is one number now where it used to be
+   * two, and nothing downstream has to ask which system is loaded. */
+  window.XTuning.scaleNotes = equaveNotes();
+  /* What one press of Transpose is worth, for MIDI's readout — it is no
+   * longer always an octave, and never was always 1200 cents. */
+  window.XTuning.shiftCents = shiftCents();
+  window.XTuning.shiftKeys = shiftKeys();
+  /* The editor was standing on a key that has just been destroyed and
+   * rebuilt; it is put back on the same key, or on the one Enter asked to
+   * move to.  Done here rather than by the committer because THIS is the
+   * pass that made the new keys. */
+  restoreEditor();
+  /* Anything downstream that has to restate a pitch — MIDI's readout —
    * hears about it here rather than polling, because this is the one place
    * the table is settled. */
   window.dispatchEvent(new CustomEvent('xenachord:tuning'));
@@ -276,14 +486,25 @@ function refresh() {
   else label();
 }
 
+/* ---------------------------------------------------------------------
+ *  Transposition
+ * ------------------------------------------------------------------ */
+
 /**
  * How far the transposition is allowed to run.
  *
- * Four equaves either way puts a 1/1 of 261 Hz between 16 Hz and 4.2 kHz, and
- * the keyboard on top of that — which is the whole of what is left to hear.
- * Past it the control would only be a way of turning the instrument off.
+ * The bound is on the DISTANCE, not on the count: four octaves either way
+ * puts a 1/1 of 261 Hz between 16 Hz and 4.2 kHz, and the keyboard on top of
+ * that — which is the whole of what is left to hear. Past it the control
+ * would only be a way of turning the instrument off. So a press of one key
+ * gets many more presses than a press of a whole equave does, and both stop
+ * at the same place.
  */
-const SHIFT_LIMIT = 4;
+const SHIFT_CENTS_LIMIT = 4800;
+const shiftLimit = () => {
+  const c = Math.abs(shiftCents());
+  return c > 1 ? Math.max(1, Math.min(256, Math.round(SHIFT_CENTS_LIMIT / c))) : 4;
+};
 
 /**
  * Move the whole instrument by whole equaves.
@@ -295,9 +516,247 @@ const SHIFT_LIMIT = 4;
  * @returns the shift actually taken, which is the asked-for one clamped.
  */
 function setEquaveShift(n) {
-  const v = Math.max(-SHIFT_LIMIT, Math.min(SHIFT_LIMIT, n | 0));
+  const L = shiftLimit();
+  const v = Math.max(-L, Math.min(L, n | 0));
   if (v !== T.equaveShift) { T.equaveShift = v; refresh(); }
   return T.equaveShift;
+}
+
+/* ---------------------------------------------------------------------
+ *  Typing a pitch onto a key
+ *
+ *  The strip is torn down and rebuilt on every pass, so the box that opens on
+ *  a key cannot survive a commit — and it does not have to.  What survives is
+ *  a note number: which key the box was on, or which one Enter asked to move
+ *  to.  label() puts the box back at the end of the rebuild that made the new
+ *  keys, so the sequence "type, Enter, type" reads as one continuous edit
+ *  even though the strip underneath it was replaced twice.
+ * ------------------------------------------------------------------ */
+
+/** Armed for typing rather than for playing. */
+let armed = false;
+/** The note the open box is on, and the note to re-open on after a rebuild. */
+let editNote = null, pending = null;
+/** True while the box is being torn down, so its own blur is not a commit. */
+let closing = false;
+/** The degree last typed on or clicked, for the panel's readout. */
+let lastDeg = null;
+/** Degrees whose line in the fill list did not parse, on the last input. */
+let scaleListErrors = null;
+
+const stripInner = () => document.getElementById('stripInner');
+
+function setArmed(on) {
+  const v = !!on && T.system === 'custom';
+  if (v === armed) return;
+  armed = v;
+  document.body.classList.toggle('tune-edit', armed);
+  /* Nothing may be left ringing under a keyboard that has stopped being an
+   * instrument — the key it was pressed on is about to become a text field. */
+  if (armed && window.XPlay) window.XPlay.releaseAll();
+  if (!armed) closeEditor(false);
+  syncUI();
+}
+
+/** Every element that draws this note — a rig draws the same degree more
+ *  than once, and all of them are the same key as far as typing goes. */
+const notesEls = (n) =>
+  document.querySelectorAll(`#stripInner [data-note="${n}"]`);
+
+function openEditor(note) {
+  closeEditor(true);          // commit whatever was open before moving on
+  const inner = stripInner();
+  const el = inner && inner.querySelector(`[data-note="${note}"]`);
+  if (!el) { editNote = null; return; }
+  editNote = note;
+  lastDeg = +el.dataset.deg;
+  for (const e of notesEls(note)) e.classList.add('editing');
+
+  const box = document.createElement('div');
+  box.className = 'kb-edit';
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.spellcheck = false;
+  inp.value = entryText(entryOf(mod(note + T.rot, equaveNotes()), equaveNotes()));
+  /* WHAT THE BOX OPENED WITH.  Stepping across the keyboard opens a box on
+   * every key it passes, and each of them commits on the way out — so a
+   * commit of text nobody touched has to be nothing at all.  Otherwise
+   * merely visiting a degree would type its Auto reading onto it, and "4 of
+   * 19 typed" would be counting keys you only looked at. */
+  box.dataset.was = inp.value;
+  const tip = document.createElement('div');
+  tip.className = 'tip';
+  box.appendChild(inp);
+  box.appendChild(tip);
+
+  /* Placed off the two boxes' own rectangles rather than off the layout
+   * numbers, so it lands on the key wherever the rig has put it and however
+   * far the strip is scrolled. */
+  const r = el.getBoundingClientRect(), ir = inner.getBoundingClientRect();
+  box.style.left = (r.left - ir.left + r.width / 2) + 'px';
+  box.style.top = (r.top - ir.top + Math.max(6, r.height / 2 - 20)) + 'px';
+  inner.appendChild(box);
+
+  const readout = () => {
+    const p = parseInterval(inp.value, equaveNotes());
+    if (!inp.value.trim()) { tip.className = 'tip'; tip.textContent = 'blank clears it'; return; }
+    if (!p) { tip.className = 'tip bad'; tip.textContent = 'not an interval'; return; }
+    tip.className = 'tip ok';
+    tip.textContent = `${num2(entryCents(p))}¢`;
+  };
+  readout();
+  inp.addEventListener('input', readout);
+
+  inp.addEventListener('keydown', (ev) => {
+    ev.stopPropagation();     // the arrow keys transpose; not in here they don't
+    if (ev.key === 'Escape') { ev.preventDefault(); closeEditor(false); }
+    else if (ev.key === 'Enter' || ev.key === 'Tab') {
+      ev.preventDefault();
+      pending = nextNote(note, ev.shiftKey ? -1 : +1);
+      closeEditor(true);
+    }
+  });
+  /* Clicking out of the key IS the commit — the gesture the panel describes,
+   * and the same one that lands on the next key when that is where you
+   * clicked. */
+  inp.addEventListener('blur', () => { if (!closing) closeEditor(true); });
+
+  inp.focus();
+  inp.select();
+}
+
+/** Where Enter goes: the next key along, wrapping at the end of the run. */
+function nextNote(note, dir) {
+  const all = [...document.querySelectorAll('#stripInner [data-note]')]
+    .map((e) => +e.dataset.note);
+  const uniq = [...new Set(all)].sort((a, b) => a - b);
+  if (!uniq.length) return null;
+  const i = uniq.indexOf(note);
+  if (i < 0) return uniq[0];
+  return uniq[mod(i + dir, uniq.length)];
+}
+
+/**
+ * Take the box down.
+ *
+ * @param commit  write what was typed onto the degree.  A blank box puts the
+ *                degree back to its Auto reading, which is the only way to
+ *                un-type one and reads as what it is: rubbing it out.
+ */
+function closeEditor(commit) {
+  const inner = stripInner();
+  const box = inner && inner.querySelector('.kb-edit');
+  const note = editNote;
+  editNote = null;
+  for (const e of document.querySelectorAll('#stripInner .editing')) {
+    e.classList.remove('editing');
+  }
+  if (!box) { if (pending != null) { const n = pending; pending = null; openEditor(n); } return; }
+  const text = box.querySelector('input').value;
+  const untouched = text === box.dataset.was;
+  closing = true;
+  box.remove();
+  closing = false;
+  if (!commit || untouched || note == null) {
+    if (pending != null) { const n = pending; pending = null; openEditor(n); }
+    return;
+  }
+  const N = equaveNotes(), d = mod(note + T.rot, N);
+  const before = JSON.stringify(T.custom[d] || null);
+  if (!text.trim()) delete T.custom[d];
+  else {
+    const p = parseInterval(text, N);
+    if (p) T.custom[d] = p;      // unreadable is left alone rather than lost
+  }
+  lastDeg = d;
+  if (JSON.stringify(T.custom[d] || null) !== before) refresh();
+  else if (pending != null) { const n = pending; pending = null; openEditor(n); }
+  else syncUI();
+}
+
+/** After a rebuild: the box goes back where it was, or where Enter sent it. */
+function restoreEditor() {
+  if (!armed) return;
+  const n = pending != null ? pending : editNote;
+  pending = null;
+  if (n == null) return;
+  editNote = null;               // the element it named is gone; do not commit
+  openEditor(n);
+}
+
+/* ---- the strip's own pointer, while it is armed ----
+ * Capture phase on #strip, beside Play's: Play stops the event reaching the
+ * design handlers below and this reads the same event for the key under it.
+ * Two listeners on one node both run — stopPropagation only closes the way
+ * DOWN — so neither has to know about the other. */
+(function bindStrip() {
+  const strip = document.getElementById('strip');
+  if (!strip) return;
+  const noteAt = (ev) => {
+    for (const el of document.elementsFromPoint(ev.clientX, ev.clientY)) {
+      if (el.closest && el.closest('.kb-edit')) return undefined;
+      if (el.dataset && el.dataset.note != null) return +el.dataset.note;
+      if (el.id === 'strip' || el === document.body) break;
+    }
+    return null;
+  };
+  strip.addEventListener('dblclick', (ev) => {
+    if (!armed) return;
+    const n = noteAt(ev);
+    if (n == null) return;
+    ev.preventDefault(); ev.stopPropagation();
+    openEditor(n);
+  }, true);
+  /* One click moves the box on, once it is open.  Opening it in the first
+   * place stays a double-click, so an armed strip is not a minefield of
+   * accidental edits — but stepping from key to key mid-edit should not cost
+   * two clicks each time.
+   *
+   * WHETHER A BOX WAS OPEN IS DECIDED ON POINTERDOWN, not on the click:
+   * pressing elsewhere takes the focus off the input, its blur commits, and
+   * by the time the click arrives there is no longer an editor to have been
+   * stepping away from.  Pointerdown is the last moment the answer is still
+   * the true one. */
+  let wasEditing = false;
+  strip.addEventListener('pointerdown', (ev) => {
+    wasEditing = armed && editNote != null &&
+      !(ev.target.closest && ev.target.closest('.kb-edit'));
+  }, true);
+  strip.addEventListener('click', (ev) => {
+    const was = wasEditing; wasEditing = false;
+    if (!armed || !was) return;
+    const n = noteAt(ev);
+    if (n == null || n === editNote) return;
+    ev.preventDefault(); ev.stopPropagation();
+    openEditor(n);
+  }, true);
+}());
+
+window.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && armed && editNote == null) setArmed(false);
+});
+
+/* ---------------------------------------------------------------------
+ *  Filling every degree at once
+ * ------------------------------------------------------------------ */
+
+/** The fill list, folded into one equave and sorted, as the Tuner builds it.
+ *  A declaration rather than a const: the migration above runs before this
+ *  point in the file and calls it. */
+function scaleDegrees() { return buildJiScale('custom', { custom: T.scale }); }
+
+/**
+ * Write the fill list onto the degrees, from 0 up.
+ *
+ * The old JI system was exactly this and nothing else — a list of ratios laid
+ * along the keyboard in order — so it survives as a button rather than as a
+ * mode, and what it writes can then be edited a key at a time.
+ */
+function fillFromScale(into) {
+  const out = into || {};
+  const ds = scaleDegrees();
+  ds.forEach((d, i) => { out[i] = { kind: 'ratio', num: d.num, den: d.den }; });
+  return out;
 }
 
 /* ---------------------------------------------------------------------
@@ -320,51 +779,100 @@ function seg(id, key, after) {
 }
 
 /** What the controls say, brought back into step with what T holds. */
-function syncUI(ji) {
+function syncUI() {
+  const custom = T.system === 'custom';
+  const N = equaveNotes();
+
   $('t-ref').textContent = NOMINALS[T.nominal] + ACCS[T.acc] + T.oct;
 
   /* The transposition is set from the MIDI panel and from the arrow keys, so
    * it can be moved without this fieldset being looked at — and it changes
    * what every number above it is worth. It says so here, where 1/1 is
    * defined, rather than only where it was pressed. */
-  const sh = T.equaveShift | 0;
+  const sh = T.equaveShift | 0, sc = shiftCents(), K = shiftKeys();
   const tr = $('t-transpose');
   tr.style.display = sh ? '' : 'none';
   if (sh) {
-    tr.innerHTML = `transposed <b>${sh > 0 ? '+' : ''}${sh}</b> equave` +
-      `${Math.abs(sh) === 1 ? '' : 's'} &mdash; 1/1 sounds at ` +
-      `<b>${(T.hz * Math.pow(2, sh)).toFixed(4)}</b> Hz`;
+    tr.innerHTML = `transposed <b>${sh > 0 ? '+' : ''}${sh}</b> &times; ` +
+      `<b>${K}</b> key${K === 1 ? '' : 's'} &mdash; 1/1 sounds at ` +
+      `<b>${(T.hz * Math.pow(2, sh * sc / 1200)).toFixed(4)}</b> Hz. ` +
+      `Every key keeps its name.`;
   }
-  $('t-edo').style.display = T.system === 'edo' ? '' : 'none';
-  $('t-ji').style.display = T.system === 'ji' ? '' : 'none';
-  $('t-sag').style.display = (T.system === 'ji' && T.jiRead === 'sagittal') ? '' : 'none';
-  // The halves are a question about ups-and-downs spelling; a bare step number
-  // has no accidental for the answer to land on.
+
+  for (const b of $('t-system-seg').querySelectorAll('button')) {
+    b.classList.toggle('on', b.dataset.v === T.system);
+  }
+  $('t-auto').style.display = custom ? 'none' : '';
+  $('t-custom').style.display = custom ? '' : 'none';
+  $('t-not-ji').style.display = custom ? '' : 'none';
+  $('t-sag').style.display = (custom && T.jiRead === 'sagittal') ? '' : 'none';
+  // The halves are a question about ups-and-downs spelling; a bare step
+  // number has no accidental for the answer to land on, and neither has a
+  // division of something other than the octave.
   $('t-edo-halves').style.display = (T.edoRead === 'updown') ? '' : 'none';
 
-  $('t-edo-n').textContent = equaveNotes();
+  /* ---- Auto ---- */
+  $('t-edo-n').textContent = N;
   /* Where the number came from, when it is no longer just Design's own: the
    * stack doubled it, and that is worth saying beside it. */
-  const rows = stackDepth(), base = equaveNotes() / rows;
+  const rows = stackDepth(), base = N / rows;
   /* On a rig, WHOSE Notes in Scale — because it is the anchor device's, and
    * editing another device's period must not look like it did nothing. */
   const who = (typeof window.rigAnchorLabel === 'function') ? window.rigAnchorLabel() : '';
   $('t-edo-who').textContent = who ? ` (${who})` : '';
   $('t-edo-rig').innerHTML = rows > 1
     ? `, <b>${base}</b> &times; <b>${rows}</b> interchanged keyboards` : '';
-  $('t-edo-rot-v').textContent = T.edoRot;
-  $('t-ji-rot-v').textContent = T.jiRot;
-  $('t-scale-read').innerHTML = ji.length
-    ? `<b>${ji.length}</b> degree${ji.length === 1 ? '' : 's'} &mdash; ` +
-      ji.map((d) => `${d.num}/${d.den}`).join(' ')
-    : '<span style="color:var(--warn)">no ratios read from that scale</span>';
+
+  /* ---- Custom ---- */
+  const btn = $('t-cus-edit');
+  btn.classList.toggle('on', armed);
+  btn.textContent = armed ? '✓ Done editing' : '✎ Edit Keys on the Strip';
+  btn.style.borderColor = armed ? 'var(--ok)' : '';
+  btn.style.color = armed ? 'var(--ok)' : '';
+  $('t-cus-help').style.display = armed ? '' : 'none';
+  if (custom) {
+    const t = typedCount();
+    $('t-cus-read').innerHTML = t
+      ? `<b>${t}</b> of <b>${N}</b> degree${N === 1 ? '' : 's'} typed &mdash; ` +
+        `the rest read as <b>${N}</b> equal steps of the equave`
+      : `all <b>${N}</b> degrees still read as <b>${N}</b> equal steps &mdash; ` +
+        `edit any of them and only those change`;
+    const sel = $('t-cus-sel');
+    if (lastDeg != null && lastDeg < N) {
+      const e = entryOf(lastDeg, N);
+      sel.innerHTML = `degree <b>${lastDeg}</b>: <b>${esc(entryText(e))}</b>` +
+        (e.kind === 'cents' ? ''
+          : ` &middot; <b>${num2(entryCents(e))}</b>&cent;`) +
+        (isTyped(lastDeg) ? '' : ' <span style="opacity:.7">(auto)</span>');
+    } else sel.innerHTML = '';
+    /* The list IS the keyboard, one line per degree: what shows here is
+     * exactly what pitchOf reads, so nothing said above it can be stale. It
+     * is only rewritten while the box does not have focus — mid-edit, the
+     * keys already follow the input handler below, and overwriting the value
+     * out from under a keystroke would fight the cursor. */
+    const st2 = $('t-scale');
+    if (document.activeElement !== st2) {
+      st2.value = Array.from({ length: N }, (_, d) => entryText(entryOf(d, N))).join('\n');
+    }
+    $('t-scale-read').innerHTML = scaleListErrors
+      ? `<span style="color:var(--warn)">line${scaleListErrors.length === 1 ? '' : 's'} ` +
+        `${scaleListErrors.map((d) => d + 1).join(', ')}: not an interval &mdash; ` +
+        `left as ${scaleListErrors.length === 1 ? 'it was' : 'they were'}</span>`
+      : '';
+  }
+
+  /* ---- rotation, and what one press of Transpose is worth ---- */
+  $('t-rot-v').textContent = T.rot;
+  const st = $('m-tr-step');
+  if (document.activeElement !== st) st.value = shiftAuto() ? '' : String(K);
+  st.placeholder = String(N);
+  $('m-tr-step-read').innerHTML = `${num2(sc)}&cent;`;
 }
 
 function bind() {
   for (const [id, key, cast] of [
     ['t-nominal', 'nominal', Number], ['t-acc', 'acc', Number],
-    ['t-oct', 'oct', Number], ['t-system', 'system', String],
-    ['t-sag-precision', 'sagPrecision', String],
+    ['t-oct', 'oct', Number], ['t-sag-precision', 'sagPrecision', String],
   ]) {
     const el = $(id);
     el.value = String(T[key]);
@@ -378,27 +886,68 @@ function bind() {
     if (isFinite(v) && v > 0) { T.hz = v; refresh(); }
   };
 
+  /* The fill list IS the keyboard: each line is one degree, in order, so
+   * editing a line writes straight onto the key it names — there is no
+   * separate "write onto the keys" step any more, and none of the ratio-list
+   * folding the old JI system did, because the list is not an arbitrary
+   * scale to fold, it is the degrees themselves. */
   const scale = $('t-scale');
-  scale.value = T.scale;
-  scale.oninput = () => { T.scale = scale.value; refresh(); };
+  scale.oninput = () => {
+    const N = equaveNotes();
+    const lines = scale.value.split('\n');
+    const errors = [];
+    for (let d = 0; d < N; d++) {
+      const line = lines[d] === undefined ? '' : lines[d];
+      if (!line.trim()) { delete T.custom[d]; continue; }
+      const p = parseInterval(line, N);
+      if (p) T.custom[d] = p;
+      else errors.push(d);          // unreadable is left alone rather than lost
+    }
+    scaleListErrors = errors.length ? errors : null;
+    refresh();
+  };
 
+  /* Blank follows Design's Notes in Scale — which is what "equave" means
+   * here, and what it goes back to when you rub the number out. */
+  const st = $('m-tr-step');
+  st.value = shiftAuto() ? '' : String(shiftKeys());
+  st.oninput = () => {
+    const v = parseInt(st.value, 10);
+    T.trStep = (Number.isFinite(v) && v >= 1 && v <= 128) ? v : null;
+    /* The distance one press covers has changed, so a shift taken at the old
+     * size may now be past the end of what can be heard. */
+    T.equaveShift = Math.max(-shiftLimit(), Math.min(shiftLimit(), T.equaveShift));
+    refresh();
+  };
+
+  /* Leaving Custom puts the editor away: the strip in Auto has nothing to
+   * type on, and an armed keyboard that will not take a keystroke would be
+   * worse than no arming at all. */
+  seg('t-system-seg', 'system', () => { if (T.system !== 'custom') setArmed(false); });
   seg('t-edo-seg', 'edoRead');
   seg('t-edo-halves', 'edoHalves');
   seg('t-ji-seg', 'jiRead');
   seg('t-sag-flavour', 'sagFlavour');
 
-  const rot = (id, key, span) => {
-    $(id).onclick = () => { T[key] += span; refresh(); };
+  $('t-cus-edit').onclick = () => setArmed(!armed);
+  $('t-cus-reset').onclick = () => {
+    closeEditor(false);
+    T.custom = {}; lastDeg = null; scaleListErrors = null; refresh();
   };
-  rot('t-edo-rot-up', 'edoRot', +1);
-  rot('t-edo-rot-dn', 'edoRot', -1);
-  rot('t-ji-rot-up', 'jiRot', +1);
-  rot('t-ji-rot-dn', 'jiRot', -1);
+
+  const rot = (id, span) => { $(id).onclick = () => { T.rot += span; refresh(); }; };
+  rot('t-rot-dn', -1);
+  rot('t-rot-up', +1);
 }
 
 window.XTuning = {
-  label, refresh, setEquaveShift, SHIFT_LIMIT,
+  label, refresh, setEquaveShift, shiftLimit,
+  /** Play asks this before it sounds anything, and the mode switch calls the
+   *  setter on its way out of Play. */
+  editing: () => armed,
+  disarmEdit: () => setArmed(false),
   settings: T, freqs: {}, notesEq: 32, scaleNotes: 32,
+  shiftCents: 1200, shiftKeys: 32,
 };
 bind();
 /* The module is deferred, so the layout is already standing by the time it
