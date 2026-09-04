@@ -576,6 +576,26 @@ gets it.
   one solid rather than merely touching.
 * Beveling, the ad-hoc widths and the sensor-press solve are all in the mesh
   the button writes; the STL is the keyboard exactly as the preview draws it.
+* **Two rows for the print bed** (on by default). A keyboard is the wrong shape
+  for a printer: laid out as it is played the instrument is 373 × 95 mm, which
+  no common bed will take. But the AKM320 is *already* two halves — spine half
+  A with its 16 sensor feet, half B with the other 16, and a drafted 1.29 mm of
+  air between them that nothing bridges — so the export folds it at that seam.
+  Everything standing on half B (its keys, their presses, its spine bands)
+  moves as one by exactly the drafted distance between the two spine halves in
+  x, and back in y by the depth of the build plus a 6 mm gap. The result is
+  about **197 × 196 mm**, which drops onto a 220 mm square with room around it.
+
+  Nothing is cut and nothing is re-oriented: every piece stands on the bed in
+  the attitude it stood in before, so a support plan or a first layer that
+  worked in one row works in the other. A key takes the half its *foot* is on
+  (`ref.half`), which is the physical answer rather than an x comparison that
+  would have to decide about a key overhanging the seam. The same pitch is used
+  for all three colour files, so reassembly is one reverse move for the set.
+  The footprint is quoted under the buttons; turn the box off for the assembled
+  layout, on a long bed or for checking the whole keyboard in a slicer. It is a
+  per-browser preference, not part of the design — not in a preset, a share
+  link or the undo stack.
 * A colour the design does not use is not an empty file — the button greys out
   and the zip leaves it out.
 * **Save STL files for all colours (.zip)** — the colours this keyboard uses

@@ -1051,8 +1051,45 @@
   }
   const armKey = (type, cx) => type + '@' + Math.round(cx * 1e4);
 
+  /* ------------------------------------------------------------------ *
+   *  WHICH HALF OF THE INSTRUMENT A PIECE BELONGS TO                    *
+   *                                                                     *
+   *  The AKM320 is already two halves: spine half A with its 16 sensor  *
+   *  feet, spine half B with its other 16, and a drafted 1.29 mm of air *
+   *  between them that nothing bridges.  So the keyboard has a seam of  *
+   *  its own, and every piece of it — a key, the press under that key,  *
+   *  a spine band — falls on one side of that seam or the other.  A key *
+   *  takes the half its FOOT is on (`ref.half`, set in computeLayout),  *
+   *  which is the physical answer rather than an x comparison that      *
+   *  would have to decide what to do with a key overhanging the seam.   *
+   *                                                                     *
+   *  Recorded as index SPANS into the flat per-colour arrays rather     *
+   *  than as a second copy of the geometry: the preview wants those     *
+   *  arrays whole and a keyboard is a hundred thousand floats.          *
+   * ------------------------------------------------------------------ */
+  function spanner(out) {
+    const spans = { keys: {}, press: {}, spine: {} };
+    out.spans = spans;
+    /** run `body`, then record which half everything it appended is on */
+    return function mark(src, part, half, body) {
+      const arr = out[part] || (out[part] = []);
+      const i0 = arr.length;
+      body(arr);
+      if (arr.length > i0)
+        (spans[src][part] = spans[src][part] || [])
+          .push({ half: half === 'B' ? 'B' : 'A', i0, i1: arr.length });
+    };
+  }
+
+  /* HOW FAR APART THE TWO ROWS STAND, once the keyboard is laid out for a
+   * bed rather than for a player.  Measured off the build — a keyboard's
+   * depth is its deepest key, which the design decides — plus a gap wide
+   * enough for a brim and for the two rows to be told apart by eye. */
+  const ROW_GAP = 6;                       // mm of clear bed between rows
+
   function buildMeshes(L) {
     const out = { white: [], black: [], gray: [] };
+    const mark = spanner(out);
     /* Keys are drawn whole.  Nothing is cut into their undersides any more:
      * the pair face is a floating loop lying in the deck plane, not a weld,
      * so the key's own triangulation is left exactly as drafted — save for
@@ -1061,12 +1098,14 @@
     const bkeys = pairKeys(L);
     const arms = armTargets(bkeys);
     for (const w of L.whites)
-      out.white.push(...XM.buildKey(w.cx, w.w, w.type, w.ctxL, w.ctxR, null,
-                                    arms.get(armKey(w.type, w.cx))));
+      mark('keys', 'white', w.half, arr =>
+        arr.push(...XM.buildKey(w.cx, w.w, w.type, w.ctxL, w.ctxR, null,
+                                arms.get(armKey(w.type, w.cx)))));
     for (const sl of L.slots) {
       for (const m of sl.members)
-        out[m.spec.layer].push(...XM.buildKey(m.cx, m.w, m.type, null, null, null,
-                                              arms.get(armKey(m.type, m.cx))));
+        mark('keys', m.spec.layer, m.half, arr =>
+          arr.push(...XM.buildKey(m.cx, m.w, m.type, null, null, null,
+                                  arms.get(armKey(m.type, m.cx)))));
     }
     /* The spine is the drafted one for this design's colour count — the
      * "<kind> type Spine - A / - B" pair.  Keep it whole for the STL, and
@@ -1085,7 +1124,11 @@
       out.spine.push(...p.tris);
       (out.spineLayers[p.layer] = out.spineLayers[p.layer] || []).push(...p.tris);
       const part = XM.spineLayerPart(L.spineKind, p.layer);
-      (out.spineByPart[part] = out.spineByPart[part] || []).push(...p.tris);
+      const arr = out.spineByPart[part] = out.spineByPart[part] || [];
+      const i0 = arr.length;
+      arr.push(...p.tris);
+      (out.spans.spine[part] = out.spans.spine[part] || [])
+        .push({ half: p.half, i0, i1: arr.length });
     }
     /* A foot is its pad face plus the pairing face of the key it belongs
      * to — the two loops the press is built between. */
@@ -1100,9 +1143,53 @@
     out.pressLayers = { white: [], black: [], gray: [] };
     for (const p of XM.pressParts(bkeys)) {
       out.press.push(...p.tris);
-      (out.pressLayers[p.layer] = out.pressLayers[p.layer] || []).push(...p.tris);
+      const arr = out.pressLayers[p.layer] = out.pressLayers[p.layer] || [];
+      const i0 = arr.length;
+      arr.push(...p.tris);
+      /* a press stands on ONE sensor pad, so it is on the half that pad is
+       * on — the note index is the foot number, and the feet are 16 and 16 */
+      (out.spans.press[p.layer] = out.spans.press[p.layer] || [])
+        .push({ half: p.index < XM.FEET_PER_HALF ? 'A' : 'B', i0, i1: arr.length });
     }
+
+    /* HOW DEEP THE WHOLE BUILD IS, for the two-row bed layout.  Read off
+     * what was actually built rather than off the class depths: the
+     * deepest thing in the design decides it, and a design of nothing but
+     * whites is shallower than one carrying full-sized grays. */
+    let y0 = Infinity, y1 = -Infinity;
+    for (const part of ['white', 'black', 'gray'])
+      for (const src of [out[part], out.pressLayers[part], out.spineByPart[part]])
+        for (let i = 1; src && i < src.length; i += 3) {
+          if (src[i] < y0) y0 = src[i];
+          if (src[i] > y1) y1 = src[i];
+        }
+    out.rowPitch = isFinite(y0) ? (y1 - y0) + ROW_GAP : 0;
     return out;
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  TWO ROWS, BECAUSE A PRINT BED IS NOT A KEYBOARD                    *
+   *                                                                     *
+   *  Laid out as it is played, a 32-key keyboard is some 373 mm across  *
+   *  and 95 mm deep — a shape almost no bed has, and one that will not  *
+   *  fit the common 220 or 256 mm square at all.  Folded at the seam    *
+   *  the instrument already has, it is 184 x 196: two rows, each half   *
+   *  the length, and it drops onto a small square bed with room around  *
+   *  it.                                                                *
+   *                                                                     *
+   *  NOTHING IS CUT AND NOTHING IS RE-ORIENTED.  Half B is MOVED, whole *
+   *  — every key, press and spine band that stands on it — by exactly   *
+   *  the drafted distance between the two spine halves in x, so the two *
+   *  rows keep the same datum and read as the two halves they are, and  *
+   *  back in y by the depth of the build plus a gap.  Each piece stands *
+   *  on the bed in the same attitude it stood in before, so a support   *
+   *  plan, a first layer or a seam that worked in one row works in the  *
+   *  other.  Reassembly is the reverse move, and it is the same move    *
+   *  for all three colour files.                                        *
+   * ------------------------------------------------------------------ */
+  function rowOffset(meshes) {
+    return { dx: -(XM.SPINE.halfB.x0 - XM.SPINE.halfA.x0),
+             dy: (meshes && meshes.rowPitch) || 0 };
   }
 
   /**
@@ -1117,17 +1204,56 @@
    * band belongs to exactly one of them (spineLayerPart) — so nothing is
    * printed twice and nothing is left out.
    */
-  function printMesh(meshes, part) {
-    const out = (meshes[part] || []).slice();
-    for (const src of [(meshes.pressLayers || {})[part],
-                       (meshes.spineByPart || {})[part]])
-      if (src && src.length) out.push(...src);
+  function printMesh(meshes, part, opts) {
+    const rows = !!(opts && opts.rows);
+    const spans = meshes.spans || { keys: {}, press: {}, spine: {} };
+    const srcs = [['keys', meshes[part]],
+                  ['press', (meshes.pressLayers || {})[part]],
+                  ['spine', (meshes.spineByPart || {})[part]]];
+    const out = [];
+    /* copied a float at a time rather than with push(...src): a colour is
+     * a hundred thousand of them and that many arguments is past what a
+     * call frame will take */
+    const copy = (src, i0, i1, dx, dy) => {
+      for (let i = i0; i < i1; i += 3) {
+        out.push(src[i] + dx, src[i + 1] + dy, src[i + 2]);
+      }
+    };
+    for (const [name, src] of srcs) {
+      if (!src || !src.length) continue;
+      if (!rows) { copy(src, 0, src.length, 0, 0); continue; }
+      const sp = spans[name] && spans[name][part];
+      const off = rowOffset(meshes);
+      /* a build from before the spans existed has nothing to fold along,
+       * so it is written flat rather than guessed at */
+      if (!sp || !sp.length) { copy(src, 0, src.length, 0, 0); continue; }
+      for (const s of sp)
+        copy(src, s.i0, s.i1, s.half === 'B' ? off.dx : 0,
+                              s.half === 'B' ? off.dy : 0);
+    }
     return out;
   }
 
   /** the colours this build actually has something to print in */
   function printParts(meshes) {
-    return ['white', 'black', 'gray'].filter(p => printMesh(meshes, p).length);
+    return ['white', 'black', 'gray'].filter(p =>
+      (meshes[p] || []).length ||
+      ((meshes.pressLayers || {})[p] || []).length ||
+      ((meshes.spineByPart || {})[p] || []).length);
+  }
+
+  /** the footprint an exported part lands in, so the UI can say it */
+  function printBounds(meshes, part, opts) {
+    const t = printMesh(meshes, part, opts);
+    if (!t.length) return null;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let i = 0; i < t.length; i += 3) {
+      if (t[i] < x0) x0 = t[i];
+      if (t[i] > x1) x1 = t[i];
+      if (t[i + 1] < y0) y0 = t[i + 1];
+      if (t[i + 1] > y1) y1 = t[i + 1];
+    }
+    return { x0, x1, y0, y1, w: x1 - x0, d: y1 - y0 };
   }
 
   /* ------------------------------------------------------------------ *
@@ -2357,7 +2483,8 @@ if __name__ == "__main__":
 
   const api = {
     presetDesign, clearedDesign, scaleOf, slotAt, designColours,
-    computeLayout, pairKeys, printMesh, printParts, buildMeshes, toSTL, makeZip,
+    computeLayout, pairKeys, printMesh, printParts, printBounds, rowOffset,
+    buildMeshes, toSTL, makeZip,
     pythonLog, summary, notesPerPeriod, layerCount, templateColours,
     whiteCount, widthAt, suggestScale,
     bounds, worldOffset, ORIGIN_MODES, bevelOf
