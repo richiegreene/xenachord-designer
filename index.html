@@ -908,15 +908,23 @@
                 title="Every gray part fused into one solid: the gray keys, their sensor presses, and the spine band they plug into.">gray.stl</button>
             </div>
             <!-- ---- laid out for a bed, not for a player ----
-                 The instrument is 373 mm across as it is played, which is a
-                 shape almost no printer has. It is already two halves with
-                 16 sensor feet each, so it folds at its own seam into two
-                 rows about 197 mm square — and every piece keeps the
-                 attitude it stood in, so nothing about the print changes
-                 but where it sits. -->
-            <label class="vis" id="rowslab" style="margin-top:9px"
-              title="Moves everything standing on spine half B — its keys, their presses and its spine bands — behind half A, as one, by the drafted distance between the two halves. A 373 × 95 mm keyboard becomes about 197 × 196 mm, which fits a 220 mm bed. Off, the STL is laid out as the keyboard is played.">
-              <input type="checkbox" id="stl-rows" checked>two rows for the print bed</label>
+                 Two things, and they are one answer to one question — what
+                 does this have to be for a printer to make it well?
+
+                 FOLDED, because the instrument is 373 mm across as it is
+                 played and that is a shape almost no bed has. It is already
+                 two halves with 16 sensor feet each, so it folds at its own
+                 seam into two rows about 197 mm square.
+
+                 AND TURNED OVER, because the face that matters is the one
+                 you play on: printed upright it is the last thing laid down
+                 and carries every seam; face down it is ironed flat against
+                 the glass. A white's top is flat and turns a clean 180°; a
+                 black or gray top is raked about 2°, so it turns that much
+                 less and lands on the rake instead of rocking on an edge. -->
+            <label class="vis" id="bedlab" style="margin-top:9px"
+              title="Turns each colour over onto its own playing surface — 180° for the flat white tops, about 178° for the raked black and gray ones, so the face you play on is the face on the glass — and folds spine half B behind half A so a 373 × 95 mm keyboard becomes about 197 × 196 mm and fits a 220 mm bed. Off, the STL comes out exactly as the app draws it: upright, one long row.">
+              <input type="checkbox" id="stl-bed" checked>lay out for the print bed</label>
             <p class="hint" id="partsinfo"></p>
           </fieldset>
 
@@ -3367,28 +3375,38 @@ function logOpts(u){
  */
 const PRINT_PARTS = ['white', 'black', 'gray'];
 
-/* ---- WHICH WAY THE PARTS ARE LAID OUT IN THE FILE ----
- * A KEYBOARD IS THE WRONG SHAPE FOR A PRINTER.  Laid out as it is played
- * the instrument is 373 x 95 mm, which no common bed will take; folded at
- * the seam it already has — spine half A with its 16 feet, half B with the
- * other 16 — it is two rows of about 197 x 196 mm and drops onto a 220 mm
- * square with room around it.  So this is ON by default: it is what the
- * file is nearly always FOR.  Turned off, the STL comes out laid out as
- * the app draws it, for anyone whose bed is long enough or who wants the
- * assembled keyboard in one piece.
+/* ---- HOW THE PARTS SIT IN THE FILE ----
+ * A KEYBOARD IS THE WRONG SHAPE AND THE WRONG WAY UP FOR A PRINTER, and
+ * this is the one switch for both.
+ *
+ * WRONG SHAPE: laid out as it is played the instrument is 373 x 95 mm,
+ * which no common bed will take; folded at the seam it already has — spine
+ * half A with its 16 feet, half B with the other 16 — it is two rows of
+ * about 197 x 196 mm and drops onto a 220 mm square with room around it.
+ *
+ * WRONG WAY UP: the surface that has to come out well is the one you play
+ * on, and printed upright it is the last thing laid down — stepped over
+ * the curve of the sides and carrying every seam.  Turned over it is the
+ * first, ironed flat on the glass.  Each colour turns onto its OWN playing
+ * surface: a half turn for the flat white tops, a half turn less about two
+ * degrees for the raked black and gray ones (see XD.bedAngle).
+ *
+ * ON by default, because that is what the file is nearly always FOR.
+ * Turned off it comes out exactly as the app draws it — upright, one long
+ * row — for a long bed, or for looking at the whole keyboard at once.
  *
  * A VIEW PREFERENCE, NOT PART OF THE DESIGN.  It changes where the pieces
  * sit in the file and nothing about what they are, so it is remembered per
  * browser like the collapsed strip is, and it is not in a preset, a share
  * link or the undo stack. */
-const ROWS_LS = 'xenachord-stl-rows';
-const rowsOn = () => { const b = $('stl-rows'); return !b || b.checked; };
+const BED_LS = 'xenachord-stl-bed';
+const bedOn = () => { const b = $('stl-bed'); return !b || b.checked; };
 (function(){
-  const b = $('stl-rows');
+  const b = $('stl-bed');
   if (!b) return;
-  try { b.checked = localStorage.getItem(ROWS_LS) !== '0'; } catch(e){}
+  try { b.checked = localStorage.getItem(BED_LS) !== '0'; } catch(e){}
   b.onchange = ()=>{
-    try { localStorage.setItem(ROWS_LS, b.checked ? '1' : '0'); } catch(e){}
+    try { localStorage.setItem(BED_LS, b.checked ? '1' : '0'); } catch(e){}
     showParts();
   };
 })();
@@ -3411,25 +3429,31 @@ function showParts(){
   /* WHAT IT WILL ASK OF THE BED, said in millimetres rather than left to be
    * found out in the slicer.  The widest of the three colours is the one
    * that decides whether the set fits, so that is the one quoted. */
-  const rows = rowsOn();
+  const bed = bedOn();
   let w = 0, d = 0;
+  const turns = [];
   for (const p of have){
-    const b = XD.printBounds(meshes, p, { rows });
+    const b = XD.printBounds(meshes, p, { bed });
     if (b){ w = Math.max(w, b.w); d = Math.max(d, b.d); }
+    /* how far this colour turns to lie on its own playing surface — 180°
+     * for a white, a couple of degrees less for a raked accidental */
+    if (bed) turns.push(`${p} ${(XD.bedAngle(meshes, p) * 180 / Math.PI).toFixed(1)}°`);
   }
   info.innerHTML =
     `${have.size} color${have.size===1?'':'s'} — ` +
     [...have].map(p=>`<b>${p}</b>`).join(' · ') +
     `. Each file is that color's keys, presses and spine band as one solid, ` +
-    (rows ? `folded into <b>two rows</b> at the spine's own seam`
-          : `laid out as it is played`) +
-    ` — <b>${w.toFixed(0)} × ${d.toFixed(0)} mm</b> on the bed.`;
+    (bed ? `turned playing-face down and folded into <b>two rows</b> at the ` +
+           `spine's own seam` : `laid out as it is played`) +
+    ` — <b>${w.toFixed(0)} × ${d.toFixed(0)} mm</b> on the bed.` +
+    (bed ? `<br>Turned ${turns.join(' · ')} — each color onto its own top, ` +
+           `so the raked accidentals lie flat rather than rock on an edge.` : '');
 }
 
 document.querySelectorAll('button[data-part]').forEach(b=>{
   b.onclick = ()=>{ if(!meshes) return;
     const p=b.dataset.part;
-    const tris = XD.printMesh(meshes, p, { rows: rowsOn() });
+    const tris = XD.printMesh(meshes, p, { bed: bedOn() });
     if(!tris.length) return toast(`this keyboard has no ${p} parts`);
     download(`${baseName()}-${p}.stl`, XD.toSTL(tris, p)); };
 });
@@ -3457,7 +3481,7 @@ $('dl-zip').onclick = ()=>{
     /* one file per colour the keyboard uses — a colour it does not use is
      * not an empty STL in the folder, it is simply not there */
     for(const part of PRINT_PARTS){
-      const tris = XD.printMesh(u.build.meshes, part, { rows: rowsOn() });
+      const tris = XD.printMesh(u.build.meshes, part, { bed: bedOn() });
       if(!tris.length) continue;
       files.push({ name:`${dir}${nm}-${part}.stl`, data: XD.toSTL(tris, part) });
     }

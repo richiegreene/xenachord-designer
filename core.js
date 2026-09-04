@@ -1168,6 +1168,89 @@
   }
 
   /* ------------------------------------------------------------------ *
+   *  WHICH FACE THE PART LIES ON                                        *
+   *                                                                     *
+   *  The one you want to come out well: the playing surface.  Printed   *
+   *  the way the app draws it, a key's top is the LAST thing the        *
+   *  printer lays down — stepped over the curve of the sides, supported *
+   *  by nothing, and carrying every seam.  Turned over it is the FIRST  *
+   *  thing, ironed flat against the glass, and the parts that come out  *
+   *  rough are the tongue and the underside, which nobody touches.      *
+   *                                                                     *
+   *  A WHITE IS A HALF TURN.  Its playing surface is one flat plane at  *
+   *  z = 8.628, so 180 degrees about x puts it on the bed exactly.      *
+   *                                                                     *
+   *  AN ACCIDENTAL IS NOT.  Black and gray tops are RAKED — they rise   *
+   *  about two degrees from the spine to the peak before the nose ramps *
+   *  away — so a half turn leaves them resting on one edge, rocking,    *
+   *  and printing the surface that matters as a 2 degree overhang off a *
+   *  line of contact.  The turn is therefore a half turn LESS THE RAKE, *
+   *  and it is that raked plane that lands flat on the glass.           *
+   *                                                                     *
+   *  THE RAKE IS MEASURED, NOT DECLARED.  It comes off the profiles     *
+   *  that were actually built — the largest upward-facing plane among   *
+   *  the topmost surfaces of that colour's KEYS, which is the surface   *
+   *  that will touch the bed once it is turned over.  So it is right    *
+   *  for whatever the design placed, it is unmoved by the bevel (which  *
+   *  trims the top's edges without tilting it), and a colour holding    *
+   *  two types whose rakes differ by a tenth of a degree is laid on the *
+   *  area-weighted mean of the two rather than on either.               *
+   *                                                                     *
+   *  THE SPINE BAND GOES WITH IT.  The band is fused to its keys and    *
+   *  prints as one solid with them, so it takes the same turn and ends  *
+   *  up two degrees off level.  That is the right way round: the        *
+   *  playing surface is the one that has to be flat, and the band's own *
+   *  faces are glued, not touched.                                      *
+   * ------------------------------------------------------------------ */
+  function bedTilt(tris) {
+    const f = [];
+    for (let i = 0; i < tris.length; i += 9) {
+      const ux = tris[i+3] - tris[i], uy = tris[i+4] - tris[i+1], uz = tris[i+5] - tris[i+2];
+      const vx = tris[i+6] - tris[i], vy = tris[i+7] - tris[i+1], vz = tris[i+8] - tris[i+2];
+      const nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+      const L = Math.hypot(nx, ny, nz);
+      if (!L || nz / L < 0.9) continue;          // not an upward face
+      f.push({ a: L / 2, ny: ny / L, nz: nz / L,
+               z: (tris[i+2] + tris[i+5] + tris[i+8]) / 3 });
+    }
+    if (!f.length) return 0;
+    /* WHAT WILL TOUCH THE BED IS WHAT IS HIGHEST NOW.  A split gray's rear
+     * arm is upward-facing and very nearly parallel to its playing top, and
+     * it is ten millimetres below it — turned over it is ten millimetres in
+     * the air, so it has no business deciding how the part lies. */
+    let zTop = -Infinity;
+    for (const q of f) if (q.z > zTop) zTop = q.z;
+    /* grouped by rake rather than averaged: a bevel puts a fan of shallow
+     * strips around the top's edges, and their areas would drag a plain
+     * mean off the plane they are a rounding of */
+    const g = new Map();
+    for (const q of f) {
+      if (q.z < zTop - TOP_BAND) continue;
+      const k = q.ny.toFixed(3), e = g.get(k) || { a: 0, ny: 0, nz: 0 };
+      e.a += q.a; e.ny += q.ny * q.a; e.nz += q.nz * q.a;
+      g.set(k, e);
+    }
+    if (!g.size) return 0;
+    const groups = [...g.values()].sort((a, b) => b.a - a.a);
+    const lead = Math.atan2(-groups[0].ny, groups[0].nz);
+    let ay = 0, az = 0;
+    for (const e of groups) {
+      /* one colour, two key types, two rakes a tenth of a degree apart:
+       * both are playing surfaces and the part is laid between them */
+      if (Math.abs(Math.atan2(-e.ny, e.nz) - lead) > TOP_SPREAD) continue;
+      ay += e.ny; az += e.nz;
+    }
+    return Math.atan2(-ay, az);
+  }
+  const TOP_BAND = 2.0;                    // mm below the highest face
+  const TOP_SPREAD = 0.5 * Math.PI / 180;  // rakes this close are one surface
+
+  /** how far a colour turns to lie on its playing surface, in radians */
+  function bedAngle(meshes, part) {
+    return Math.PI - bedTilt(meshes[part] || []);
+  }
+
+  /* ------------------------------------------------------------------ *
    *  TWO ROWS, BECAUSE A PRINT BED IS NOT A KEYBOARD                    *
    *                                                                     *
    *  Laid out as it is played, a 32-key keyboard is some 373 mm across  *
@@ -1177,20 +1260,20 @@
    *  the length, and it drops onto a small square bed with room around  *
    *  it.                                                                *
    *                                                                     *
-   *  NOTHING IS CUT AND NOTHING IS RE-ORIENTED.  Half B is MOVED, whole *
-   *  — every key, press and spine band that stands on it — by exactly   *
-   *  the drafted distance between the two spine halves in x, so the two *
-   *  rows keep the same datum and read as the two halves they are, and  *
-   *  back in y by the depth of the build plus a gap.  Each piece stands *
-   *  on the bed in the same attitude it stood in before, so a support   *
-   *  plan, a first layer or a seam that worked in one row works in the  *
-   *  other.  Reassembly is the reverse move, and it is the same move    *
-   *  for all three colour files.                                        *
+   *  NOTHING IS CUT.  Half B is MOVED, whole — every key, press and     *
+   *  spine band that stands on it — by exactly the drafted distance     *
+   *  between the two spine halves in x, so the two rows keep the same   *
+   *  datum and read as the two halves they are, and back in y until it  *
+   *  clears half A by ROW_GAP.  Both rows take the same turn onto their *
+   *  playing surface, so both lie on the glass and neither is propped   *
+   *  up by the other.                                                   *
+   *                                                                     *
+   *  THE FOLD IS DONE AFTER THE TURN, in the bed's own frame.  Folded   *
+   *  first, the row offset would be turned with everything else and     *
+   *  half B would come out three and a half millimetres off the bed —   *
+   *  a keyboard-shaped step nothing would print on.                     *
    * ------------------------------------------------------------------ */
-  function rowOffset(meshes) {
-    return { dx: -(XM.SPINE.halfB.x0 - XM.SPINE.halfA.x0),
-             dy: (meshes && meshes.rowPitch) || 0 };
-  }
+  const rowShiftX = () => -(XM.SPINE.halfB.x0 - XM.SPINE.halfA.x0);
 
   /**
    * ONE COLOUR'S MESH AS IT PRINTS.  Not "the keys" — everything that
@@ -1205,7 +1288,7 @@
    * printed twice and nothing is left out.
    */
   function printMesh(meshes, part, opts) {
-    const rows = !!(opts && opts.rows);
+    const bed = !!(opts && (opts.bed || opts.rows));
     const spans = meshes.spans || { keys: {}, press: {}, spine: {} };
     const srcs = [['keys', meshes[part]],
                   ['press', (meshes.pressLayers || {})[part]],
@@ -1214,22 +1297,56 @@
     /* copied a float at a time rather than with push(...src): a colour is
      * a hundred thousand of them and that many arguments is past what a
      * call frame will take */
-    const copy = (src, i0, i1, dx, dy) => {
-      for (let i = i0; i < i1; i += 3) {
-        out.push(src[i] + dx, src[i + 1] + dy, src[i + 2]);
-      }
+    const copy = (src, i0, i1, fn) => {
+      for (let i = i0; i < i1; i += 3) fn(src[i], src[i + 1], src[i + 2]);
     };
+    const flat = () => {
+      for (const [, src] of srcs)
+        if (src && src.length)
+          copy(src, 0, src.length, (x, y, z) => out.push(x, y, z));
+    };
+    if (!bed) { flat(); return out; }
+
+    /* THE PIECES OF THIS COLOUR, EACH WITH THE HALF IT STANDS ON.  A build
+     * from before the spans existed has nothing to fold along, so it is
+     * written out as it is rather than guessed at. */
+    const runs = [];
     for (const [name, src] of srcs) {
       if (!src || !src.length) continue;
-      if (!rows) { copy(src, 0, src.length, 0, 0); continue; }
       const sp = spans[name] && spans[name][part];
-      const off = rowOffset(meshes);
-      /* a build from before the spans existed has nothing to fold along,
-       * so it is written flat rather than guessed at */
-      if (!sp || !sp.length) { copy(src, 0, src.length, 0, 0); continue; }
-      for (const s of sp)
-        copy(src, s.i0, s.i1, s.half === 'B' ? off.dx : 0,
-                              s.half === 'B' ? off.dy : 0);
+      if (!sp || !sp.length) { flat(); return out; }
+      for (const s of sp) runs.push({ src, i0: s.i0, i1: s.i1, half: s.half });
+    }
+    if (!runs.length) return out;
+
+    const th = bedAngle(meshes, part), c = Math.cos(th), sn = Math.sin(th);
+    const turnY = (y, z) => y * c - z * sn;
+
+    /* how far back half B has to go, measured on the TURNED rows */
+    let aHi = -Infinity, bLo = Infinity;
+    for (const r of runs)
+      copy(r.src, r.i0, r.i1, (x, y, z) => {
+        const ty = turnY(y, z);
+        if (r.half === 'B') { if (ty < bLo) bLo = ty; }
+        else if (ty > aHi) aHi = ty;
+      });
+    const dx = rowShiftX();
+    const dy = (isFinite(aHi) && isFinite(bLo)) ? aHi + ROW_GAP - bLo : 0;
+
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity;
+    for (const r of runs) {
+      const ox = r.half === 'B' ? dx : 0, oy = r.half === 'B' ? dy : 0;
+      copy(r.src, r.i0, r.i1, (x, y, z) => {
+        const X = x + ox, Y = y * c - z * sn + oy, Z = y * sn + z * c;
+        if (X < x0) x0 = X; if (Y < y0) y0 = Y; if (Z < z0) z0 = Z;
+        out.push(X, Y, Z);
+      });
+    }
+    /* AND SET DOWN ON THE BED.  Turned about x through the origin the part
+     * ends up under it; a slicer would drop it anyway, but a file that says
+     * where it sits can be opened and measured without one. */
+    for (let i = 0; i < out.length; i += 3) {
+      out[i] -= x0; out[i + 1] -= y0; out[i + 2] -= z0;
     }
     return out;
   }
@@ -2483,7 +2600,7 @@ if __name__ == "__main__":
 
   const api = {
     presetDesign, clearedDesign, scaleOf, slotAt, designColours,
-    computeLayout, pairKeys, printMesh, printParts, printBounds, rowOffset,
+    computeLayout, pairKeys, printMesh, printParts, printBounds, bedAngle,
     buildMeshes, toSTL, makeZip,
     pythonLog, summary, notesPerPeriod, layerCount, templateColours,
     whiteCount, widthAt, suggestScale,

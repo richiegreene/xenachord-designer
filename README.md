@@ -576,26 +576,64 @@ gets it.
   one solid rather than merely touching.
 * Beveling, the ad-hoc widths and the sensor-press solve are all in the mesh
   the button writes; the STL is the keyboard exactly as the preview draws it.
-* **Two rows for the print bed** (on by default). A keyboard is the wrong shape
-  for a printer: laid out as it is played the instrument is 373 × 95 mm, which
-  no common bed will take. But the AKM320 is *already* two halves — spine half
-  A with its 16 sensor feet, half B with the other 16, and a drafted 1.29 mm of
-  air between them that nothing bridges — so the export folds it at that seam.
-  Everything standing on half B (its keys, their presses, its spine bands)
-  moves as one by exactly the drafted distance between the two spine halves in
-  x, and back in y by the depth of the build plus a 6 mm gap. The result is
-  about **197 × 196 mm**, which drops onto a 220 mm square with room around it.
+### Lay out for the print bed
 
-  Nothing is cut and nothing is re-oriented: every piece stands on the bed in
-  the attitude it stood in before, so a support plan or a first layer that
-  worked in one row works in the other. A key takes the half its *foot* is on
-  (`ref.half`), which is the physical answer rather than an x comparison that
-  would have to decide about a key overhanging the seam. The same pitch is used
-  for all three colour files, so reassembly is one reverse move for the set.
-  The footprint is quoted under the buttons; turn the box off for the assembled
-  layout, on a long bed or for checking the whole keyboard in a slicer. It is a
-  per-browser preference, not part of the design — not in a preset, a share
-  link or the undo stack.
+On by default, because it is what the file is nearly always for. A keyboard is
+the wrong shape *and* the wrong way up for a printer, and the one box fixes
+both. Turn it off and the STL comes out exactly as the app draws it — upright,
+one long row — for a long bed, or for looking at the whole keyboard at once.
+It is a per-browser preference, not part of the design: not in a preset, a
+share link or the undo stack. The footprint and the turn are quoted under the
+buttons.
+
+**Wrong shape → folded in two.** Laid out as it is played the instrument is
+373 × 95 mm, which no common bed will take. But the AKM320 is *already* two
+halves — spine half A with its 16 sensor feet, half B with the other 16, and a
+drafted 1.29 mm of air between them that nothing bridges — so the export folds
+it at that seam. Everything standing on half B (its keys, their presses, its
+spine bands) moves as one by exactly the drafted distance between the two spine
+halves in x, and back in y until it clears half A by 6 mm. The result is about
+**197 × 196 mm**, which drops onto a 220 mm square with room around it. A key
+takes the half its *foot* is on (`ref.half`), which is the physical answer
+rather than an x comparison that would have to decide about a key overhanging
+the seam.
+
+**Wrong way up → turned onto the playing face.** The surface that has to come
+out well is the one you play on, and printed upright it is the *last* thing
+laid down: stepped over the curve of the sides, supported by nothing, carrying
+every seam. Turned over it is the first thing, ironed flat against the glass,
+and what comes out rough is the tongue and the underside, which nobody touches.
+
+* A **white** turns a clean 180°: its playing surface is one flat plane at
+  z = 8.628, so a half turn puts it on the bed exactly.
+* A **black or gray** does not. Their tops are *raked* — they rise about 2°
+  from the spine to the peak before the nose ramps away — so a plain half turn
+  leaves them resting on one edge, rocking, printing the surface that matters
+  as a 2° overhang off a line of contact. The turn is a half turn *less the
+  rake*, and the raked plane lands flat.
+
+  Measured, not declared: `XD.bedAngle` reads the rake off the profiles that
+  were actually built — the largest upward-facing plane among the topmost
+  surfaces of that colour's keys, which is the surface that will touch the bed
+  once turned. So it is right for whatever the design placed, it is unmoved by
+  the bevel (which trims the top's edges without tilting it), a split gray's
+  rear arm is correctly ignored (parallel, but 10 mm above the playing top and
+  so 10 mm in the air once turned), and a colour holding two types whose rakes
+  differ by a tenth of a degree is laid on the area-weighted mean of the two.
+
+  On a bevel-free 32-key design the difference is the whole point: a plain
+  180° flip gives black and gray **0 mm²** of bed contact within 0.1 mm — they
+  are balanced on an edge — where the measured turn gives 403 mm² and 319 mm².
+  (Deepening the bevel trims the contact patch, because a rounded-over edge is
+  by definition less flat top; at 2 mm on narrow accidentals it is down to
+  about a quarter of that.)
+
+The spine band takes the same turn as its keys, since it is fused to them and
+prints as one solid — so it ends up about 2° off level in the black and gray
+files. That is the right way round: the playing surface is the one that has to
+be flat, and the band's faces are glued, not touched. The fold is applied
+*after* the turn, in the bed's own frame; folded first, the row offset would be
+turned with everything else and half B would come out 3.5 mm off the bed.
 * A colour the design does not use is not an empty file — the button greys out
   and the zip leaves it out.
 * **Save STL files for all colours (.zip)** — the colours this keyboard uses
