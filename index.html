@@ -219,7 +219,7 @@
   .kb-m.b{background:var(--kb)} .kb-m.g{background:var(--kg)}
   .kb-foot{position:absolute;background:#3d5f7d;border-radius:1px;opacity:.9}
   .kb-foot.half-b{box-shadow:-2px 0 0 var(--accent)}
-  .kb-spine{position:absolute;background:var(--spine);border-radius:2px}
+  .kb-spine{display:none}
   .kb-over{outline:2px solid var(--accent)}
   /* ---------- which keyboard of the rig a band is ----------
      Only ever drawn when there is more than one, because a name on the only
@@ -936,6 +936,8 @@
               <button class="wide" id="save-preset"
                 title="Save the current layout, widths, scale and bevel as a named preset in Design's Layout Presets menu">⬇︎ Save to Presets</button>
               <button class="wide" id="dl-py">⬇︎ Save design log (.py)</button>
+              <button class="wide" id="dl-svg"
+                title="Save the layout currently displayed in Play, including its selected tuning and notation">⬇︎ Save design layout (.svg)</button>
             </div>
           </fieldset>
         </div>
@@ -3427,6 +3429,42 @@ $('dl-py').onclick = ()=>{
   download(`${baseName()}-design-log.py`,
            new TextEncoder().encode(XD.pythonLog(L, logOpts())), 'text/x-python');
 };
+const svgEscape = s => String(s).replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+function savePlaySvg(){
+  if(!L) return;
+  const inner = $('stripInner'), box = inner.getBoundingClientRect();
+  const xOf = r => r.left - box.left + inner.scrollLeft;
+  const yOf = r => r.top - box.top + inner.scrollTop;
+  const parts = [];
+  const rects = inner.querySelectorAll('.kb-white,.kb-m,.kb-foot');
+  for(const el of rects){
+    const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+    parts.push(`<rect x="${xOf(r).toFixed(2)}" y="${yOf(r).toFixed(2)}" `+
+      `width="${r.width.toFixed(2)}" height="${r.height.toFixed(2)}" `+
+      `rx="${cs.borderRadius.split(' ')[0]}" fill="${svgEscape(cs.backgroundColor)}" `+
+      `stroke="${svgEscape(cs.borderTopColor)}" stroke-width="${cs.borderTopWidth}"/>`);
+  }
+  for(const el of inner.querySelectorAll('[data-note] .kb-tune')){
+    const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+    parts.push(`<text x="${(xOf(r)+r.width/2).toFixed(2)}" `+
+      `y="${(yOf(r)+r.height).toFixed(2)}" text-anchor="middle" `+
+      `fill="${svgEscape(cs.color)}" font-size="${cs.fontSize}" `+
+      `font-family="${svgEscape(cs.fontFamily)}">${svgEscape(el.textContent)}</text>`);
+  }
+  for(const el of inner.querySelectorAll('.kb-band-tag')){
+    const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+    parts.push(`<text x="${xOf(r).toFixed(2)}" y="${(yOf(r)+r.height-3).toFixed(2)}" `+
+      `fill="${svgEscape(cs.color)}" font-size="${cs.fontSize}" `+
+      `font-family="${svgEscape(cs.fontFamily)}">${svgEscape(el.textContent)}</text>`);
+  }
+  const width = Math.ceil(inner.scrollWidth), height = Math.ceil(inner.scrollHeight);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" `+
+    `viewBox="0 0 ${width} ${height}"><title>${svgEscape(baseName())} Play layout</title>`+
+    parts.join('') + '</svg>';
+  download(`${baseName()}-design-layout.svg`, svg, 'image/svg+xml');
+}
+$('dl-svg').onclick = savePlaySvg;
 $('copy-py').onclick = async ()=>{
   if(!L) return;
   const txt = XD.pythonLog(L, logOpts());
