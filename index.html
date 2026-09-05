@@ -529,7 +529,7 @@
     </fieldset>
 
     <fieldset>
-      <legend>Layout Presets</legend>
+      <legend>Presets</legend>
       <div class="row">
         <div><select id="preset"
           title="All presets, shared via presets-shared.js. A dot marks one saved locally that isn't in that file yet."></select></div>
@@ -945,7 +945,7 @@
               <button class="primary wide" id="copy-py"
                 title="A runnable Blender script that rebuilds the design from the Key Type Categories collection.">⧉ Copy Python Log</button>
               <button class="wide" id="save-preset"
-                title="Save the current layout, widths, scale and bevel as a named preset in Design's Layout Presets menu">⬇︎ Save to Presets</button>
+                title="Save the current layout, widths, scale, bevel, tuning, sound and MIDI mapping as a named preset in Design's Presets menu">⬇︎ Save to Presets</button>
               <button class="wide" id="dl-py">⬇︎ Save design log (.py)</button>
               <button id="dl-svg"
                 title="Save the layout currently displayed in Play, including its selected tuning and notation">⬇︎ Save design (.svg)</button>
@@ -1314,9 +1314,11 @@ function presetsFileText(){
  *
  * This file IS the preset list. It lives beside index.html, so every copy of
  * the app carries it and anybody who opens the app sees the same presets. A
- * preset is one KEYBOARD — key types, widths, scale length, rotation — not a
- * rig: where a device stands and what its keys are called belong to the desk,
- * so a preset loads into any device of any rig without renumbering it.
+ * preset is one KEYBOARD and, where it was saved with one, the session that
+ * goes with it — key types, widths, scale length, rotation, tuning, sound and
+ * MIDI mapping — not a rig: where a device stands and what its keys are
+ * called belong to the desk, so a preset loads into any device of any rig
+ * without renumbering it.
  *
  * Written as a script rather than as .json because the app is meant to run by
  * opening index.html, and a file:// page cannot fetch() data.
@@ -1358,11 +1360,15 @@ $('preset-write').onclick = writePresetsFile;
 presetSel.onchange = () => {
   if (!presetSel.value) return;
   const wasBevel = bevelNow();      // what the edge is broken at right now
+  let play = null;
   if (presetSel.value.startsWith(CUSTOM_PREFIX)){
     const name = presetSel.value.slice(CUSTOM_PREFIX.length);
     const all = allPresets();
     if (!all[name]) return;
-    setDesign(migrate(JSON.parse(JSON.stringify(all[name]))));
+    const saved = JSON.parse(JSON.stringify(all[name]));
+    play = saved.x || null;
+    delete saved.x;
+    setDesign(migrate(saved));
     design.preset = presetSel.value;
   } else {
     /* a drafted sheet is written out as 32 individual keys, so it opens as
@@ -1376,6 +1382,10 @@ presetSel.onchange = () => {
   carryBevel(wasBevel);
   forgetPressBlend();
   syncInputs(); rebuild();
+  /* tuning, synth and MIDI go on after the keyboard, for the same reason
+   * takeShared() applies them last: Auto reads its division off the
+   * layout that is on the desk when it runs */
+  if (play) XShare.applyPlay(play);
 };
 /* ---- deleting one ----
  * Any preset, by anybody, for good.  There is no protected set: a preset the
@@ -1423,6 +1433,13 @@ $('save-preset').onclick = () => {
   const keep = Object.assign(JSON.parse(JSON.stringify(design)),
                              { period: periodNow(), bevel: bevelNow() });
   delete keep.noteBase; delete keep.noteStep;
+  /* A PRESET IS A SESSION, NOT JUST A KEYBOARD.  Loading one that left the
+   * tuning, the synth and the MIDI mapping behind would hand back the same
+   * picture-of-an-instrument problem a bare layout link has — see share.js.
+   * XShare.playNow() is exactly what a share link already carries, so a
+   * preset carries it too, under the same `x` key a payload uses. */
+  const play = XShare.playNow();
+  if (play) keep.x = play;
   const e = loadEdits();
   e.add[name] = keep;
   /* saving over a preset the app carries is a replacement, not a second one

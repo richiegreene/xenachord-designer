@@ -789,6 +789,7 @@ function syncUI() {
    * it can be moved without this fieldset being looked at — and it changes
    * what every number above it is worth. It says so here, where 1/1 is
    * defined, rather than only where it was pressed. */
+  const sc = shiftCents(), K = shiftKeys();
   const tr = $('t-transpose');
   tr.style.display = 'none';
 
