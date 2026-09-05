@@ -386,7 +386,28 @@
 
   const DRAFT = 0.1018;      // side draft above z = Z.whiteTop (5.8 degrees)
   const WALL  = 1.0;         // shell wall thickness
-  const TONGUE_Y = 5.0688;   // every accidental's tongue runs y 0 .. 5.0688
+  const TONGUE_Y = 5.0688;   // the drafted tongue ran y 0 .. 5.0688
+
+  /* ==================================================================== *
+   *  THE KEY REACHES BACK, THE TONGUE GIVES THE LENGTH UP                *
+   *                                                                      *
+   *  The drafted key ends at y = TONGUE_Y and the tongue runs the whole   *
+   *  way from there to the spine face.  The back now carries on           *
+   *  BACK_REACH further toward the spine and the tongue loses exactly     *
+   *  that much, so the spine, the tongue's own z band and everything      *
+   *  forward of the back face are where they were: what changes is where  *
+   *  the key stops and how much flexure is left between it and the band.  *
+   *                                                                      *
+   *  EACH SURFACE CARRIES ON THE WAY IT WAS ALREADY GOING.  A white's     *
+   *  playing top is flat, so it reaches back flat.  An accidental's is a  *
+   *  ramp — 14.128 at the back rising to its peak — so its back edge      *
+   *  follows that ramp down rather than stepping off it, and the same     *
+   *  goes for every other face that meets the back plane.  A face with    *
+   *  nothing running forward from it (the tongue's own root) reaches back *
+   *  flat, because flat is the way it was already going.                  *
+   * ==================================================================== */
+  const BACK_REACH = 3.0;                 // how much further back the key goes
+  const BACK_Y = TONGUE_Y - BACK_REACH;   // 2.0688, where a key now ends
 
   /* Each accidental category is described by
    *   depth       front face y
@@ -1105,6 +1126,73 @@
     return BACK_SRC;
   }
 
+  const REACH_SRC = new WeakMap();
+  /**
+   * The profile with its back carried BACK_REACH further toward the spine.
+   * See THE KEY REACHES BACK.  Runs on any drafted or derived profile and
+   * is cached against it, so a key type is only reworked once.
+   */
+  function backReach(p) {
+    if (!(BACK_REACH > 1e-6)) return p;
+    const hit = REACH_SRC.get(p);
+    if (hit) return hit;
+    const V = [];
+    for (let i = 0; i < p.nv; i++) {
+      const j = i * 4;
+      V.push({ a: p.v[j], b: +p.v[j + 1].toFixed(6),
+               y: +p.v[j + 2].toFixed(4), z: +p.v[j + 3].toFixed(5) });
+    }
+    const F = [];
+    for (let i = 0; i < p.f.length;) { const n = p.f[i]; F.push(p.f.slice(i + 1, i + 1 + n)); i += n + 1; }
+    const onBack = i => Math.abs(V[i].y - TONGUE_Y) < 1e-3;
+
+    /* WHAT EACH BACK CORNER RUNS FORWARD TO.  Only along its OWN wall —
+     * same alpha, same beta — because that is the surface whose angle is
+     * being continued, and only far enough forward (RUN) that the edge is
+     * a lengthwise one rather than a corner of the back itself. */
+    const RUN = 1.0;
+    const fwd = new Map();
+    const put = (i, j) => {
+      if (!onBack(i) || V[j].y < TONGUE_Y + RUN) return;
+      if (Math.abs(V[i].a - V[j].a) > 1e-6 || Math.abs(V[i].b - V[j].b) > 1e-6) return;
+      const q = fwd.get(i);
+      if (q == null || V[j].y < V[q].y) fwd.set(i, j);
+    };
+    for (const f of F)
+      for (let k = 0; k < f.length; k++) {
+        const i = f[k], j = f[(k + 1) % f.length];
+        put(i, j); put(j, i);
+      }
+    /* WHAT MEETS THE SPINE REACHES BACK FLAT.  Below the top of the
+     * tongue's own band — the underside the key stands on and the tongue
+     * root itself — every face is a mating surface against the spine, and
+     * a face that leaves its plane on the way back would foul the band it
+     * lies on.  The band is read off the tongue's y = 0 end, which is the
+     * one place only the tongue reaches.  Above it the key is in free air
+     * and each face carries on the way it was going. */
+    let mate = -Infinity;
+    for (const q of V) if (q.y < 1e-3 && q.z > mate) mate = q.z;
+    for (let i = 0; i < V.length; i++) {
+      if (!onBack(i)) continue;
+      const j = fwd.get(i);
+      let slope = j == null || V[i].z <= mate + 1e-4
+        ? 0 : (V[j].z - V[i].z) / (V[j].y - V[i].y);
+      /* a wall steeper than 45 degrees is not a ramp this back is on, it is
+       * a step the search happened to reach: carry on flat instead */
+      if (!(Math.abs(slope) <= 1)) slope = 0;
+      V[i].y = BACK_Y;
+      V[i].z = +(V[i].z - slope * BACK_REACH).toFixed(5);
+    }
+    const v = [], f = [];
+    for (const q of V) v.push(q.a, q.b, +q.y.toFixed(4), q.z);
+    for (const r of F) { f.push(r.length); for (const i of r) f.push(i); }
+    const out = { w0: p.w0, widths: p.widths, nv: V.length, nf: F.length, v, f,
+                  nose: p.nose, backRamp: p.backRamp, derived: p.derived,
+                  back: true };
+    REACH_SRC.set(p, out);
+    return out;
+  }
+
   /**
    * Split the two right-hand walls at the step planes so the rear can move
    * independently of the front.  Returns the profile as editable arrays
@@ -1568,7 +1656,7 @@
               (mid ? '|' + mid.side + mid.at.outer + '@' + mid.h : '');
     if (!DERIVED_WHITE[k]) {
       if (DERIVED_WHITE_N > 512) { DERIVED_WHITE = {}; DERIVED_WHITE_N = 0; }
-      const src = whiteBackRamp(akm320Nose(KP.P[KP.INDEX['Full Sized White']['n|n']]));
+      const src = backReach(whiteBackRamp(akm320Nose(KP.P[KP.INDEX['Full Sized White']['n|n']])));
       let base;
       if (halfR > 0) {
         const bk = stepR.outer + '|' + stepR.inner;
@@ -2361,7 +2449,7 @@
      * what actually stands beside it.  See whiteProfile above.          */
     if (t === 'Full Sized White')
       return { p: bev(whiteProfile(lb, rb)), mirror, exact: true };
-    if (table[want] != null) return { p: bev(KP.P[table[want]]), mirror, exact: true };
+    if (table[want] != null) return { p: bev(backReach(KP.P[table[want]])), mirror, exact: true };
     /* The sheets draw nine of the sixteen possible neighbour contexts.  For
      * one they never drew, borrow the drafted white whose context is
      * closest — occupancy first, then the nearer slot bias.               */
@@ -2376,7 +2464,7 @@
       if (bl !== null && rb !== null) sc += Math.abs(bl - rb);
       if (sc < bestScore) { bestScore = sc; best = table[k]; }
     }
-    return { p: bev(KP.P[best]), mirror, exact: false };
+    return { p: bev(backReach(KP.P[best])), mirror, exact: false };
   }
 
   /** the profile's vertex positions at width w, left edge at xLeft */
@@ -2736,7 +2824,7 @@
    *                                                                      *
    *  So the tongue is cut off flush at its half's edge.  Every key type   *
    *  draws it as the same thing — an axis-aligned box behind the key's    *
-   *  back face, y 0 .. TONGUE_Y, over the colour's own TONGUE_Z band, and *
+   *  back face, y 0 .. BACK_Y, over the colour's own TONGUE_Z band, and   *
    *  the ONLY thing any key has behind that face — so the cut is exact:   *
    *  the box is rebuilt over the span that is left, and the back face is  *
    *  closed across the span the tongue no longer passes through.          *
@@ -2754,7 +2842,7 @@
     const keep = [];
     for (let i = 0; i < t.length; i += 9) {
       let behind = false;
-      for (let k = 0; k < 3; k++) if (t[i + k * 3 + 1] < TONGUE_Y - EPS) behind = true;
+      for (let k = 0; k < 3; k++) if (t[i + k * 3 + 1] < BACK_Y - EPS) behind = true;
       if (!behind) { for (let j = 0; j < 9; j++) keep.push(t[i + j]); continue; }
       any = true;
       for (let k = 0; k < 3; k++) {
@@ -2767,7 +2855,7 @@
     if (!any || !(x1 - x0 > EPS) || !(z1 - z0 > EPS)) return t;
     const a = Math.max(x0, span.x0), b = Math.min(x1, span.x1);
     if (a - x0 < EPS && x1 - b < EPS) return t;        // nothing overhangs
-    const T = TONGUE_Y;
+    const T = BACK_Y;
     /* the tongue, rebuilt over what is left — an OPEN prism, because the
      * back face it grows out of is still the key's own */
     if (b - a > EPS) {
@@ -4942,6 +5030,7 @@
    * ==================================================================== */
   const api = {
     WORLD, SPINE, FOOT, SIZE, Z, COLORS, DRAFT, WALL, TONGUE_Y,
+    BACK_REACH, BACK_Y, backReach,
     NOTES, UNITS, FEET_PER_HALF,
     RIG, rigConfig, rigCols, rigRows, rigCount, rigPitchX, rigUnits,
     rigNote, rigLabel, rigSlot, rigSlotCol, rigSlotRow, RIG_SLOTS,
