@@ -205,9 +205,11 @@
   .kb-white{position:absolute;background:var(--spine);border:1px solid #55565f;
     border-radius:0 0 3px 3px;color:var(--key-text,#444);font-size:9px;text-align:center}
   .kb-white .nm{position:absolute;bottom:18px;left:2px;right:2px;display:block;
-    white-space:nowrap;text-align:center}
+    white-space:nowrap;text-align:center;
+    transform:scaleY(var(--kb-unstretch,1))}
   .kb-m .nm{position:absolute;left:2px;right:2px;top:50%;display:block;
-    white-space:nowrap;text-align:center;color:#f0f0f2}
+    white-space:nowrap;text-align:center;color:#f0f0f2;
+    transform:scaleY(var(--kb-unstretch,1))}
   .kb-m.g .nm{color:#141419}
   .kb-slot{position:absolute;border-radius:3px;
     outline:1px dashed transparent;outline-offset:-1px}
@@ -230,6 +232,7 @@
   .kb-band-tag{position:absolute;z-index:7;font-size:9.5px;letter-spacing:.04em;
     text-transform:uppercase;color:var(--dim);background:var(--strip-bg);
     padding:1px 5px;border-radius:3px;border:1px solid var(--line);
+    transform:scaleY(var(--kb-unstretch,1));transform-origin:0 0;
     pointer-events:auto;cursor:pointer;white-space:nowrap}
   .kb-band-tag.on{color:var(--accent);border-color:var(--accent);cursor:default}
   .kb-band-veil{position:absolute;z-index:5;border-radius:4px;cursor:pointer;
@@ -305,7 +308,8 @@
    * to be allowed out of its box: it is centred on the key's own centre and
    * left to overhang, rather than clipped or made unreadably small.
    */
-  .kb-tune{position:absolute;left:50%;transform:translateX(-50%);
+  .kb-tune{position:absolute;left:50%;
+    transform:translateX(-50%) scaleY(var(--kb-unstretch,1));
     display:flex;align-items:center;justify-content:center;
     white-space:nowrap;pointer-events:none;line-height:1;text-align:center}
   /* In Play the enumeration is not drawn, so the name takes the foot of the
@@ -450,6 +454,63 @@
   .midi-row{display:flex;align-items:center;justify-content:space-between;
     gap:8px;margin-top:10px}
   .midi-row label{margin:0}
+
+  /* ==================================================================
+     A PHONE IS NOT A SMALL DESKTOP.
+
+     The ordinary way in here is a QR code off somebody's Export panel: a
+     link opens, and what the person holding the phone came for is to PLAY
+     the instrument that was sent to them, not to look at a 3D print
+     preview of it.  So on a small screen the app arrives with the drawers
+     shut and the strip — the actual keyboard — carrying the screen, with
+     the 3D view kept as the smaller companion it is here.
+
+     Everything below is scoped to body.mobile, which is set from
+     matchMedia in the script; the desktop layout above is untouched.
+     ================================================================== */
+
+  /* THE RAIL STAYS, THE DRAWER OVERLAYS.  A 433px drawer on a 390px phone
+     would leave the keyboard nothing, so the panel is not a column that
+     pushes — it is a sheet that covers, and shutting it gives the whole
+     screen straight back.  The rail is what stays behind, because it is
+     the only way back to Design and Export. */
+  #app{position:relative}
+  body.mobile #panel{width:52px;min-width:52px;transition:none}
+  body.mobile .rail{width:51px;padding:7px 0;gap:6px}
+  body.mobile .rail-btn{width:38px;height:38px}
+  body.mobile .rail-icon{width:21px;height:21px}
+  body.mobile #panel.open{position:absolute;inset:0;width:auto;min-width:0;
+    max-width:none;z-index:40;box-shadow:0 0 0 100vmax rgba(0,0,0,.35)}
+  body.mobile .drawer{padding:12px 13px 56px;-webkit-overflow-scrolling:touch}
+
+  /* THE STRIP TAKES THE ROOM, AND THE 3D VIEW TAKES WHAT IS LEFT.  Both
+     are still here — the preview is worth having and a phone can draw it —
+     but the order of the claim is reversed from the desktop, where the
+     viewport leads and the strip is a bar under it. */
+  body.mobile.mode-play #glwrap{flex:1 1 auto;min-height:74px}
+  body.mobile.mode-play #viewbar2{display:none}
+  /* Nothing on the strip is a hint on a touch screen: there is no hover to
+     reveal a grip with, and a tap that lands on one would resize a key
+     instead of sounding it. */
+  body.mobile.mode-play .kb-grip{display:none}
+  /* A held finger must not raise the OS text-selection loupe over the key
+     it is holding. */
+  body.mobile #strip{-webkit-user-select:none;user-select:none;
+    -webkit-touch-callout:none;overscroll-behavior:contain}
+  /* Room for a thumb: the collapse handle is a 14px sliver on a mouse. */
+  body.mobile #stripHandle{height:22px}
+
+  /* ---- turn it sideways ----
+     Portrait fits the whole keyboard across ~390px, which makes the keys
+     narrow; landscape roughly doubles them.  Said once, on the strip
+     itself, and dismissed by being tapped or by turning the phone. */
+  #rotate-hint{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);
+    z-index:30;display:none;align-items:center;gap:7px;
+    background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    color:var(--dim);font-size:11.5px;padding:5px 12px;cursor:pointer;
+    box-shadow:0 3px 14px rgba(0,0,0,.4)}
+  body.mobile.mode-play.hint-rotate #rotate-hint{display:flex}
+  @media (orientation:landscape){ #rotate-hint{display:none!important} }
 </style>
 </head>
 <body>
@@ -1041,6 +1102,7 @@
       </div>
       <div id="camread"></div>
       <div id="inspect"></div>
+      <div id="rotate-hint" title="tap to dismiss">&#8635; turn sideways for a wider keyboard</div>
     </div>
     <div id="strip"><div id="stripInner"></div></div>
     <div id="stripHandle" title="tap to hide the keyboard editor"><span class="grip"></span></div>
@@ -1089,6 +1151,48 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const LS = 'xenachord-designer-v2';
+
+/* ===================== a phone is a different instrument =====================
+ *
+ * WHO ARRIVES HERE ON A PHONE.  Almost always somebody who scanned a QR code
+ * off another person's Export panel: a link carrying a whole keyboard — its
+ * layout, its tuning, its sound — handed over to be PLAYED.  They did not
+ * come to design a 3D print, and the first thing they should see is the
+ * keyboard, ready, with nothing in front of it.
+ *
+ * So `mobile` is not a screen width alone.  A narrow desktop window is still
+ * a desktop: it has a mouse, hover works, the rail's grips are reachable, and
+ * silently turning it into a phone would take the design tools away from
+ * somebody who still wants them.  A coarse pointer on a small screen is what
+ * actually means "played with a thumb".
+ */
+const MOBILE_Q = window.matchMedia(
+  '(max-width: 760px), (pointer: coarse) and (max-width: 1100px)');
+const isMobile = () => MOBILE_Q.matches;
+
+function applyMobile(){
+  document.body.classList.toggle('mobile', isMobile());
+  if (typeof fitStripHeight === 'function') fitStripHeight();
+  showRotateHint();
+}
+/* Rotating the phone, or dragging a desktop window narrow, re-answers it. */
+(MOBILE_Q.addEventListener
+  ? MOBILE_Q.addEventListener('change', applyMobile)
+  : MOBILE_Q.addListener(applyMobile));
+
+/* ---- said once ----
+ * Portrait fits the whole keyboard into ~390px, which is narrow keys;
+ * landscape roughly doubles them.  Worth saying, not worth saying twice, so
+ * a dismissal is remembered like everything else this app remembers. */
+const ROT_LS = 'xenachord-rotate-hint';
+let rotateHintOff = false;
+try { rotateHintOff = localStorage.getItem(ROT_LS) === '1'; } catch(e){}
+function showRotateHint(){
+  document.body.classList.toggle('hint-rotate',
+    !rotateHintOff && isMobile() &&
+    document.body.classList.contains('mode-play') &&
+    innerHeight > innerWidth);
+}
 
 /* ===================== THE RIG =====================
  *
@@ -2165,9 +2269,94 @@ function rigDevices(){
  * view's space with it.  Past that it scrolls, which is the honest failure:
  * the second keyboard is still there and still reachable. */
 let stripH = ROW_H;
+
+/* ---- the strip, sized for the screen it is being played on ----
+ *
+ * ON A DESKTOP THE STRIP IS A MEASUREMENT and PX is the whole of its scale:
+ * two millimetres are two pixels, everywhere, and nothing here touches that.
+ *
+ * ON A PHONE IN PLAY it is an instrument first.  A keyboard is ~300mm wide
+ * and a phone is not, so at 1:1 the far end of the layout is off the side of
+ * the screen — and a keyboard you have to scroll to reach the end of is one
+ * you cannot glissando across, which is the thing a touch screen is actually
+ * good at.  So Play on a small screen draws the strip at whatever scale puts
+ * ALL of it on the glass at once, floored so it never becomes a picture of a
+ * keyboard rather than one a finger can hit.
+ *
+ * The scale is a TRANSFORM rather than a different PX: every box is still
+ * laid out at its true millimetre position and the whole plan is scaled as
+ * one picture, so nothing in the layout has to know it is on a phone — and
+ * elementsFromPoint, which is how a finger finds its key, reads the drawn
+ * geometry either way.
+ */
+let stripW = 0;            // px the plan is wide at 1:1
+let stripZx = 1, stripZy = 1;   // what it is actually drawn at
+
+/* HOW MUCH TALLER THAN WIDE THE PLAN MAY BE DRAWN.  Only ever on a phone, in
+ * Play, where the strip has stopped being a measurement and become the thing
+ * being played. Across the strip is where the LAYOUT lives — which key is
+ * where, which accidental leans into which white — and that is drawn true.
+ * Down it is only how far a key reaches toward you, and on a portrait screen
+ * that is exactly the axis with room going spare: stretching it turns a 22px
+ * sliver into something a thumb can actually land on without moving a single
+ * key sideways or changing what the picture says. */
+const STRIP_STRETCH_MAX = 2.2;
+
+function stripFitsMobile(){
+  /* A PICTURE IS NOT A SCREEN.  The SVG/PNG export traces the strip's real
+   * boxes off getBoundingClientRect, so a fit-to-phone transform would be
+   * baked into the file as a shrunken drawing.  The saved design is the
+   * design, at its own scale, whatever it was traced on. */
+  const b = document.body;
+  return isMobile() && b.classList.contains('mode-play') &&
+         !b.classList.contains('exporting');
+}
+
+/**
+ * The scale the strip is drawn at, across and down, for a given height budget.
+ *
+ * ACROSS: the whole keyboard, on the glass, at once. Play holds the pointer —
+ * `touch-action:none` is what lets a finger slide across keys instead of
+ * scrolling the strip out from under itself, and it takes scrolling away in
+ * the same breath — so anything hanging past the right edge here is not
+ * merely awkward, it is unreachable. Never magnified past 1:1: a landscape
+ * phone with room to spare gets a true-size keyboard, not a blown-up one.
+ *
+ * DOWN: whatever is left of the budget, up to STRIP_STRETCH_MAX times the
+ * across scale. Fitting the width of a 300mm keyboard onto a portrait phone
+ * costs about half of it, and half of a key's depth is a target barely deeper
+ * than a fingertip; the height it buys back is the whole reason the keyboard
+ * reads as one on that screen.
+ */
+function wantStripZoom(cap){
+  if (!stripFitsMobile() || !(stripW > 0) || !(stripH > 0)) return [1, 1];
+  const avail = $('strip').clientWidth;
+  if (!(avail > 0)) return [1, 1];
+  const zx = Math.max(0.4, Math.min(avail / stripW, 1));
+  const zy = Math.max(zx, Math.min((cap - 20) / stripH, zx * STRIP_STRETCH_MAX));
+  return [zx, zy];
+}
+
 function fitStripHeight(){
-  $('strip').style.height =
-    Math.min(stripH + 20, Math.max(190, innerHeight*0.5)) + 'px';
+  /* Half the window on a desktop; on a phone in Play the strip leads and the
+     3D view takes what is left of the screen rather than the other way up. */
+  const cap = stripFitsMobile() ? Math.max(150, innerHeight * 0.5)
+                                : Math.max(190, innerHeight * 0.5);
+  [stripZx, stripZy] = wantStripZoom(cap);
+  const inner = $('stripInner');
+  if (inner && stripW > 0){
+    inner.style.transformOrigin = '0 0';
+    inner.style.transform = (stripZx === 1 && stripZy === 1)
+      ? '' : `scale(${stripZx},${stripZy})`;
+    inner.style.width  = (stripW * stripZx) + 'px';
+    inner.style.height = (stripH * stripZy) + 'px';
+    /* A STRETCHED KEY IS FINE; STRETCHED LETTERING IS NOT.  The names a
+     * tuning writes are the one thing in the strip that is type rather than
+     * measurement, so they are given the stretch back and end up drawn at the
+     * across scale — the key is taller, the ratio on it is not. */
+    inner.style.setProperty('--kb-unstretch', stripZx / stripZy);
+  }
+  $('strip').style.height = Math.min(stripH * stripZy + 20, cap) + 'px';
 }
 addEventListener('resize', fitStripHeight);
 
@@ -2180,9 +2369,8 @@ function buildStrip(){
    * all the same keyboard any more */
   let w = 0;
   for (const u of units) if (u.L) w = Math.max(w, u.dx + u.L.width);
-  inner.style.width = ((w + 40)*PX) + 'px';
+  stripW = (w + 40)*PX;
   stripH = rows*ROW_H + (rows-1)*ROW_GAP;
-  inner.style.height = stripH + 'px';
   fitStripHeight();
   for (const u of units) if (u.L) buildUnit(u, inner, rows);
   /* The strip is torn down and rebuilt whole every time, so the names a
@@ -3821,10 +4009,12 @@ function inPlayStyling(fn){
   body.classList.remove('mode-export', 'tune-edit', 'resizing');
   body.classList.add('mode-play', 'bright', 'exporting');
   try {
+    fitStripHeight();          // drops the phone's fit-to-width scale
     applyLabelSizing();
     return fn();
   } finally {
     body.className = was;
+    fitStripHeight();
     applyLabelSizing();
   }
 }
@@ -4018,7 +4208,10 @@ function takeShared(got, how, toPlay){
    * be sounded, not edited — a link opened cold should land where that
    * happens, the way opening a saved file or dragging one in still lands
    * wherever the drawer already was. */
-  if (toPlay){ setMode('play'); openDrawer('play'); }
+  /* On a phone the Play drawer is a full-screen sheet, so opening it would
+   * put a synth panel over the keyboard the link was sent to hand over. The
+   * MODE still changes — the keys sound — the drawer just stays shut. */
+  if (toPlay){ setMode('play'); if (!isMobile()) openDrawer('play'); }
   return true;
 }
 
@@ -4879,6 +5072,10 @@ function setMode(name){
   // drawing again, and a key that took a caret instead of a click would be
   // the Design/Play confusion the modes exist to prevent.
   if(name !== 'play' && window.XTuning) window.XTuning.disarmEdit();
+  /* On a phone the strip is drawn to fit only in Play, so the scale is a
+   * question the mode answers — and the rotate hint is Play's alone. */
+  fitStripHeight();
+  showRotateHint();
 }
 
 for(const btn of railPane.querySelectorAll('.rail-btn')){
@@ -4889,6 +5086,21 @@ for(const btn of railPane.querySelectorAll('.rail-btn')){
   };
 }
 setMode(railPane.querySelector('.rail-btn[aria-expanded="true"]')?.dataset.drawer);
+
+/* ---- how the app stands up on a phone ----
+ * Shut, and in Play.  The rail is still there — Design and Export are one tap
+ * away and nothing has been removed — but a drawer is a sheet over the whole
+ * screen at this size, and covering the keyboard with a panel of print
+ * settings is not how a shared instrument should arrive. */
+applyMobile();
+if (isMobile()){ setMode('play'); openDrawer(null); }
+
+$('rotate-hint').onclick = () => {
+  rotateHintOff = true;
+  try { localStorage.setItem(ROT_LS, '1'); } catch(e){}
+  showRotateHint();
+};
+addEventListener('resize', showRotateHint);
 
 /* ===================== strip collapse =====================
  * The same move as the rail: tapping the bar you're already looking at

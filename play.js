@@ -293,12 +293,35 @@ strip.addEventListener('pointermove', (ev) => {
   if (note != null) press(ev.pointerId, note);
 }, true);
 
-for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
+/* ---- LETTING GO IS NOT THE SAME AS LEAVING A KEY ----
+ *
+ * A glissando lives or dies here.  `pointerleave` does not bubble, but a
+ * listener in the CAPTURE phase still sees it on the way down to a
+ * descendant — so a leave fired at the key the finger is sliding OFF was
+ * being read by the strip as "the finger is gone", and the note stopped
+ * before the next key could take it.  Taking the pointer capture below fires
+ * one at the pressed key immediately, so the very first move killed the
+ * note: every note had to be pressed on its own, which is exactly the thing
+ * a keyboard must not make you do.
+ *
+ * So a release is a release: the pointer going up, or the browser taking it
+ * away.  Crossing a boundary inside the strip is a note change, and
+ * `pointermove` above is what answers it.
+ */
+for (const type of ['pointerup', 'pointercancel']) {
   strip.addEventListener(type, (ev) => {
     if (!inPlay() || inEditor(ev)) return;
     ev.stopPropagation();
     release(ev.pointerId);
   }, true);
+}
+
+/* The strip captures the pointer, so an up outside it still arrives above.
+ * Where the capture could not be taken it would not, and a finger lifted
+ * over the 3D view would leave the note ringing with nothing holding it —
+ * this is the floor under that case, and a no-op in the ordinary one. */
+for (const type of ['pointerup', 'pointercancel']) {
+  window.addEventListener(type, (ev) => release(ev.pointerId));
 }
 
 /* A click is dispatched after the pointer sequence and is what the design
