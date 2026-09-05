@@ -3062,20 +3062,7 @@ function showBevel(){
    * a white's rear and far more on an accidental.  So the line says the
    * range the keys were actually built at rather than letting the slider
    * read a number nothing was cut to. */
-  const at = L && L.bevel != null ? L.bevel : b;      // the ask, at these widths
-  const cut = L && L.bevelCut;                        // what the keys were cut at
-  const held = at < b - 5e-4 ||
-    (cut && (cut.hi < b - 5e-4 || cut.lo < cut.hi - 5e-4));
-  if (!(b > 0) || !held) { info.innerHTML = ''; return; }
-  info.innerHTML =
-    cut && cut.lo < cut.hi - 5e-4
-      ? `cut at ${cut.hi.toFixed(2)} mm, and ${cut.lo.toFixed(2)} mm on the keys ` +
-        `whose own wall will not carry more`
-    : cut && cut.hi < at - 5e-4
-      ? `cut at ${cut.hi.toFixed(2)} mm — as deep as the wall under the arris ` +
-        `will carry`
-      : `cut at ${(cut ? cut.hi : at).toFixed(2)} mm — held back so the ` +
-        `narrowest key keeps a playing surface between its two rounds`;
+  info.innerHTML = '';
 }
 
 (function(){

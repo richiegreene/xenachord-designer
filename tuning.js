@@ -789,15 +789,8 @@ function syncUI() {
    * it can be moved without this fieldset being looked at — and it changes
    * what every number above it is worth. It says so here, where 1/1 is
    * defined, rather than only where it was pressed. */
-  const sh = T.equaveShift | 0, sc = shiftCents(), K = shiftKeys();
   const tr = $('t-transpose');
-  tr.style.display = sh ? '' : 'none';
-  if (sh) {
-    tr.innerHTML = `transposed <b>${sh > 0 ? '+' : ''}${sh}</b> &times; ` +
-      `<b>${K}</b> key${K === 1 ? '' : 's'} &mdash; 1/1 sounds at ` +
-      `<b>${(T.hz * Math.pow(2, sh * sc / 1200)).toFixed(4)}</b> Hz. ` +
-      `Every key keeps its name.`;
-  }
+  tr.style.display = 'none';
 
   for (const b of $('t-system-seg').querySelectorAll('button')) {
     b.classList.toggle('on', b.dataset.v === T.system);
