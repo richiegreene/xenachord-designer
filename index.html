@@ -761,7 +761,7 @@
     <fieldset>
       <legend>Bevel: simplify/smoothen playing edges<span id="bevel-who"></span></legend>
       <div class="presswrap"
-        title="Rounds over the top edge of each key's playing surface only (not the spine, feet, sensor press, or underside). Runs up to 2mm, capped by each key's own wall clearance (whites 1.539mm, accidentals 4.5mm) — the line below the slider shows the actual cut. Sharp corners in a key's outline may block the full round; flagged when that happens.">
+        title="Rounds over the top edge of each key's playing surface only (not the spine, feet, sensor press, or underside). Runs up to 2mm, capped by each key's own wall clearance (whites 2mm at the front lip — their rear edge runs flush into the tongue and is not broken; accidentals 4.5mm) — the line below the slider shows the actual cut. Sharp corners in a key's outline may block the full round; flagged when that happens.">
         <div class="pressrow">
           <label for="bevel">Bevel</label>
           <span id="bevel-v" class="pressval">square</span>
@@ -3592,8 +3592,9 @@ function showBevel(){
    * Two things hold it back and they hold back different keys: a thin
    * split key would lose its playing surface to two full rounds, so the
    * layout holds the break under a share of the narrowest class; and each
-   * key is then held to the wall under its own arris, which is 1.539 mm on
-   * a white's rear and far more on an accidental.  So the line says the
+   * key is then held to the wall under its own arris, which is 2 mm at a
+   * white's front lip — its rear edge runs flush into the tongue and takes
+   * no break at all — and far more on an accidental.  So the line says the
    * range the keys were actually built at rather than letting the slider
    * read a number nothing was cut to. */
   info.innerHTML = '';

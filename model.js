@@ -376,6 +376,29 @@
     whiteTongue: [6.08924, 8.62804]    // plugs into spine layer 3
   };
 
+  /* ------------------------------------------------------------------ *
+   *  THE WHITE'S TOP RUNS STRAIGHT INTO ITS TONGUE                      *
+   *                                                                     *
+   *  The drafted white had 1.5387 mm of shell wall standing between its  *
+   *  playing surface (Z.whiteTop) and the roof of its tongue — the one   *
+   *  wall on the whole keyboard thin enough to hold the bevel back (see  *
+   *  bevelRoom).  It is gone: the WHITE band of the spine and the white  *
+   *  tongue that plugs into it are both raised by exactly that much, so  *
+   *  the tongue's roof, the spine's top face and the key's playing top   *
+   *  are one plane at Z.whiteTop, and the white gains 1.5387 mm of       *
+   *  section through the joint that carries it.                          *
+   *                                                                     *
+   *  Z.whiteTongue already named Z.whiteTop as its top: it was the       *
+   *  spine band, 1.5387 mm lower, that clipped the tongue down to it     *
+   *  (see tongueLaps and spineParts).  Raising the band is what makes    *
+   *  the drafted figure real.                                            *
+   *                                                                     *
+   *  WHITES ONLY.  Black and gray tongues are unchanged — they are       *
+   *  buried bands with another colour's key stacked over them, and       *
+   *  there is no top face for them to run out to.                        *
+   * ------------------------------------------------------------------ */
+  const WHITE_RISE = 1.5387;   // Z.whiteTop - the drafted white band top
+
   /* Part colours.  One table, used by the WebGL preview and written into the
    * Blender log as materials, so the two renderings read the same.        */
   const COLORS = {
@@ -1126,6 +1149,86 @@
     return BACK_SRC;
   }
 
+  /* ==================================================================== *
+   *  THE TONGUE'S ROOF IS THE KEY'S OWN TOP                              *
+   *                                                                      *
+   *  A white was drafted with its tongue's roof 1.5387 mm below its       *
+   *  playing surface, so between the two stood a strip of shell wall and  *
+   *  the key met the spine with a step in it.  That strip is what held    *
+   *  the bevel down (bevelRoom measured it), and it is the thinnest       *
+   *  section anywhere on the key — the one place a white breaks.          *
+   *                                                                      *
+   *  So the roof is raised to Z.whiteTop.  The tongue keeps its           *
+   *  underside, its depth and its x span; what it gains is WHITE_RISE of  *
+   *  thickness, and the key's top face and the tongue's roof become one   *
+   *  plane running unbroken from the player's edge to the spine, which    *
+   *  has been raised to meet it.                                          *
+   *                                                                      *
+   *  The two rear corners of the key's back face and the two rear corners *
+   *  of the tongue's roof now stand at the same point, so they are WELDED *
+   *  — the back face above the tongue has no height left, and a face with *
+   *  no height is not a face.  The profile is marked `flushTongue`, which *
+   *  is what tells the bevel to leave the tongue's outline alone.         *
+   * ==================================================================== */
+  const FLUSH_SRC = new WeakMap();
+  /** the white with its tongue raised flush into the playing surface */
+  function whiteFlushTongue(p) {
+    if (!(WHITE_RISE > 1e-6)) return p;
+    const hit = FLUSH_SRC.get(p);
+    if (hit) return hit;
+    const V = [];
+    for (let i = 0; i < p.nv; i++) {
+      const j = i * 4;
+      V.push({ a: p.v[j], b: p.v[j + 1], y: p.v[j + 2], z: p.v[j + 3] });
+    }
+    let F = [];
+    for (let i = 0; i < p.f.length;) { const n = p.f[i]; F.push(p.f.slice(i + 1, i + 1 + n)); i += n + 1; }
+
+    /* the roof is the highest thing the key has at the spine face, which is
+     * the tongue and nothing else — see A TONGUE THAT READS NO SPINE */
+    let roof = -Infinity;
+    for (const q of V) if (q.y < 1e-3 && q.z > roof) roof = q.z;
+    if (!(roof > -Infinity)) return p;
+    for (const q of V)
+      if (q.y < BACK_Y + 1e-3 && Math.abs(q.z - roof) < 1e-4)
+        q.z = +(q.z + WHITE_RISE).toFixed(5);
+
+    /* WELD.  Two vertices that now stand at the same (alpha, beta, y, z)
+     * stand at the same point at EVERY width the profile spans, so this is
+     * a merge and not an approximation. */
+    const key = q => [q.a.toFixed(5), q.b.toFixed(6),
+                      q.y.toFixed(4), q.z.toFixed(4)].join(',');
+    const at = new Map(), map = [];
+    for (let i = 0; i < V.length; i++) {
+      const k = key(V[i]);
+      if (at.has(k)) map.push(at.get(k));
+      else { at.set(k, i); map.push(i); }
+    }
+    F = F.map(r => {
+      const out = [];
+      for (const i of r) {
+        const j = map[i];
+        if (!out.length || out[out.length - 1] !== j) out.push(j);
+      }
+      while (out.length > 1 && out[0] === out[out.length - 1]) out.pop();
+      return out;
+    }).filter(r => r.length >= 3);
+
+    const v = [], f = [];
+    for (const q of V) v.push(q.a, q.b, +q.y.toFixed(4), +q.z.toFixed(5));
+    for (const r of F) { f.push(r.length); for (const i of r) f.push(i); }
+    const out = { w0: p.w0, widths: p.widths, nv: V.length, nf: F.length, v, f,
+                  nose: p.nose, backRamp: p.backRamp, derived: p.derived,
+                  back: p.back, flushTongue: true };
+    FLUSH_SRC.set(p, out);
+    return out;
+  }
+
+  /** every vertex of `p` that stands on the tongue, when it runs flush */
+  function onFlushTongue(p, i) {
+    return !!p.flushTongue && p.v[i * 4 + 2] <= BACK_Y + 1e-3;
+  }
+
   const REACH_SRC = new WeakMap();
   /**
    * The profile with its back carried BACK_REACH further toward the spine.
@@ -1721,16 +1824,19 @@
    *  IS THEN HELD TO ITS OWN WALL — see bevelRoom.  The arris drops by    *
    *  the full radius, so the wall it runs down has to be that deep before *
    *  it meets whatever the profile does next; past that the wall inverts  *
-   *  and the key is no longer a solid the slicer can read.  The white is  *
-   *  the tight one: 1.539 mm of rear wall between its playing surface and *
-   *  the roof of the mortice its tongue plugs into (its front lip gives   *
-   *  2.0, its sides far more), while an accidental stands 4.5 mm or more  *
-   *  clear of anything under its nose.  So a full 2 mm break is real on   *
-   *  the accidentals and the white takes the deepest round its own rear   *
-   *  wall will carry — which is what a maker does by hand, finessing each *
-   *  key to the wood that is actually there — rather than every key being *
-   *  held down to the thinnest one, or the cavity being opened by a slip  *
-   *  of the slider.                                                      *
+   *  and the key is no longer a solid the slicer can read.  The white     *
+   *  used to be the tight one — 1.539 mm of rear wall between its playing *
+   *  surface and the roof of the mortice its tongue plugged into — but    *
+   *  that wall is gone: its tongue runs flush into its top now (see THE   *
+   *  TONGUE'S ROOF IS THE KEY'S OWN TOP) and its rear arris is not broken *
+   *  at all, so the white is held by its front lip's 2.0 mm like anything *
+   *  else, while an accidental stands 4.5 mm or more clear of anything    *
+   *  under its nose.  So a full 2 mm break is real on the accidentals and *
+   *  every other key takes the deepest round its own wall will carry —    *
+   *  which is what a maker does by hand, finessing each key to the wood   *
+   *  that is actually there — rather than every key being held down to    *
+   *  the thinnest one, or the cavity being opened by a slip of the        *
+   *  slider.                                                             *
    *                                                                      *
    *  IT IS A FILLET, NOT A FLAT CHAMFER.  A true quarter-circle profile —  *
    *  the shape a round-over cutter or a hand-sanded key actually leaves —  *
@@ -1817,8 +1923,8 @@
    * The arris does not stay where it was drawn: the round is tangent to
    * the wall, so the boundary of the playing surface DROPS by the full
    * radius and the wall below it gives that much up.  A wall has only so
-   * much to give — the white's rear wall has 1.539 mm before it reaches
-   * the roof of the mortice its tongue plugs into — and a break deeper
+   * much to give — a white's front lip has 2.0 mm before it reaches the
+   * pocket under its nose — and a break deeper
    * than that does not cut a bigger round, it drags the arris PAST the
    * feature below and the wall doubles back on itself.  The key stays
    * edge-closed while it does, which is exactly why it is worth measuring
@@ -1908,6 +2014,9 @@
         const u = r[i], v = r[(i + 1) % r.length];
         for (const [a, c] of [[u, v], [v, u]]) {
           if (!arris.has(a)) continue;
+          /* a stretch of boundary the break is held off does not measure
+             the wall it stands on — see THE TONGUE IS NOT BROKEN */
+          if (onFlushTongue(p, a)) continue;
           const d = V[a][2] - V[c][2];
           if (d > BEVEL_EPS && over(a, c)) {
             const r = Math.max(0, d - BEVEL_KEEP);
@@ -2024,6 +2133,25 @@
       return nv.length - 1;
     };
     const ekey = (i, j) => (i < j ? i + ':' + j : j + ':' + i);
+    /* ---- THE TONGUE IS NOT BROKEN ----
+     *
+     * A white's playing top now runs on into the roof of its tongue as one
+     * flat plane (see THE TONGUE'S ROOF IS THE KEY'S OWN TOP), so the
+     * tongue's own outline has become part of the boundary of the surface
+     * the break is taken round.  It must not be: the tongue is a plug, and
+     * a plug with a rounded-over rim is a plug that rattles in its mortice
+     * — and the arris the round drops belongs to a flange 2.5 mm thick,
+     * which a 2 mm break would eat most of the way through.
+     *
+     * So every boundary edge that lies wholly on the tongue is held out of
+     * the break.  What is left is an open chain running from one side of
+     * the tongue, round the player's edge, and back to the other, and it
+     * is broken exactly as a closed loop is, with a flat cap at each end
+     * standing in the plane where the tongue begins.  The result is what
+     * was asked for: the key's top face meets the tongue and the spine
+     * dead flush, with no groove between them.
+     */
+    const noBreak = (u, v2) => onFlushTongue(p, u) && onFlushTongue(p, v2);
     const sub = (a, c) => [a[0] - c[0], a[1] - c[1], a[2] - c[2]];
     const dot = (a, c) => a[0] * c[0] + a[1] * c[1] + a[2] * c[2];
     const cross = (a, c) => [a[1] * c[2] - a[2] * c[1],
@@ -2266,19 +2394,38 @@
         const r = nf[fi];
         for (let i = 0; i < r.length; i++) {
           const u = r[i], v2 = r[(i + 1) % r.length];
-          if (eF.get(ekey(u, v2)).length === 1) { nxt.set(u, v2); owner.set(u, fi); }
+          if (eF.get(ekey(u, v2)).length !== 1) continue;
+          if (noBreak(u, v2)) continue;          // the tongue keeps its arris
+          nxt.set(u, v2); owner.set(u, fi);
         }
       }
+      const prv = new Map();
+      for (const [u, v2] of nxt) prv.set(v2, u);
       const loops = [], seen2 = new Set();
+      const walk = s => {
+        const chain = [];
+        let cur = s;
+        while (nxt.has(cur) && !seen2.has(cur)) { seen2.add(cur); chain.push(cur); cur = nxt.get(cur); }
+        return { chain, end: cur };
+      };
+      /* AN ARRIS THAT IS HELD OFF PART OF THE BOUNDARY IS A CHAIN, NOT A
+       * LOOP.  The white's tongue keeps its square outline (see THE TONGUE
+       * IS NOT BROKEN), so the boundary comes away as an open run with two
+       * ends standing on geometry that does not move.  Those are walked
+       * first, each from the vertex nothing runs into; whatever is left is
+       * a closed loop and is broken all the way round as it always was. */
+      for (const s of nxt.keys()) {
+        if (prv.has(s) || seen2.has(s)) continue;
+        const w2 = walk(s);
+        if (w2.chain.length >= 2) loops.push({ ring: w2.chain.concat([w2.end]), closed: false });
+      }
       for (const s of nxt.keys()) {
         if (seen2.has(s)) continue;
-        const loop = [];
-        let cur = s;
-        while (nxt.has(cur) && !seen2.has(cur)) { seen2.add(cur); loop.push(cur); cur = nxt.get(cur); }
-        if (cur === s && loop.length >= 3) loops.push(loop);
+        const w2 = walk(s);
+        if (w2.end === s && w2.chain.length >= 3) loops.push({ ring: w2.chain, closed: true });
       }
 
-      for (const ring of loops) {
+      for (const { ring, closed } of loops) {
         /* THE ARRIS IS ITS CORNERS, NOT ITS VERTICES.  A drafted loop carries
          * vertices that lie flat on a straight run — welded-out steps, seams
          * a neighbouring wall still needs — and offsetting one of those gives
@@ -2297,6 +2444,9 @@
          * to its lip, taking the nose with it.                             */
         const corner = [];
         for (let i = 0; i < ring.length; i++) {
+          /* a chain's two ends anchor the round against the geometry it
+           * runs out onto, so they carry an offset whether they turn or not */
+          if (!closed && (i === 0 || i === ring.length - 1)) { corner.push(i); continue; }
           const P = V[ring[i]], A = V[ring[(i + ring.length - 1) % ring.length]],
                 B = V[ring[(i + 1) % ring.length]];
           const u = sub(P, A), v2 = sub(B, P);
@@ -2318,12 +2468,17 @@
               gxs = new Array(m), gys = new Array(m);
         for (let c = 0; c < m; c++) {
           const i = corner[c];
-          const P = V[ring[i]], A = V[ring[corner[(c + m - 1) % m]]],
-                B = V[ring[corner[(c + 1) % m]]];
+          const cp = closed ? (c + m - 1) % m : Math.max(0, c - 1);
+          const cn = closed ? (c + 1) % m : Math.min(m - 1, c + 1);
+          const P = V[ring[i]], A = V[ring[corner[cp]]], B = V[ring[corner[cn]]];
           /* inward normals of the two edges meeting here.  The loop is wound
            * CCW seen from above (it is up-facing), so the interior lies to
-           * the LEFT of each edge and (-dy, dx) points into it. */
-          const e1 = [P[0] - A[0], P[1] - A[1]], e2 = [B[0] - P[0], B[1] - P[1]];
+           * the LEFT of each edge and (-dy, dx) points into it.  At the end
+           * of an open chain there is only one edge, and the round takes its
+           * normal square — it is running out onto a wall, not turning. */
+          let e1 = [P[0] - A[0], P[1] - A[1]], e2 = [B[0] - P[0], B[1] - P[1]];
+          if (!closed && c === 0) e1 = e2;
+          if (!closed && c === m - 1) e2 = e1;
           const l1 = Math.hypot(e1[0], e1[1]) || 1, l2 = Math.hypot(e2[0], e2[1]) || 1;
           const n1 = [-e1[1] / l1, e1[0] / l1], n2 = [-e2[1] / l2, e2[0] / l2];
           const det = n1[0] * n2[1] - n1[1] * n2[0];
@@ -2333,7 +2488,9 @@
            * along, so it stays ON the playing surface however that surface
            * is sloped — flat at the back of the key, tilted on the roll,
            * steeper again down the nose. */
-          const NF = ringNormal(V, nf[owner.get(ring[i])]);
+          const NF = ringNormal(V, nf[owner.get(ring[i]) != null
+                                       ? owner.get(ring[i])
+                                       : owner.get(ring[corner[cp]])]);
           gxs[c] = NF[2] !== 0 ? -NF[0] / NF[2] : 0;
           gys[c] = NF[2] !== 0 ? -NF[1] / NF[2] : 0;
           /* NOTING A HARD TURN.  The miter is b / sin(half the turn), so a
@@ -2361,8 +2518,23 @@
          * a "round" come out looking like a chamfer: use sin for both and
          * u + v = b for every t, which is the straight line exactly.
          */
+        /* THE ENDS OF A CHAIN KEEP THEIR VERTEX AND GAIN A DROPPED TWIN.
+         * The arris drops by the full radius, but the two ends stand on the
+         * tongue's outline, which does not move — so the vertex itself stays
+         * where the tongue's walls hold it and a copy of it, dropped, is
+         * what the round starts from.  The wall between the two follows it
+         * across, and the quarter-round's flat end cap closes the gap. */
+        const dropOf = new Map();
+        if (!closed)
+          for (const i of [0, ring.length - 1]) {
+            const q = ring[i];
+            dropOf.set(q, addFrom(q, 0, nv[q].y, V[q][2] - b));
+          }
+        const chainEnds = closed ? [] : [ring[0], ring[ring.length - 1]];
+        const at0 = q => (dropOf.has(q) ? dropOf.get(q) : q);
+
         const levels = [];               // levels[k][c] -> vertex index
-        levels[0] = corner.map(i => ring[i]);   // t = 0: the arris, pre-drop
+        levels[0] = corner.map(i => at0(ring[i]));   // t = 0: the arris, pre-drop
         for (let k = 1; k <= BEVEL_SEGMENTS; k++) {
           const t = (k / BEVEL_SEGMENTS) * (Math.PI / 2);
           const u = 1 - Math.cos(t), drop = b * (1 - Math.sin(t));
@@ -2377,26 +2549,71 @@
          * gives its boundary corners up to their inset copies; a vertex flat
          * on the arris is dropped outright, because on the inset line it is
          * collinear with its neighbours and leaving it out is exact. */
-        const insetOf = new Map();
-        for (let c = 0; c < m; c++) insetOf.set(ring[corner[c]], levels[BEVEL_SEGMENTS][c]);
-        const onArris = new Set(ring);
+        const insetOf = new Map(), endInset = new Map();
+        for (let c = 0; c < m; c++) {
+          const q = ring[corner[c]];
+          if (chainEnds.indexOf(q) >= 0) endInset.set(q, levels[BEVEL_SEGMENTS][c]);
+          else insetOf.set(q, levels[BEVEL_SEGMENTS][c]);
+        }
+        const onArris = new Set(ring.filter(q => chainEnds.indexOf(q) < 0));
+        /* AND ONLY THE FACE THE BREAK RUNS OFF gives anything up at an end.
+         * A chain end is shared with the part of the surface that is NOT
+         * broken — the tongue's roof — and that face keeps its corner
+         * exactly where it is, or the two would part company along the edge
+         * they share. */
+        const endFace = new Map();
+        if (!closed) {
+          endFace.set(ring[0], owner.get(ring[0]));
+          endFace.set(ring[ring.length - 1], owner.get(ring[ring.length - 2]));
+        }
         for (const fi of faces) {
           const r = nf[fi];
-          if (!r.some(q => onArris.has(q))) continue;
+          if (!r.some(q => onArris.has(q) || endInset.has(q))) continue;
           const out = [];
           for (const q of r) {
-            if (insetOf.has(q)) out.push(insetOf.get(q));
+            /* an end of the chain is still the surface's own corner — the
+             * tongue is bounded by it — so the face KEEPS it and gains the
+             * inset point beside it, on the side the break runs off to */
+            if (endInset.has(q) && endFace.get(q) !== fi) out.push(q);
+            else if (q === ring[0] && endInset.has(q)) { out.push(q, endInset.get(q)); }
+            else if (q === ring[ring.length - 1] && endInset.has(q)) { out.push(endInset.get(q), q); }
+            else if (insetOf.has(q)) out.push(insetOf.get(q));
             else if (!onArris.has(q)) out.push(q);
           }
           if (out.length >= 3) nf[fi] = out;
         }
 
-        /* t = 0 is (u 0, v b): the arris keeps its line and drops the full
-         * radius, which is where the round leaves the wall tangentially */
-        for (let i = 0; i < ring.length; i++) { nv[ring[i]].z -= b; V[ring[i]][2] -= b; }
+        /* THE WALL AT EACH END FOLLOWS THE DROP.  Every face outside the
+         * region that holds a chain end next to the first broken edge takes
+         * the dropped twin in between, so the wall meets the round's cap on
+         * the same edge rather than tearing away from it. */
+        if (!closed) {
+          const region = new Set(faces);
+          const ends = [[ring[0], ring[1]], [ring[ring.length - 1], ring[ring.length - 2]]];
+          for (const [q, nb] of ends) {
+            const d = dropOf.get(q);
+            for (let fi = 0; fi < nf.length; fi++) {
+              if (region.has(fi)) continue;
+              const r = nf[fi], k = r.indexOf(q);
+              if (k < 0) continue;
+              const nx = r[(k + 1) % r.length], pv = r[(k + r.length - 1) % r.length];
+              if (nx === nb) nf[fi] = r.slice(0, k + 1).concat([d], r.slice(k + 1));
+              else if (pv === nb) nf[fi] = r.slice(0, k).concat([d], r.slice(k));
+            }
+          }
+        }
 
-        for (let c = 0; c < m; c++) {
-          const d = (c + 1) % m;
+        /* t = 0 is (u 0, v b): the arris keeps its line and drops the full
+         * radius, which is where the round leaves the wall tangentially.
+         * A chain's ends do not drop — their twins already stand there. */
+        for (let i = 0; i < ring.length; i++) {
+          const q = ring[i];
+          if (dropOf.has(q)) continue;
+          nv[q].z -= b; V[q][2] -= b;
+        }
+
+        for (let c = 0; c < (closed ? m : m - 1); c++) {
+          const d = closed ? (c + 1) % m : c + 1;
           /* level 0 -> level 1 runs the WHOLE segment of arris between two
            * corners, any vertex still standing on it included, and closes on
            * level 1's single edge.  It is fanned from level 1's corner
@@ -2406,7 +2623,7 @@
            * triangle is a hole. */
           const path = [];
           for (let i = corner[c]; ; i = (i + 1) % ring.length) {
-            path.push(ring[i]);
+            path.push(at0(ring[i]));
             if (i === corner[d]) break;
           }
           for (let k = 0; k + 1 < path.length; k++)
@@ -2417,6 +2634,25 @@
            * rings — the round's remaining facets */
           for (let k = 1; k < BEVEL_SEGMENTS; k++)
             nf.push([levels[k][c], levels[k][d], levels[k + 1][d], levels[k + 1][c]]);
+        }
+
+        /* ---- AND THE ROUND IS CAPPED WHERE IT RUNS OUT ----
+         *
+         * At each end of an open chain the quarter-round stops on the plane
+         * the tongue begins in.  What closes it there is the section itself:
+         * the vertex, its dropped twin, and the arc between them — a flat
+         * face in that plane, and the only new outline the break adds.   */
+        if (!closed) {
+          for (const e of [0, m - 1]) {
+            const q = ring[corner[e]];
+            const cap = [q, dropOf.get(q)];
+            for (let k = 1; k <= BEVEL_SEGMENTS; k++) cap.push(levels[k][e]);
+            /* the cap faces the way the round runs — the material it closes
+             * is behind it, along the chain */
+            const outw = sub(V[ring[e === 0 ? 1 : ring.length - 2]], V[q]);
+            if (dot(ringNormal(V, cap), outw) < 0) cap.reverse();
+            nf.push(cap);
+          }
         }
       }
     }
@@ -2448,7 +2684,7 @@
     /* a white is never picked from the sheet any more — it is derived from
      * what actually stands beside it.  See whiteProfile above.          */
     if (t === 'Full Sized White')
-      return { p: bev(whiteProfile(lb, rb)), mirror, exact: true };
+      return { p: bev(whiteFlushTongue(whiteProfile(lb, rb))), mirror, exact: true };
     if (table[want] != null) return { p: bev(backReach(KP.P[table[want]])), mirror, exact: true };
     /* The sheets draw nine of the sixteen possible neighbour contexts.  For
      * one they never drew, borrow the drafted white whose context is
@@ -3430,9 +3666,17 @@
     const out = [];
     let prevTop = -Infinity;
     for (const L of src) {
+      /* THE WHITE BAND IS TALLER THAN IT WAS DRAFTED.  Its top face — and
+       * only its top face — is lifted WHITE_RISE, which puts it level with
+       * the white keys' playing surface and lets their tongues carry the
+       * full section up to it.  See THE WHITE'S TOP RUNS STRAIGHT INTO ITS
+       * TONGUE.  The rise goes onto the DRAFTED top as well, because that
+       * is what the boss and the lap are clipped to. */
+      const rise = spineLayerPart(kind, L.name) === 'white' ? WHITE_RISE : 0;
+      const top = L.z1 + rise;
       const z0 = Math.max(L.z0, prevTop + FIT.gap);
-      const z1 = Math.max(L.z1, z0 + 0.2);
-      out.push({ name: L.name, z0, z1, z0Drafted: L.z0, z1Drafted: L.z1 });
+      const z1 = Math.max(top, z0 + 0.2);
+      out.push({ name: L.name, z0, z1, z0Drafted: L.z0, z1Drafted: top });
       prevTop = z1;
     }
     return out;
@@ -3580,7 +3824,8 @@
     const kind = spineKindOf(spine);
     let z0 = Infinity, z1 = -Infinity;
     for (const [hn] of spineHalves()) {
-      const ls = SPINE.layers[kind][hn];
+      /* through spineBands, so the white band's rise is in the extent */
+      const ls = spineBands(kind, hn);
       z0 = Math.min(z0, ls[0].z0);
       z1 = Math.max(z1, ls[ls.length - 1].z1);
     }
@@ -5037,6 +5282,7 @@
     rigStep, rigBase, rigNoteAuto,
     KEY_TYPES, TYPE_ORDER, LAYOUTS,
     whiteProfile, twoSidedWhiteBase, deriveWhiteProfile, akm320Nose, whiteBackRamp,
+    whiteFlushTongue, onFlushTongue, WHITE_RISE,
     NOSE_SHIFT, NOSE_LEG_RAMP, NOSE_LEG_REAR, NOSE_LEG_IN, NOSE_LEG_OUT,
     NOSE_ROOF_Z, NOSE_FLOOR_Z,
     KEY_PAIRS, PAIR_ORDER, PALETTE_ORDER, TYPE_ALIASES,
