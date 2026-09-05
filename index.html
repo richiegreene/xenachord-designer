@@ -3928,10 +3928,17 @@ const PRINT_PARTS = ['white', 'black', 'gray'];
  * for almost any bed, and its playing surfaces face up, the wrong way for
  * a slicer to print them well.  So export always folds the keyboard at
  * its own A/B spine seam into two rows of about 197 x 196 mm, and turns
- * each colour onto its own playing surface — a half turn for the flat
- * white tops, a half turn less about two degrees for the raked black and
- * gray ones (XD.bedAngle).  There is no other way to get the file: it is
- * simply what "export an STL" means here. */
+ * the whole instrument onto its white deck.
+ *
+ * ONE TURN AND ONE FOLD FOR ALL THREE FILES, not one per colour: the
+ * three share a spine — the same bolt holes, the same ribbon notch —
+ * so they are laid out together and open in a slicer in register, as
+ * the keyboard.  The accidentals keep their drafted 2-degree rake,
+ * standing off the bed as they stand off the deck in the hand.  See
+ * ONE BED FRAME FOR THE WHOLE INSTRUMENT in core.js.
+ *
+ * There is no other way to get the file: it is simply what "export an
+ * STL" means here. */
 
 /** the colours ANY keyboard in the rig actually has something to print in —
  *  a stacked pair's lower manual having black keys the upper lacks should

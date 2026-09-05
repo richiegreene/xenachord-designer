@@ -1292,6 +1292,96 @@
   }
 
   /* ------------------------------------------------------------------ *
+   *  ONE BED FRAME FOR THE WHOLE INSTRUMENT                             *
+   *                                                                     *
+   *  The three colours are three files, but they are ONE keyboard: the  *
+   *  white band, the black band and the gray band are courses of the    *
+   *  same spine, bolted through the same holes, with the same ribbon    *
+   *  notch cut through all of them.  So they are turned, folded and set *
+   *  down TOGETHER, in a frame measured over the whole build — open all *
+   *  three in a slicer and they land as the instrument, in register.    *
+   *                                                                     *
+   *  Measured per colour instead, each file got its own turn and its    *
+   *  own drop to the origin: white lies on its flat tops at 180 deg and *
+   *  the raked blacks and grays at about 178, so the three came out     *
+   *  two degrees apart and each shoved into the same corner.  Every     *
+   *  feature the colours SHARE then disagreed — the notch stood in a    *
+   *  different place in each file and no bolt hole lined up with its    *
+   *  own hole in the band above it.                                     *
+   *                                                                     *
+   *  THE TURN IS THE DECK'S.  No one frame lays every colour flat: the  *
+   *  accidentals are drafted with a 2-degree rake, so their tops and    *
+   *  the white tops are not parallel and never can be.  The instrument  *
+   *  is turned onto its WHITE deck — the plane it is measured from      *
+   *  everywhere else, and three quarters of the playing surface — and   *
+   *  the accidentals keep their rake, standing off the bed exactly as   *
+   *  they stand off the deck in the hand.                               *
+   *                                                                     *
+   *  NOT bedTilt OVER EVERY KEY AT ONCE, which reads the highest 2 mm   *
+   *  and finds only the accidentals there: they stand about 5 mm proud  *
+   *  of the whites, so the whole instrument would be turned onto their  *
+   *  rake and the white file — the big one — would print on a slope.    *
+   * ------------------------------------------------------------------ */
+  const BED_FRAMES = new WeakMap();
+  function bedFrame(meshes) {
+    let f = BED_FRAMES.get(meshes);
+    if (f) return f;
+    const parts = ['white', 'black', 'gray'];
+    const srcOf = (part, name) =>
+      name === 'keys' ? meshes[part]
+        : name === 'press' ? (meshes.pressLayers || {})[part]
+          : (meshes.spineByPart || {})[part];
+    /* the turn: the deck's own, taken once and handed to all three files.
+     * White if this design has any — it always does — and otherwise the
+     * colour with the most key surface to lie on. */
+    const deck = (meshes.white || []).length
+      ? 'white'
+      : parts.map(p => [p, (meshes[p] || []).length])
+             .sort((a, b) => b[1] - a[1])[0][0];
+    const th = Math.PI - bedTilt(meshes[deck] || []);
+    const c = Math.cos(th), sn = Math.sin(th);
+
+    const spans = meshes.spans || { keys: {}, press: {}, spine: {} };
+    const runs = [];
+    for (const p of parts)
+      for (const nm of ['keys', 'press', 'spine']) {
+        const src = srcOf(p, nm);
+        if (!src || !src.length) continue;
+        for (const s of (spans[nm] && spans[nm][p]) || [])
+          runs.push({ src, i0: s.i0, i1: s.i1, half: s.half });
+      }
+    /* how far back half B goes — measured on the turned rows of the WHOLE
+     * build, so the two rows are one fold and not three */
+    let aHi = -Infinity, bLo = Infinity;
+    for (const r of runs)
+      for (let i = r.i0; i < r.i1; i += 3) {
+        const ty = r.src[i + 1] * c - r.src[i + 2] * sn;
+        if (r.half === 'B') { if (ty < bLo) bLo = ty; }
+        else if (ty > aHi) aHi = ty;
+      }
+    const dx = rowShiftX();
+    const dy = (isFinite(aHi) && isFinite(bLo)) ? aHi + ROW_GAP - bLo : 0;
+    /* and the drop onto the bed, also over the whole build: the assembly
+     * is set down at the origin, not each colour on top of the others */
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity;
+    for (const r of runs) {
+      const ox = r.half === 'B' ? dx : 0, oy = r.half === 'B' ? dy : 0;
+      for (let i = r.i0; i < r.i1; i += 3) {
+        const X = r.src[i] + ox;
+        const Y = r.src[i + 1] * c - r.src[i + 2] * sn + oy;
+        const Z = r.src[i + 1] * sn + r.src[i + 2] * c;
+        if (X < x0) x0 = X; if (Y < y0) y0 = Y; if (Z < z0) z0 = Z;
+      }
+    }
+    f = { th, c, sn, dx, dy,
+          x0: isFinite(x0) ? x0 : 0,
+          y0: isFinite(y0) ? y0 : 0,
+          z0: isFinite(z0) ? z0 : 0 };
+    BED_FRAMES.set(meshes, f);
+    return f;
+  }
+
+  /* ------------------------------------------------------------------ *
    *  TWO ROWS, BECAUSE A PRINT BED IS NOT A KEYBOARD                    *
    *                                                                     *
    *  Laid out as it is played, a 32-key keyboard is some 373 mm across  *
@@ -1360,34 +1450,24 @@
     }
     if (!runs.length) return out;
 
-    const th = bedAngle(meshes, part), c = Math.cos(th), sn = Math.sin(th);
-    const turnY = (y, z) => y * c - z * sn;
-
-    /* how far back half B has to go, measured on the TURNED rows */
-    let aHi = -Infinity, bLo = Infinity;
-    for (const r of runs)
-      copy(r.src, r.i0, r.i1, (x, y, z) => {
-        const ty = turnY(y, z);
-        if (r.half === 'B') { if (ty < bLo) bLo = ty; }
-        else if (ty > aHi) aHi = ty;
-      });
-    const dx = rowShiftX();
-    const dy = (isFinite(aHi) && isFinite(bLo)) ? aHi + ROW_GAP - bLo : 0;
-
-    let x0 = Infinity, y0 = Infinity, z0 = Infinity;
+    /* THE FRAME IS THE WHOLE INSTRUMENT'S, not this colour's — one turn,
+     * one fold, one drop, shared by all three files so that the spine they
+     * share comes out of them in one piece.  See ONE BED FRAME FOR THE
+     * WHOLE INSTRUMENT. */
+    const F = bedFrame(meshes);
+    const c = F.c, sn = F.sn;
     for (const r of runs) {
-      const ox = r.half === 'B' ? dx : 0, oy = r.half === 'B' ? dy : 0;
+      const ox = r.half === 'B' ? F.dx : 0, oy = r.half === 'B' ? F.dy : 0;
       copy(r.src, r.i0, r.i1, (x, y, z) => {
-        const X = x + ox, Y = y * c - z * sn + oy, Z = y * sn + z * c;
-        if (X < x0) x0 = X; if (Y < y0) y0 = Y; if (Z < z0) z0 = Z;
-        out.push(X, Y, Z);
+        /* AND SET DOWN ON THE BED.  Turned about x through the origin the
+         * part ends up under it; a slicer would drop it anyway, but a file
+         * that says where it sits can be opened and measured without one.
+         * The drop is the build's, so a colour that happens not to reach
+         * the bed's front-left corner does not get shoved into it. */
+        out.push(x + ox - F.x0,
+                 y * c - z * sn + oy - F.y0,
+                 y * sn + z * c - F.z0);
       });
-    }
-    /* AND SET DOWN ON THE BED.  Turned about x through the origin the part
-     * ends up under it; a slicer would drop it anyway, but a file that says
-     * where it sits can be opened and measured without one. */
-    for (let i = 0; i < out.length; i += 3) {
-      out[i] -= x0; out[i + 1] -= y0; out[i + 2] -= z0;
     }
     return out;
   }
@@ -1666,7 +1746,7 @@
     /* --- key table ---------------------------------------------------- */
     p('# --- the 32 keys, left to right, one per sensor foot -------------------');
     p('# (name, type, x_centre, width, depth, profile,');
-    p('#  world_x, world_y_back, world_z_bottom, foot_x, arm_x)');
+    p('#  world_x, world_y_back, world_z_bottom, foot_x, arm_x, lap, half)');
     p('# "profile" names the drafted key this one is instantiated from.  For a');
     p('# white it carries the neighbour context "<leftBias>|<rightBias>" ("n" =');
     p('# that slot is empty), because the drafted whites rib differently');
@@ -1675,6 +1755,11 @@
     p('# `lap` is where that key\'s tongue carries on THROUGH the spine face and');
     p('# into its own band — (x0, x1, y0, y1, z0, z1) boxes, normally one, two');
     p('# only for a key straddling the A/B seam.  See build_key.');
+    p('# `half` is the spine half the key hangs off — the half its FOOT is on.');
+    p('# Its tongue is cut off flush at that half\'s x edge: past there the');
+    p('# tongue is over the 1.29 mm of air between the halves, or over the');
+    p('# OTHER half, which is a separate piece it must never touch.  See A');
+    p('# TONGUE THAT READS NO SPINE IS NOT A TONGUE in model.js.');
     p('# "arm_x" places the two arms of the key\'s underside "-| |-" on their');
     p('# own bars, in x: one value per stem line ("arm_a"/"arm_b" in the profile');
     p('# below), so the pair lands on the stems of the sensor press standing');
@@ -1713,7 +1798,8 @@
         })(r.foot == null ? null
            : XM.armPlaceFor(r.cx, w, n.type, lb, rb, r.foot, armSib.get(n.index))),
         ', [', lap.map(q => '(' + [q.x0, q.x1, q.y0, q.y1, q.z0, q.z1]
-                                    .map(pn).join(', ') + ')').join(', '), ']),');
+                                    .map(pn).join(', ') + ')').join(', '), '], "',
+        r.half === 'B' ? 'B' : 'A', '"),');
     }
     p(']');
     p('');
@@ -1964,15 +2050,22 @@
     const arms = armTargets(bkeys);
     const laps = lapTargets(L, bkeys);
     const key = k => objName.get(k.type + '@' + Math.round(k.cx * 1e4));
+    /* WITH THE TONGUE CLIPPED TO ITS OWN HALF, exactly as buildMeshes does
+     * it — see A TONGUE THAT READS NO SPINE IS NOT A TONGUE in model.js.
+     * Left off, this wrote a checksum for a key nothing builds: the STLs
+     * carry the clipped key and the Blender scene would have carried the
+     * overhang, and the parity check would have blessed the pair. */
     for (const w of L.whites)
       out.push([key(w), XM.buildKey(w.cx, w.w, w.type, w.ctxL, w.ctxR, null,
                                     arms.get(armKey(w.type, w.cx)),
-                                    laps.get(armKey(w.type, w.cx)))]);
+                                    laps.get(armKey(w.type, w.cx)),
+                                    XM.spineHalfSpan(w.half))]);
     for (const sl of L.slots)
       for (const m of sl.members)
         out.push([key(m), XM.buildKey(m.cx, m.w, m.type, null, null, null,
                                       arms.get(armKey(m.type, m.cx)),
-                                      laps.get(armKey(m.type, m.cx)))]);
+                                      laps.get(armKey(m.type, m.cx)),
+                                      XM.spineHalfSpan(m.half))]);
     for (const p of XM.spineParts(L.spineKind, keySpans(L)))
       out.push([p.name, p.tris]);
     for (const p of XM.pressParts(bkeys)) out.push([p.name, p.tris]);
@@ -2087,6 +2180,7 @@ FOOT_YC, FOOT_Z  = ${pn(XM.FOOT.yCentre)}, ${pn(XM.FOOT.z)}
 FIT_ENGAGE       = ${pn(XM.FIT.engage)}   # overlap that makes a comb one solid
 FIT_LAP          = ${pn(XM.FIT.lap)}   # how far a tongue carries on past the spine face
 FIT_GAP          = ${pn(XM.FIT.gap)}   # clearance between the stacked bands
+BACK_Y           = ${pn(XM.BACK_Y)}   # where a key ends; its tongue is all that is behind
 
 # THE FOOT IS NOT A RECTANGLE.  "Feet - A" / "Feet - B" draw all 32 feet as
 # one shape and it is the "-| |-": two mirrored T's, each a full-width
@@ -2334,7 +2428,87 @@ def weld_t_junctions(t):
     return t
 
 
-def build_key(cx, w, prof, arm_x=None, laps=()):
+# =========================================================================
+# A TONGUE THAT READS NO SPINE IS NOT A TONGUE
+#
+# A key hangs off the spine half its own colour's band is on, and the two
+# halves are 1.29 mm apart with nothing bridging them.  A key standing over
+# the seam still gets its full drafted tongue, so the part of it past its own
+# half's end hangs in that air -- and then over the OTHER half, whose band is
+# a different piece it must never touch.  The same is true at the two outer
+# ends of the instrument.
+#
+# So the tongue is cut off flush at its half's edge.  Every key type draws it
+# as the same thing -- an axis-aligned box behind the key's back face,
+# y 0 .. BACK_Y, over the colour's own tongue band, and the ONLY thing any
+# key has behind that face -- so the cut is exact: the box is rebuilt over
+# the span that is left, and the back face is closed across the span the
+# tongue no longer passes through.  No boolean solver is involved, here or in
+# the browser: the shape being cut is known, so the cut is drawn.
+# =========================================================================
+def spine_half_span(half):
+    """the x span of one spine half, by name -- what a tongue on it may reach"""
+    for (hname, hx0, hx1, hy_back, hy_front, layers) in SPINE["halves"]:
+        if hname == half:
+            return (hx0, hx1)
+    return None
+
+
+def clip_tongue_x(t, span):
+    """Clip a key's tongue to span (x0, x1) in x.  t is the key's triangle
+    soup as (x, y, z) points, three to a triangle; returns it with the
+    overhang gone, still closed."""
+    if not span:
+        return t
+    eps = 1e-4
+    # the tongue is everything BEHIND the back face; its own section is read
+    # off the y = 0 end, which is the one place nothing else reaches
+    x0, x1 = float("inf"), float("-inf")
+    z0, z1 = float("inf"), float("-inf")
+    any_behind = False
+    keep = []
+    for i in range(0, len(t), 3):
+        tri = t[i:i + 3]
+        if not any(p[1] < BACK_Y - eps for p in tri):
+            keep.extend(tri)
+            continue
+        any_behind = True
+        for p in tri:
+            if p[1] > eps:
+                continue                          # the y = 0 end only
+            x0, x1 = min(x0, p[0]), max(x1, p[0])
+            z0, z1 = min(z0, p[2]), max(z1, p[2])
+    if not any_behind or not x1 - x0 > eps or not z1 - z0 > eps:
+        return t
+    a, b = max(x0, span[0]), min(x1, span[1])
+    if a - x0 < eps and x1 - b < eps:
+        return t                                  # nothing overhangs
+    T = BACK_Y
+    # the tongue, rebuilt over what is left -- an OPEN prism, because the
+    # back face it grows out of is still the key's own
+    if b - a > eps:
+        push_quad(keep, (b, 0.0, z1), (a, 0.0, z1), (a, 0.0, z0), (b, 0.0, z0))
+        push_quad(keep, (b, 0.0, z0), (a, 0.0, z0), (a, T, z0), (b, T, z0))
+        push_quad(keep, (a, 0.0, z1), (b, 0.0, z1), (b, T, z1), (a, T, z1))
+        push_quad(keep, (b, T, z1), (b, 0.0, z1), (b, 0.0, z0), (b, T, z0))
+        push_quad(keep, (a, 0.0, z0), (a, 0.0, z1), (a, T, z1), (a, T, z0))
+
+    # and the back face closes over every millimetre the tongue used to pass
+    # through and no longer does -- which is the whole of it when the key
+    # reaches no spine at all
+    def patch(p, q):
+        if q - p > eps:
+            push_quad(keep, (q, T, z1), (p, T, z1), (p, T, z0), (q, T, z0))
+
+    if b - a > eps:
+        patch(x0, a)
+        patch(b, x1)
+    else:
+        patch(x0, x1)
+    return keep
+
+
+def build_key(cx, w, prof, arm_x=None, laps=(), span=None):
     """A drafted profile instantiated at this key's width, with the two arms
     of its underside "-| |-" placed at arm_x -- one x per stem line -- so they
     stand on the sensor press, the drafted stem width whatever this key's width
@@ -2344,7 +2518,10 @@ def build_key(cx, w, prof, arm_x=None, laps=()):
     laps are the boxes that carry this key's tongue on THROUGH the spine's
     front face and into the band it belongs to, so the key's solid crosses
     into the spine's instead of arriving at it on a coincident plane.  They
-    are part of the KEY, in the key's own filament."""
+    are part of the KEY, in the key's own filament.
+
+    span is the x reach of the spine half this key hangs off; the tongue is
+    cut off flush there -- see clip_tongue_x."""
     v, n, mirror = prof["v"], prof["nv"], prof["mirror"]
     x_left = cx - w / 2.0
     V = [None] * n
@@ -2391,11 +2568,16 @@ def build_key(cx, w, prof, arm_x=None, laps=()):
         if mirror:
             ring = ring[::-1]          # mirroring flips face winding
         emit(triangulate_face(V, ring))
+    # THE TONGUE IS CUT BEFORE THE LAP IS ADDED.  The lap is already the
+    # half's own -- it is clipped where it is worked out -- and it lives
+    # behind the back face too, so cutting after it would read it as part of
+    # the tongue.
+    cut = clip_tongue_x(t, span)
     # the lap into the spine -- part of the key, not of the band
     for (lx0, lx1, ly0, ly1, lz0, lz1) in laps:
-        push_box(t, lx0, lx1, ly0, ly1, lz0, lz1)
+        push_box(cut, lx0, lx1, ly0, ly1, lz0, lz1)
     # and said in a way that closes -- see T-JUNCTIONS above
-    return weld_t_junctions(t)
+    return weld_t_junctions(cut)
 
 
 # =========================================================================
@@ -2903,7 +3085,7 @@ def build():
 
     keys_from_sheet = 0
     for (name, ktype, cx, width, depth, profile,
-         wx, wy, wz, foot, arm_x, lap) in KEYS:
+         wx, wy, wz, foot, arm_x, lap, half) in KEYS:
         coll = part[LAYER_PART[KEY_LAYER[ktype]]]
         if USE_BLEND_CATEGORIES:
             src = find_category(ktype)
@@ -2912,7 +3094,8 @@ def build():
                 keys_from_sheet += 1
                 continue
         make_mesh_object(name,
-                         build_key(cx, width, KEY_PROFILES[profile], arm_x, lap),
+                         build_key(cx, width, KEY_PROFILES[profile], arm_x, lap,
+                                   spine_half_span(half)),
                          coll, mats[KEY_LAYER[ktype]])
 
     spine_from_sheet = 0
