@@ -372,6 +372,12 @@
   body.mode-play .kb-band-tag{cursor:default}
   body.mode-play .kb-band-tag .ed{display:none}
   body.mode-play .kb-band-veil{display:none}
+  /* ---------- an exported picture has no drawer to be a device in ----------
+     "upper"/"lower" tells you which band you're editing on screen; a picture
+     of the finished pair doesn't need it, and the label would sit stamped
+     across a keyboard nobody drew there. Scoped to .exporting, not mode-play
+     itself, so the live Play tab keeps its tags. */
+  body.exporting .kb-band-tag{display:none}
   body.mode-play .kb-slot.empty,
   body.mode-play .kb-slot.end.empty,
   body.mode-export .kb-slot.empty,
@@ -514,8 +520,6 @@
       <div id="rig-edit" style="display:none">
         <div class="tune-h">Which device the panel edits</div>
         <div id="rig-units" class="rigmap"></div>
-        <button class="wide" id="rig-copy" style="width:100%;margin-top:7px"
-          title="Copies this device's key types, widths and scale to every other device. Each keeps its own numbering.">⧉ Copy This Layout to the Others</button>
 
         <!-- ---- and its relationship to the others ----
              note(i) = base + step x i, and the rig reads both off its own
@@ -713,10 +717,12 @@
                   title="Double-click a key to type a ratio (e.g. 3/2) cents from 1/1 (702c), an EDO step (7\12) or Hz (392hz). Enter moves to the next key.">&#9998; Edit Keys on the Strip</button>
                 <div class="tune-read" id="t-cus-sel" style="margin-top:6px"></div>
 
-                <div class="tune-h">Fill from list</div>
-                <textarea id="t-scale" rows="8" spellcheck="false"
-                  title="One degree per line, from degree 0 up — this is what the keys carry, right now. Edit a line the way you would type onto its key: a ratio, a cents figure or a step of a division. A blank line puts that degree back to Auto."></textarea>
-                <div class="tune-read" id="t-scale-read" style="margin-top:6px"></div>
+                <div id="t-scale-wrap">
+                  <div class="tune-h">Fill from list</div>
+                  <textarea id="t-scale" rows="8" spellcheck="false"
+                    title="One degree per line, from degree 0 up — this is what the keys carry, right now. Edit a line the way you would type onto its key: a ratio, a cents figure or a step of a division. A blank line puts that degree back to Auto."></textarea>
+                  <div class="tune-read" id="t-scale-read" style="margin-top:6px"></div>
+                </div>
                 <div class="row" style="gap:6px">
                   <button id="t-cus-reset" style="flex:1"
                     title="Throw away every typed pitch and put all the degrees back to their Auto reading.">Reset all to Auto</button>
@@ -841,7 +847,7 @@
                 title="Transposes the whole keyboard by one equave of the current scale — 17 notes on a 17-note keyboard, 19 on a 19. The strip's pitches move with it, so a key sounds the same whether a finger or a controller presses it, and the map from a MIDI number to a key never moves.">
                 <div class="pressrow"
                   title="&uarr; and &darr; transpose in Play, and whenever a controller is connected; &larr; and &rarr; still orbit the view.">
-                  <label>&#8597; Transpose</label>
+                  <label>&#8597; Transpose by Equave</label>
                   <span class="rotbtns">
                     <button id="m-tr-dn" title="Down one equave (&darr;)">&#9660;</button>
                     <span id="m-tr-v" class="pressval">0</span>
@@ -849,13 +855,82 @@
                   </span>
                 </div>
 
-                <div class="row" style="align-items:center;margin-top:11px">
+                <div class="row" id="m-tr-step-row" style="align-items:center;margin-top:11px">
                   <label class="tune-inline" for="m-tr-step"
-                    title="How far one press moves, counted in keys — which is what a MIDI note number counts in too. Design's Notes in Scale is the equave, and is the default.">Equave</label>
+                    title="How far one press moves, counted in keys — which is what a MIDI note number counts in too. Design's Notes in Scale is the default.">MIDI Number</label>
                   <input id="m-tr-step" type="number" min="1" max="128" step="1" style="width:5em"
                     title="One press moves every pitch by the interval that many keys span from 1/1. Leave it at the Notes in Scale and one press is an equave; set it to 7 on a 12-note keyboard and one press is a fifth. Clear the field to follow Notes in Scale again.">
-                  <p class="tune-read" id="m-tr-step-read" style="margin:0"></p>
                 </div>
+
+                <!-- ---- stacked, and read one keyboard at a time ----
+                     Two built controllers, each with its own fixed run of
+                     MIDI numbers, is exactly the case a single "Equave"
+                     could not state: pressing Transpose has to move the
+                     lower keyboard by ITS OWN count of keys and the upper by
+                     its, in the same press, or a 19-note lower and a 17-note
+                     upper drift apart from wherever they started aligned.
+                     One shared press-count (the arrows above) times each
+                     device's own MIDI Number gives exactly that, and is
+                     what Custom's per-device loop (see tuning.js) is read
+                     against — see rigIsStacked(). -->
+                <div id="m-tr-step-rig" style="display:none">
+                  <div class="row" style="align-items:center;margin-top:11px">
+                    <label class="tune-inline" for="m-tr-step-upper"
+                      title="How far one press moves the UPPER keyboard, counted in its own keys — its own MIDI numbering. Its own Notes in Scale is the default.">Upper MIDI Number</label>
+                    <input id="m-tr-step-upper" type="number" min="1" max="128" step="1" style="width:5em"
+                      title="One press moves the upper keyboard's pitches by the interval that many of ITS OWN keys span from 1/1. Leave it at its Notes in Scale and one press is an equave. Clear the field to follow Notes in Scale again.">
+                  </div>
+                  <div class="row" style="align-items:center;margin-top:6px">
+                    <label class="tune-inline" for="m-tr-step-lower"
+                      title="How far one press moves the LOWER keyboard, counted in its own keys — its own MIDI numbering. Its own Notes in Scale is the default.">Lower MIDI Number</label>
+                    <input id="m-tr-step-lower" type="number" min="1" max="128" step="1" style="width:5em"
+                      title="One press moves the lower keyboard's pitches by the interval that many of ITS OWN keys span from 1/1. Leave it at its Notes in Scale and one press is an equave. Clear the field to follow Notes in Scale again.">
+                  </div>
+                </div>
+              </div>
+
+              <!-- ---- where the octave actually turns over ----
+                   floor(key / period) assumes the written scale wraps back
+                   down exactly every `period` keys, which is true of an
+                   isomorphic keyboard built for its own division but not of
+                   a generalized one mapping a handful of physical keys onto
+                   a larger gamut by hand (19 keys carrying a 31-tone scale,
+                   degree by typed degree) — there the wrap can sit anywhere
+                   in the run, and left where the device's own loop happens
+                   to end, the material keeps climbing right up to that edge
+                   and then drops. This moves the edge to wherever it
+                   belongs instead — see pivotEq() in tuning.js — once for
+                   the whole keyboard, or per device on a stacked rig, the
+                   same split Transpose's MIDI Number takes. -->
+              <div class="presswrap" style="margin-top:12px">
+                <div class="pressrow" id="m-mrot-row">
+                  <label>&#8597; Rotate MIDI Number</label>
+                  <span class="rotbtns">
+                    <button id="m-mrot-dn" title="Move the octave turnover one key earlier.">&#9660;</button>
+                    <span id="m-mrot-v" class="pressval">0</span>
+                    <button id="m-mrot-up" title="Move the octave turnover one key later.">&#9650;</button>
+                  </span>
+                </div>
+                <div id="m-mrot-rig" style="display:none">
+                  <div class="pressrow"><label>&#8597; Rotate MIDI Number</label></div>
+                  <div class="pressrow" style="margin-top:6px">
+                    <label>Upper</label>
+                    <span class="rotbtns">
+                      <button id="m-mrot-upper-dn" title="Move the upper keyboard's octave turnover one key earlier.">&#9660;</button>
+                      <span id="m-mrot-upper-v" class="pressval">0</span>
+                      <button id="m-mrot-upper-up" title="Move the upper keyboard's octave turnover one key later.">&#9650;</button>
+                    </span>
+                  </div>
+                  <div class="pressrow" style="margin-top:6px">
+                    <label>Lower</label>
+                    <span class="rotbtns">
+                      <button id="m-mrot-lower-dn" title="Move the lower keyboard's octave turnover one key earlier.">&#9660;</button>
+                      <span id="m-mrot-lower-v" class="pressval">0</span>
+                      <button id="m-mrot-lower-up" title="Move the lower keyboard's octave turnover one key later.">&#9650;</button>
+                    </span>
+                  </div>
+                </div>
+              </div>
 
               <div id="m-live" style="display:none">
                 <label for="m-in">Input</label>
@@ -1362,6 +1437,32 @@ presetSel.onchange = () => {
     const all = allPresets();
     if (!all[name]) return;
     const saved = JSON.parse(JSON.stringify(all[name]));
+    /* A RIG PRESET — a whole desk, saved with it: two (or four) devices
+     * that are not the same keyboard, plus the tuning that only makes
+     * sense standing across all of them (a stacked Custom scale loops each
+     * device on its own, per keyboard — see tuning.js). One keyboard's
+     * worth of fields would lose the other devices entirely, so this
+     * replaces the desk the way opening a shared rig link does, rather
+     * than going through setDesign(). */
+    if (saved.rig){
+      const r = migrateRig(saved.rig);
+      if (r){
+        rig = r; selectUnit(rig.sel);
+        forgetPressBlend();
+        syncInputs(); rebuild();
+        if (saved.x) XShare.applyPlay(saved.x);
+        design.preset = presetSel.value;
+      }
+      return;
+    }
+    /* A PLAIN PRESET IS ONE KEYBOARD, NOT A DESK.  Selecting it while a rig
+     * preset's stack or side-by-side is still standing would leave that
+     * shape in place with only one device replaced — a single-keyboard
+     * preset loading as half of somebody else's rig. So choosing one always
+     * puts the desk back to a single device, the way pressing "single"
+     * itself does. */
+    rig.side = false; rig.stack = false;
+    selectUnit(rig.sel);          // re-clamps to slot 0, the only one left
     play = saved.x || null;
     delete saved.x;
     setDesign(migrate(saved));
@@ -1370,6 +1471,8 @@ presetSel.onchange = () => {
     /* a drafted sheet is written out as 32 individual keys, so it opens as
      * the whole keyboard said once; a SAVED preset keeps the scale length
      * it was saved with */
+    rig.side = false; rig.stack = false;
+    selectUnit(rig.sel);          // re-clamps to slot 0, the only one left
     setDesign(XD.presetDesign(+presetSel.value));
     design.period = XM.NOTES;
   }
@@ -1565,30 +1668,6 @@ function buildUnitMap(){
     box.appendChild(b);
   }
 }
-
-
-/* ---- one keyboard, on every device ----
- * The layout travels and the numbering stays: a rig is normally the same
- * keyboard read several ways, and the reading is exactly the part that must
- * not be overwritten by the copy. */
-$('rig-copy').onclick = () => {
-  const src = JSON.parse(JSON.stringify(design));
-  delete src.preset; delete src.noteBase; delete src.noteStep;
-  let n = 0;
-  for (const slot of rigSlots()){
-    if (slot === rig.sel) continue;
-    const was = rig.units[slot] || {};
-    const d = JSON.parse(JSON.stringify(src));
-    if (Number.isFinite(was.noteBase)) d.noteBase = was.noteBase;
-    if (Number.isFinite(was.noteStep)) d.noteStep = was.noteStep;
-    rig.units[slot] = d;
-    n++;
-  }
-  selectUnit(rig.sel);
-  syncInputs(); rebuild();
-  toast(n ? `layout copied to ${n} other device${n===1?'':'s'} — numbering kept`
-          : 'nothing to copy to');
-};
 
 function syncInputs(){
   showRig();
@@ -1930,7 +2009,12 @@ const ROW_H = 142;    // px one unit's band is — sized to the tallest thing dr
                       // in it (a white key's 14px headroom + its 127.6px body),
                       // so the band's own bottom margin is the only air left,
                       // matching the one above it instead of stacking a second.
-const ROW_GAP = 12;   // px between two bands — the stack, said in a plan
+let ROW_GAP = 12;     // px between two bands — the stack, said in a plan
+const ROW_GAP_LIVE = ROW_GAP;
+/* the exported picture is not a plan needing to state a lift that isn't
+ * there on paper — it can just sit the bands flush, buffered the same as
+ * two white keys are from each other */
+const ROW_GAP_FLUSH = XM.SIZE.whiteGap * 1.5;
 
 /* ===================== building the rig =====================
  *
@@ -2056,6 +2140,26 @@ function rigAnchorLabel(){
   return XM.rigCount(rigCfg()) > 1 ? XM.rigLabel(anchorUnit()) : '';
 }
 
+/** A device's own Notes in Scale, clamped the same way the anchor's is. */
+function unitPeriodOf(d){
+  const n = (d || {}).period | 0;
+  return (n >= 2 && n <= XM.NOTES) ? n : XM.NOTES;
+}
+
+/** Whether the rig is stacked — the gate for Custom to read each device's
+ *  own Notes in Scale as its own loop (see tuning.js) rather than the one
+ *  flat rig-wide equave Auto still reads. Side by side is left alone: two
+ *  columns are a CONTINUATION of one scale, not two independent ones, so
+ *  they keep sharing the flat reading Custom always used. */
+function rigIsStacked(){ return !!rig.stack; }
+
+/** Every device actually standing in the rig, with its own numbering and
+ *  its own Notes in Scale — what a stacked rig's Custom tuning loops each
+ *  one against, and what its Transpose panel lists a MIDI Number field for. */
+function rigDevices(){
+  return rigShape().map(u => ({ slot: u.slot, label: XM.rigLabel(u), period: unitPeriodOf(u.design) }));
+}
+
 /* The strip grows to hold the rig rather than clipping it — but never past
  * half the window, because a rig two units deep would otherwise take the 3D
  * view's space with it.  Past that it scrolls, which is the honest failure:
@@ -2143,6 +2247,11 @@ function buildUnit(u, inner, rows){
   const Y = mm => top + 14 + mm*1.5;
   const note = i => u.note(i);
   const of = rows*u.cols > 1 ? ` · ${u.label} keyboard` : '';
+  /* This device's own Notes in Scale, and which device it is — carried on
+   * every key so Custom (on a stacked rig) can loop each keyboard through
+   * its own period instead of the rig's flat, interleaved one. See the
+   * `keyCtx` reader in tuning.js. */
+  const ownPeriod = unitPeriodOf(u.design);
 
   // spine — half A and half B, and only ever these two
   // seen from above, so the strip takes the top band's drafted colour —
@@ -2173,10 +2282,21 @@ function buildUnit(u, inner, rows){
     d.style.left = X(w.x0)+'px'; d.style.width=(w.w*PX)+'px';
     d.style.top = Y(0)+'px'; d.style.height = (85.0688*1.5)+'px';
     d.style.background = spineColor; d.style.setProperty('--key-text', keyText);
+    /* THE NUMBER ON THE KEY IS THE ONE ON THE HARDWARE.  A built controller
+     * numbers its own sensors 0, 1, 2… — one keyboard, counted from itself —
+     * and a stacked or side-by-side rig does not get to relabel it, because
+     * nothing about the sensor under the key changed. What DOES change on a
+     * rig is which pitch that sensor is wired to, which is `n` below: the
+     * same two numbers the 3D inspector already keeps apart as "note #" and
+     * "note # in rig" (see showInspect) — shown here as one, since the strip
+     * has room for only one line, with the rig's reading in the tooltip. */
     const n = w.noteIndex != null ? note(w.noteIndex) : null;
     if (n != null) d.dataset.note = n;
-    d.innerHTML = `<div class="nm">${n != null ? n : w.i}</div>`;
-    d.title = `white ${w.i}${of} · key ${n}  x ${w.cx.toFixed(3)}  w ${w.w.toFixed(4)}`;
+    if (w.noteIndex != null){ d.dataset.local = w.noteIndex; d.dataset.udev = u.slot; d.dataset.uperiod = ownPeriod; }
+    d.innerHTML = `<div class="nm">${w.noteIndex != null ? w.noteIndex : w.i}</div>`;
+    d.title = `white ${w.i}${of} · key ${w.noteIndex}` +
+              (of ? ` (note ${n} in the rig)` : '') +
+              `  x ${w.cx.toFixed(3)}  w ${w.w.toFixed(4)}`;
     inner.appendChild(d);
   }
   /* ---- the boundary between two whites ----
@@ -2226,7 +2346,9 @@ function buildUnit(u, inner, rows){
     for (const m of ordered){
       const k = document.createElement('div');
       k.className = 'kb-m ' + cssOf(m.type);
-      if (m.noteIndex != null) k.dataset.note = note(m.noteIndex);
+      const mn = m.noteIndex != null ? note(m.noteIndex) : null;
+      if (mn != null) k.dataset.note = mn;
+      if (m.noteIndex != null){ k.dataset.local = m.noteIndex; k.dataset.udev = u.slot; k.dataset.uperiod = ownPeriod; }
       /* WHERE THE LAYOUT PUT IT.  Stacked keys sit on the gap's centre and
        * a side-by-side pair does not, so the strip reads each key's own x
        * rather than centring it — which is the same number for a stacked
@@ -2238,11 +2360,12 @@ function buildUnit(u, inner, rows){
       k.style.height = (held && m.spec.pairRole === 'front'
         ? keyHeight - splitTop : keyHeight) + 'px';
       if (held) splitTop += keyHeight;
-      k.innerHTML = `<span class="nm">${m.noteIndex != null ? note(m.noteIndex) : ''}</span>`;
-      k.title = live ? (held ? `${held} (${m.type}) — click to remove the pair`
-                             : lanes ? `${m.type} — click to remove it and leave the other`
-                             : `${m.type} — click to remove`)
-                     : `${m.type}${of}`;
+      k.innerHTML = `<span class="nm">${m.noteIndex != null ? m.noteIndex : ''}</span>`;
+      k.title = (live ? (held ? `${held} (${m.type}) — click to remove the pair`
+                              : lanes ? `${m.type} — click to remove it and leave the other`
+                              : `${m.type} — click to remove`)
+                      : `${m.type}${of}`)
+              + (of && mn != null ? ` · key ${m.noteIndex} (note ${mn} in the rig)` : '');
       if (live) k.onclick = ev => { ev.stopPropagation();
         setSlot(sl.i, lanes ? removeLane(sl.names, m.ord)
                             : removeFrom(sl.names, m.type)); };
@@ -3369,16 +3492,15 @@ function download(name, buf, mime){
   setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
 }
 /* ---- WHAT AN EXPORT IS OF, ON A RIG ----
- * A device.  You print one keyboard at a time, and with four possibly
- * different keyboards standing together, "the .stl" is not a thing — so the
- * single-part buttons and the log export the device the drawer is editing,
- * and say which in the filename.
- *
- * THE ZIP IS THE EXCEPTION, and it is the one that matters: it carries every
- * DISTINCT keyboard in the rig, each in its own folder. Four devices sharing
- * one design are still one folder, because they are one thing to print four
- * times; diverge one and a fourth folder appears. Nobody should have to
- * remember to come back and export the upper manual separately.
+ * EVERY DISTINCT KEYBOARD IN THE RIG. A stacked pair's upper and lower are
+ * both part of "the layout"; nobody should have to remember to come back and
+ * export the lower manual separately just because the drawer is editing the
+ * upper one. So the colour buttons and the log export the device the drawer
+ * is editing when that is the only keyboard standing, and hand back a zip —
+ * one file (or folder, for the log) per distinct keyboard — the moment a
+ * second, different device joins it. Four devices sharing one design are
+ * still one file, because they are one thing to print four times; diverge
+ * one and a second appears.
  */
 const slug = u => (u && (u.rows*u.cols) > 1) ? '-' + u.label.replace(/ /g,'-') : '';
 const nameOf = (LL,u) => `xenachord-32key-s${LL.s.toFixed(2)}${slug(u)}`;
@@ -3413,8 +3535,17 @@ const PRINT_PARTS = ['white', 'black', 'gray'];
  * gray ones (XD.bedAngle).  There is no other way to get the file: it is
  * simply what "export an STL" means here. */
 
-/** the colours the keyboard on the panel actually has something to print in */
-function partsHere(){ return meshes ? XD.printParts(meshes) : []; }
+/** the colours ANY keyboard in the rig actually has something to print in —
+ *  a stacked pair's lower manual having black keys the upper lacks should
+ *  still light up the black button, not just whichever device is on screen */
+function partsHere(){
+  const have = new Set();
+  for(const u of rigUnits()){
+    if(!u.build || !u.build.meshes) continue;
+    for(const p of XD.printParts(u.build.meshes)) have.add(p);
+  }
+  return [...have];
+}
 
 /** A colour a design does not use is not a file — grey out the button
  *  that would hand over an empty STL. */
@@ -3427,25 +3558,54 @@ function showParts(){
   }
 }
 
-document.querySelectorAll('button[data-part]').forEach(b=>{
-  b.onclick = ()=>{ if(!meshes) return;
-    const p=b.dataset.part;
-    const tris = XD.printMesh(meshes, p, { bed: true });
-    if(!tris.length) return toast(`this keyboard has no ${p} parts`);
-    download(`${baseName()}-${p}.stl`, XD.toSTL(tris, p)); };
-});
-$('dl-zip').onclick = ()=>{
-  if(!meshes) return;
-  /* one folder per distinct keyboard — the build cache already knows which
-   * devices are the same keyboard, so this asks it rather than comparing */
+/** every DISTINCT keyboard in the rig, one entry each — the same dedupe
+ *  dl-zip uses, so a stacked pair's upper and lower both come along and
+ *  three devices sharing a design still print as one file, not three */
+function distinctUnits(){
   const seen = new Map();
   for(const u of rigUnits()){
     if(!u.build || !u.build.meshes || seen.has(u.build.key)) continue;
     seen.set(u.build.key, u);
   }
-  const many = seen.size > 1;
+  return [...seen.values()];
+}
+
+document.querySelectorAll('button[data-part]').forEach(b=>{
+  b.onclick = ()=>{ if(!meshes) return;
+    const p = b.dataset.part;
+    const units = distinctUnits();
+    /* ONE KEYBOARD ON THE DESK — the old single-file download, unchanged. */
+    if(units.length <= 1){
+      const tris = XD.printMesh(meshes, p, { bed: true });
+      if(!tris.length) return toast(`this keyboard has no ${p} parts`);
+      download(`${baseName()}-${p}.stl`, XD.toSTL(tris, p));
+      return;
+    }
+    /* A RIG — upper and lower (or however many stand together) each need
+     * their own colour to be picked up off the same bed, and a single STL
+     * cannot hold two files, so this is the one case a colour button hands
+     * back a zip instead of an .stl. */
+    const files = [], taken = new Set();
+    for(const u of units){
+      let nm = nameOf(u.L, null);
+      if(taken.has(nm)) nm = nameOf(u.L, u);
+      taken.add(nm);
+      const tris = XD.printMesh(u.build.meshes, p, { bed: true });
+      if(tris.length) files.push({ name: `${nm}-${p}.stl`, data: XD.toSTL(tris, p) });
+    }
+    if(!files.length) return toast(`no keyboard in this rig has ${p} parts`);
+    download(`xenachord-32key-s${L.s.toFixed(2)}-rig-${p}.zip`,
+             XD.makeZip(files), 'application/zip');
+  };
+});
+$('dl-zip').onclick = ()=>{
+  if(!meshes) return;
+  /* one folder per distinct keyboard — the build cache already knows which
+   * devices are the same keyboard, so this asks it rather than comparing */
+  const units = distinctUnits();
+  const many = units.length > 1;
   const files = [], taken = new Set();
-  for(const u of seen.values()){
+  for(const u of units){
     /* the folder is named for the KEYBOARD, not for one of the devices that
      * prints it — three devices can share a design, and picking whichever of
      * them came first would read as a file only that one needed.  Two
@@ -3467,7 +3627,7 @@ $('dl-zip').onclick = ()=>{
   }
   const zipName = `xenachord-32key-s${L.s.toFixed(2)}` + (many ? '-rig' : '');
   download(`${zipName}.zip`, XD.makeZip(files), 'application/zip');
-  if(many) toast(`${seen.size} distinct keyboards exported, one folder each`);
+  if(many) toast(`${units.length} distinct keyboards exported, one folder each`);
 };
 $('dl-py').onclick = ()=>{
   if(!L) return;
@@ -3659,7 +3819,7 @@ function traceStrip(){
 function inPlayStyling(fn){
   const body = document.body, was = body.className;
   body.classList.remove('mode-export', 'tune-edit', 'resizing');
-  body.classList.add('mode-play', 'bright');
+  body.classList.add('mode-play', 'bright', 'exporting');
   try {
     applyLabelSizing();
     return fn();
@@ -3676,7 +3836,16 @@ function inPlayStyling(fn){
  * a band tag overhangs the keyboard it names, and a rectangle behind the lot
  * would draw a box round the overhang. */
 async function buildPlaySvg(){
-  const traced = inPlayStyling(traceStrip);
+  /* stacked bands are drawn with air between them so the live app can show a
+   * lift a plan view can't otherwise state (see ROW_GAP above) — the picture
+   * doesn't owe anyone that plan-reading caveat, so it re-lays the strip
+   * flush for the duration of the trace and puts the working gap straight
+   * back for the app. */
+  const flush = ROW_GAP !== ROW_GAP_FLUSH;
+  if(flush){ ROW_GAP = ROW_GAP_FLUSH; buildStrip(); }
+  let traced;
+  try { traced = inPlayStyling(traceStrip); }
+  finally { if(flush){ ROW_GAP = ROW_GAP_LIVE; buildStrip(); } }
   if(!traced) return null;
   const pad = 10;
   const x = traced.x0 - pad, y = traced.y0 - pad;
@@ -3817,7 +3986,7 @@ $('share-input').onchange = async (e)=>{
  * stack: a layout opened by mistake is one Cmd-Z away from the keyboard
  * that was there before it.
  */
-function takeShared(got, how){
+function takeShared(got, how, toPlay){
   if (!got || !got.value) return false;
   if (got.kind === 'rig'){
     const r = migrateRig(got.value);
@@ -3845,6 +4014,11 @@ function takeShared(got, how){
   const what = got.kind === 'rig' ? 'the whole rig' : 'this keyboard';
   toast(`${how} — ${what} replaced` +
         (took.length ? `, with its ${took.join(', ')}` : ''));
+  /* A LINK IS FOR PLAYING IT, NOT DESIGNING IT. Whoever built this sent it to
+   * be sounded, not edited — a link opened cold should land where that
+   * happens, the way opening a saved file or dragging one in still lands
+   * wherever the drawer already was. */
+  if (toPlay){ setMode('play'); openDrawer('play'); }
   return true;
 }
 
@@ -3858,7 +4032,7 @@ function openSharedLink(){
   const got = XShare.fromHash();
   if (!got) return false;
   if (!got.value){ toast('that share link is damaged — nothing opened'); return false; }
-  return takeShared(got, 'opened from a share link');
+  return takeShared(got, 'opened from a share link', true);
 }
 
 /* ===================== 3D preview ===================== */

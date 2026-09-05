@@ -96,8 +96,11 @@ const T = {
   sagFlavour: 'revo',
   rot: 0,                         // which degree comes to rest under key 0
   scale: '1/1 9/8 5/4 4/3 3/2 5/3 15/8',   // the fill list, not the tuning
-  custom: {},                     // degree -> entry, in Custom only
+  custom: {},                     // degree -> entry, in Custom only; see customKey
   trStep: null,                   // keys one Transpose moves; null follows Design
+  trStepByDevice: {},             // stacked only: device slot -> its own trStep
+  midiRot: 0,                     // which key starts the next equave — see pivotEq
+  midiRotByDevice: {},            // stacked only: device slot -> its own midiRot
   equaveShift: 0,                 // how many of those have been taken
 };
 
@@ -123,6 +126,8 @@ if (T.system === 'ji') {
 if (T.system !== 'auto' && T.system !== 'custom') T.system = 'auto';
 delete T.equave;                  // the equave was an interval once; it is a count now
 if (!T.custom || typeof T.custom !== 'object') T.custom = {};
+if (!T.trStepByDevice || typeof T.trStepByDevice !== 'object') T.trStepByDevice = {};
+if (!T.midiRotByDevice || typeof T.midiRotByDevice !== 'object') T.midiRotByDevice = {};
 delete T.edoRot; delete T.jiRot;
 
 const save = () => { try { localStorage.setItem(STORE, JSON.stringify(T)); } catch (e) {} };
@@ -289,27 +294,147 @@ function typedCount() {
   return n;
 }
 
+/* ---------------------------------------------------------------------
+ *  A STACKED KEYBOARD, READ DEVICE BY DEVICE
+ *
+ *  Auto keeps the one flat reading it always had — the rig's interleaved
+ *  equave, exactly as rigEquave() states it — because that reading is a fact
+ *  about the GEOMETRY (how the devices interchange) and nothing about typing
+ *  changes it.
+ *
+ *  Custom is different.  Two built controllers standing one above the other
+ *  already have their own fixed, sequential numbering (see the strip's key
+ *  labels), and a player typing a 31-tone scale onto them is not filling one
+ *  flat list — they are filling the LOWER keyboard's own 19-key loop and the
+ *  UPPER's own 17-key loop independently, by hand, degree by degree,
+ *  choosing for themselves which of the two repeat a pitch and which do not.
+ *  So Custom, on a stacked rig only, reads each key off its OWN device's
+ *  Notes in Scale rather than the rig's combined one.  Side by side is left
+ *  out of this on purpose: two columns there are a CONTINUATION of one
+ *  scale, not two independent instruments, so they keep sharing the flat
+ *  reading Custom always used.
+ *
+ *  T.custom stays one flat object regardless — customKey() is what keeps a
+ *  lower keyboard's degree 3 and an upper's apart, by folding the device's
+ *  own slot into the key. On every rig that is NOT stacked-and-Custom this
+ *  folds away to nothing (slot 0, the only slot a plain keyboard has), so a
+ *  single keyboard's saved scale reads back exactly as it always did.
+ * ------------------------------------------------------------------ */
+
+/** Whether Custom should read each key off its own device, rather than the
+ *  rig's one flat equave. */
+function perDeviceCustom() {
+  return T.system === 'custom' &&
+    typeof window.rigIsStacked === 'function' && window.rigIsStacked();
+}
+
+/** A key element's own device (by rig slot) and its place — 0-based, the
+ *  same number the strip prints on it — in that device's own run of keys. */
+function keyCtx(el) {
+  if (!el || el.dataset.local === undefined) return null;
+  return { udev: +el.dataset.udev || 0,
+           uperiod: +el.dataset.uperiod || equaveNotes(),
+           local: +el.dataset.local };
+}
+
+/** The same, found from a key's rig-wide note number rather than its
+ *  element — for the one commit path (closeEditor) that only kept the
+ *  number across the rebuild the box's Enter triggered. */
+function ctxForNote(note) {
+  const inner = stripInner();
+  const el = inner && inner.querySelector(`[data-note="${note}"]`);
+  return el ? keyCtx(el) : null;
+}
+
+/**
+ * Which physical key starts the NEXT equave, counted the same way T.rot
+ * counts degrees — 0 is wherever the device's own period boundary already
+ * falls, which is exactly what floor(slot / period) alone assumes.
+ *
+ * That assumption is only sound when the written scale actually turns over
+ * every `period` keys. An isomorphic keyboard built for its own equal
+ * division does — but a generalized keyboard mapping a handful of physical
+ * keys onto a LARGER division (19 keys carrying a 31-tone gamut, degree by
+ * hand-typed degree) can turn over anywhere in the run, wherever the
+ * degrees themselves wrap back down. Left at the device's own boundary,
+ * the material keeps climbing right up to the edge and then drops — the
+ * "Rotate MIDI Number" control moves the boundary to wherever it belongs
+ * instead, per device on a stacked rig, once for the whole keyboard
+ * otherwise.
+ */
+function midiRotFor(udev) {
+  if (perDeviceCustom()) return (T.midiRotByDevice || {})[udev] | 0;
+  return T.midiRot | 0;
+}
+
+/** floor(x / period), pivoted so the boundary sits at `piv` instead of at a
+ *  multiple of `period` — and is exactly floor(x / period) when piv is 0,
+ *  so a keyboard that never touches the control reads precisely as it
+ *  always did. */
+function pivotEq(x, piv, period) {
+  return Math.floor((x - piv) / period) - Math.floor(-piv / period);
+}
+
+/**
+ * The degree a key names, and how many times it has wrapped — its own
+ * device's, when Custom is reading a stacked rig device by device; the
+ * rig's flat one otherwise, and always for Auto.
+ */
+function keyDegree(note, ctx) {
+  if (perDeviceCustom() && ctx) {
+    const slot = ctx.local + T.rot;
+    return { d: mod(slot, ctx.uperiod), eq: pivotEq(slot, midiRotFor(ctx.udev), ctx.uperiod),
+             N: ctx.uperiod, udev: ctx.udev };
+  }
+  const N = equaveNotes(), slot = note + T.rot;
+  return { d: mod(slot, N), eq: pivotEq(slot, midiRotFor(0), N), N, udev: 0 };
+}
+
+/** Where a degree's typed entry lives in T.custom — see the note above. */
+const customKey = (d, udev) => perDeviceCustom() ? (udev * 1000 + d) : d;
+
+/** entryOf and isTyped, addressed by the composite key customKey gives —
+ *  identical to entryOf(d,N)/isTyped(d) whenever customKey(d,udev) === d,
+ *  which is every reading that is not Custom-on-a-stacked-rig. */
+function entryOfKey(key, d, N) {
+  if (T.system === 'custom') {
+    const e = T.custom[key];
+    if (e && e.kind) return e;
+  }
+  return autoEntry(d, N);
+}
+const isTypedKey = (key) => T.system === 'custom' && !!(T.custom[key] && T.custom[key].kind);
+
+/** typedCount(), for one device's own run of degrees. */
+function typedCountFor(udev, N) {
+  let n = 0;
+  for (let d = 0; d < N; d++) if (isTypedKey(customKey(d, udev))) n++;
+  return n;
+}
+
 /**
  * What key `i` carries.
  *
- * `slot` walks the scale from key 0 with the rotation applied; the degree is
- * that position folded into the scale and the equave count is how many times
- * it wrapped, so a key an equave up the strip is an equave up in pitch
- * however far the scale is rotated — and however far from ascending the
- * degrees inside one equave happen to run.
+ * `ctx`, when given, is the key's own device and place in it (see keyCtx) —
+ * what Custom reads on a stacked rig. Without it, or off Custom, or off a
+ * rig that is not stacked, the rig's one flat reading is exactly what it
+ * always was: `slot` walks the scale from key 0 with the rotation applied,
+ * the degree is that position folded into the scale and the equave count is
+ * how many times it wrapped.
  */
-function pitchOf(i) {
-  const N = equaveNotes();
-  const slot = i + T.rot;
-  const deg = mod(slot, N), eq = Math.floor(slot / N);
-  const e = entryOf(deg, N);
+function pitchOf(i, ctx) {
+  const { d, eq, N, udev } = keyDegree(i, ctx);
+  const key = customKey(d, udev);
+  const e = entryOfKey(key, d, N);
   const cents = entryCents(e);
-  /* The transposition is ONE interval added to every key alike, so it moves
-   * the pitch and touches neither the degree nor the entry the name is
-   * spelled from. */
-  return { deg, eq, entry: e, typed: isTyped(deg), cents, edoN: N,
+  /* The transposition is ONE interval added to every key of a device alike
+   * — its OWN device, on a stacked Custom rig, since a lower and an upper
+   * keyboard pressing Transpose together still move each by its own MIDI
+   * Number (see shiftCentsFor) — so it moves the pitch and touches neither
+   * the degree nor the entry the name is spelled from. */
+  return { deg: d, eq, entry: e, typed: isTypedKey(key), cents, edoN: N,
            hz: T.hz * Math.pow(2,
-             (cents + eq * 1200 + T.equaveShift * shiftCents()) / 1200) };
+             (cents + eq * 1200 + T.equaveShift * shiftCentsFor(udev, N)) / 1200) };
 }
 
 /* ---------------------------------------------------------------------
@@ -336,6 +461,32 @@ const shiftAuto = () => !(T.trStep >= 1 && T.trStep <= 128);
 function shiftCents() {
   const K = shiftKeys(), N = equaveNotes();
   return entryCents(entryOf(mod(K, N), N)) + Math.floor(K / N) * 1200;
+}
+
+/** Keys per press, for one device's own MIDI Number — the field beside its
+ *  own name on a stacked rig. Off a stacked rig this is exactly shiftKeys(),
+ *  since T.trStepByDevice is never consulted there. */
+function shiftKeysFor(udev, N) {
+  if (!perDeviceCustom()) return shiftKeys();
+  const n = (T.trStepByDevice || {})[udev] | 0;
+  return (n >= 1 && n <= 128) ? n : N;
+}
+
+/** True while a device's own MIDI Number is the one its Notes in Scale
+ *  implies rather than one typed into its own field. */
+function shiftAutoFor(udev) {
+  if (!perDeviceCustom()) return shiftAuto();
+  const n = (T.trStepByDevice || {})[udev];
+  return !(n >= 1 && n <= 128);
+}
+
+/** shiftCents(), for one device's own MIDI Number.  Off a stacked-Custom
+ *  rig this is exactly shiftCents(), unchanged — every non-stacked keyboard
+ *  and every Auto reading transposes exactly as it always did. */
+function shiftCentsFor(udev, N) {
+  if (!perDeviceCustom()) return shiftCents();
+  const K = shiftKeysFor(udev, N), d = mod(K, N), eq = Math.floor(K / N);
+  return entryCents(entryOfKey(customKey(d, udev), d, N)) + eq * 1200;
 }
 
 /* ---------------------------------------------------------------------
@@ -433,12 +584,19 @@ function label() {
   /* The rotation is folded before anything is computed off it, so what the
    * readout shows and what the keys carry can never be a pass apart. */
   T.rot = mod(T.rot, equaveNotes());
+  T.midiRot = mod(T.midiRot, equaveNotes());
+  if (perDeviceCustom() && typeof window.rigDevices === 'function') {
+    for (const dv of window.rigDevices()) {
+      if (T.midiRotByDevice && dv.slot in T.midiRotByDevice)
+        T.midiRotByDevice[dv.slot] = mod(T.midiRotByDevice[dv.slot], dv.period);
+    }
+  }
   syncUI();
   const freqs = {};
 
   for (const el of inner.querySelectorAll('[data-note]')) {
     const i = +el.dataset.note;
-    const p = pitchOf(i);
+    const p = pitchOf(i, keyCtx(el));
     freqs[i] = p.hz;
     const span = document.createElement('span');
     span.className = 'kb-tune';
@@ -501,10 +659,22 @@ function refresh() {
  * at the same place.
  */
 const SHIFT_CENTS_LIMIT = 4800;
-const shiftLimit = () => {
-  const c = Math.abs(shiftCents());
-  return c > 1 ? Math.max(1, Math.min(256, Math.round(SHIFT_CENTS_LIMIT / c))) : 4;
+const shiftLimitCents = (c) => {
+  const ac = Math.abs(c);
+  return ac > 1 ? Math.max(1, Math.min(256, Math.round(SHIFT_CENTS_LIMIT / ac))) : 4;
 };
+const shiftLimit = () => shiftLimitCents(shiftCents());
+
+/** The same, but for a stacked-Custom rig: one press moves every device by
+ *  its OWN MIDI Number, so the bound is the tightest of theirs — whichever
+ *  device's press would first put a pitch somewhere nobody could follow. */
+function shiftLimitRig() {
+  if (!perDeviceCustom()) return shiftLimit();
+  const devs = typeof window.rigDevices === 'function' ? window.rigDevices() : [];
+  let lim = shiftLimit();
+  for (const dv of devs) lim = Math.min(lim, shiftLimitCents(shiftCentsFor(dv.slot, dv.period)));
+  return lim;
+}
 
 /**
  * Move the whole instrument by whole equaves.
@@ -516,7 +686,7 @@ const shiftLimit = () => {
  * @returns the shift actually taken, which is the asked-for one clamped.
  */
 function setEquaveShift(n) {
-  const L = shiftLimit();
+  const L = shiftLimitRig();
   const v = Math.max(-L, Math.min(L, n | 0));
   if (v !== T.equaveShift) { T.equaveShift = v; refresh(); }
   return T.equaveShift;
@@ -539,8 +709,9 @@ let armed = false;
 let editNote = null, pending = null;
 /** True while the box is being torn down, so its own blur is not a commit. */
 let closing = false;
-/** The degree last typed on or clicked, for the panel's readout. */
-let lastDeg = null;
+/** The degree last typed on or clicked, and which device it was on, for the
+ *  panel's readout. */
+let lastDeg = null, lastUdev = 0;
 /** Degrees whose line in the fill list did not parse, on the last input. */
 let scaleListErrors = null;
 
@@ -569,7 +740,8 @@ function openEditor(note) {
   const el = inner && inner.querySelector(`[data-note="${note}"]`);
   if (!el) { editNote = null; return; }
   editNote = note;
-  lastDeg = +el.dataset.deg;
+  const ctx = keyCtx(el), kd = keyDegree(note, ctx);
+  lastDeg = kd.d; lastUdev = kd.udev;
   for (const e of notesEls(note)) e.classList.add('editing');
 
   const box = document.createElement('div');
@@ -577,7 +749,7 @@ function openEditor(note) {
   const inp = document.createElement('input');
   inp.type = 'text';
   inp.spellcheck = false;
-  inp.value = entryText(entryOf(mod(note + T.rot, equaveNotes()), equaveNotes()));
+  inp.value = entryText(entryOfKey(customKey(kd.d, kd.udev), kd.d, kd.N));
   /* WHAT THE BOX OPENED WITH.  Stepping across the keyboard opens a box on
    * every key it passes, and each of them commits on the way out — so a
    * commit of text nobody touched has to be nothing at all.  Otherwise
@@ -598,7 +770,7 @@ function openEditor(note) {
   inner.appendChild(box);
 
   const readout = () => {
-    const p = parseInterval(inp.value, equaveNotes());
+    const p = parseInterval(inp.value, kd.N);
     if (!inp.value.trim()) { tip.className = 'tip'; tip.textContent = 'blank clears it'; return; }
     if (!p) { tip.className = 'tip bad'; tip.textContent = 'not an interval'; return; }
     tip.className = 'tip ok';
@@ -661,15 +833,16 @@ function closeEditor(commit) {
     if (pending != null) { const n = pending; pending = null; openEditor(n); }
     return;
   }
-  const N = equaveNotes(), d = mod(note + T.rot, N);
-  const before = JSON.stringify(T.custom[d] || null);
-  if (!text.trim()) delete T.custom[d];
+  const kd = keyDegree(note, ctxForNote(note));
+  const key = customKey(kd.d, kd.udev);
+  const before = JSON.stringify(T.custom[key] || null);
+  if (!text.trim()) delete T.custom[key];
   else {
-    const p = parseInterval(text, N);
-    if (p) T.custom[d] = p;      // unreadable is left alone rather than lost
+    const p = parseInterval(text, kd.N);
+    if (p) T.custom[key] = p;    // unreadable is left alone rather than lost
   }
-  lastDeg = d;
-  if (JSON.stringify(T.custom[d] || null) !== before) refresh();
+  lastDeg = kd.d; lastUdev = kd.udev;
+  if (JSON.stringify(T.custom[key] || null) !== before) refresh();
   else if (pending != null) { const n = pending; pending = null; openEditor(n); }
   else syncUI();
 }
@@ -789,7 +962,7 @@ function syncUI() {
    * it can be moved without this fieldset being looked at — and it changes
    * what every number above it is worth. It says so here, where 1/1 is
    * defined, rather than only where it was pressed. */
-  const sc = shiftCents(), K = shiftKeys();
+  const K = shiftKeys();
   const tr = $('t-transpose');
   tr.style.display = 'none';
 
@@ -823,43 +996,97 @@ function syncUI() {
   btn.textContent = armed ? '✓ Done editing' : '✎ Edit Keys on the Strip';
   btn.style.borderColor = armed ? 'var(--ok)' : '';
   btn.style.color = armed ? 'var(--ok)' : '';
+  const perDev = perDeviceCustom();
+  const devices = perDev && typeof window.rigDevices === 'function' ? window.rigDevices() : null;
   if (custom) {
-    const t = typedCount();
-    $('t-cus-read').innerHTML = t
-      ? `<b>${t}</b> of <b>${N}</b> degree${N === 1 ? '' : 's'} typed &mdash; ` +
-        `the rest read as <b>${N}</b> equal steps of the equave`
-      : `all <b>${N}</b> degrees still read as <b>${N}</b> equal steps &mdash; ` +
-        `edit any of them and only those change`;
+    if (devices && devices.length > 1) {
+      $('t-cus-read').innerHTML = devices.map(dv => {
+        const t = typedCountFor(dv.slot, dv.period);
+        return `<b>${dv.label}</b>: <b>${t}</b> of <b>${dv.period}</b> typed`;
+      }).join(' &nbsp;&middot;&nbsp; ') +
+        ' &mdash; each keyboard loops its own Notes in Scale independently';
+    } else {
+      const t = typedCount();
+      $('t-cus-read').innerHTML = t
+        ? `<b>${t}</b> of <b>${N}</b> degree${N === 1 ? '' : 's'} typed &mdash; ` +
+          `the rest read as <b>${N}</b> equal steps of the equave`
+        : `all <b>${N}</b> degrees still read as <b>${N}</b> equal steps &mdash; ` +
+          `edit any of them and only those change`;
+    }
     const sel = $('t-cus-sel');
-    if (lastDeg != null && lastDeg < N) {
-      const e = entryOf(lastDeg, N);
-      sel.innerHTML = `degree <b>${lastDeg}</b>: <b>${esc(entryText(e))}</b>` +
+    const dv = devices && devices.find((x) => x.slot === lastUdev);
+    const ownN = dv ? dv.period : N;
+    if (lastDeg != null && lastDeg < ownN) {
+      const key = customKey(lastDeg, lastUdev);
+      const e = entryOfKey(key, lastDeg, ownN);
+      sel.innerHTML = (dv ? `<b>${dv.label}</b> ` : '') +
+        `degree <b>${lastDeg}</b>: <b>${esc(entryText(e))}</b>` +
         (e.kind === 'cents' ? ''
           : ` &middot; <b>${num2(entryCents(e))}</b>&cent;`) +
-        (isTyped(lastDeg) ? '' : ' <span style="opacity:.7">(auto)</span>');
+        (isTypedKey(key) ? '' : ' <span style="opacity:.7">(auto)</span>');
     } else sel.innerHTML = '';
-    /* The list IS the keyboard, one line per degree: what shows here is
-     * exactly what pitchOf reads, so nothing said above it can be stale. It
-     * is only rewritten while the box does not have focus — mid-edit, the
-     * keys already follow the input handler below, and overwriting the value
-     * out from under a keystroke would fight the cursor. */
-    const st2 = $('t-scale');
-    if (document.activeElement !== st2) {
-      st2.value = Array.from({ length: N }, (_, d) => entryText(entryOf(d, N))).join('\n');
+    /* The list IS the keyboard, one line per degree — but a stacked rig's
+     * keyboards loop through different counts of their own degrees, so
+     * there is no one flat list any more; typing stays on the strip. */
+    $('t-scale-wrap').style.display = perDev ? 'none' : '';
+    if (!perDev) {
+      /* This is only rewritten while the box does not have focus — mid-edit,
+       * the keys already follow the input handler below, and overwriting
+       * the value out from under a keystroke would fight the cursor. */
+      const st2 = $('t-scale');
+      if (document.activeElement !== st2) {
+        st2.value = Array.from({ length: N }, (_, d) => entryText(entryOf(d, N))).join('\n');
+      }
+      $('t-scale-read').innerHTML = scaleListErrors
+        ? `<span style="color:var(--warn)">line${scaleListErrors.length === 1 ? '' : 's'} ` +
+          `${scaleListErrors.map((d) => d + 1).join(', ')}: not an interval &mdash; ` +
+          `left as ${scaleListErrors.length === 1 ? 'it was' : 'they were'}</span>`
+        : '';
     }
-    $('t-scale-read').innerHTML = scaleListErrors
-      ? `<span style="color:var(--warn)">line${scaleListErrors.length === 1 ? '' : 's'} ` +
-        `${scaleListErrors.map((d) => d + 1).join(', ')}: not an interval &mdash; ` +
-        `left as ${scaleListErrors.length === 1 ? 'it was' : 'they were'}</span>`
-      : '';
   }
 
   /* ---- rotation, and what one press of Transpose is worth ---- */
   $('t-rot-v').textContent = T.rot;
-  const st = $('m-tr-step');
-  if (document.activeElement !== st) st.value = shiftAuto() ? '' : String(K);
-  st.placeholder = String(N);
-  $('m-tr-step-read').innerHTML = `${num2(sc)}&cent;`;
+  const stacked = typeof window.rigIsStacked === 'function' && window.rigIsStacked();
+  $('m-tr-step-row').style.display = stacked ? 'none' : '';
+  $('m-tr-step-rig').style.display = stacked ? '' : 'none';
+  if (!stacked) {
+    const st = $('m-tr-step');
+    if (document.activeElement !== st) st.value = shiftAuto() ? '' : String(K);
+    st.placeholder = String(N);
+  } else {
+    const rigDevs = (typeof window.rigDevices === 'function' ? window.rigDevices() : [])
+      .slice().sort((a, b) => a.slot - b.slot);
+    /* Upper first, lower second, whatever the two devices' slots are — the
+     * fields are named by height, not by number. */
+    const upper = rigDevs.find((d) => /upper/.test(d.label)) || rigDevs[rigDevs.length - 1];
+    const lower = rigDevs.find((d) => /lower/.test(d.label)) || rigDevs[0];
+    for (const [dv, inputId] of
+         [[upper, 'm-tr-step-upper'], [lower, 'm-tr-step-lower']]) {
+      if (!dv) continue;
+      const inp = $(inputId);
+      if (document.activeElement !== inp) {
+        inp.value = shiftAutoFor(dv.slot) ? '' : String(shiftKeysFor(dv.slot, dv.period));
+      }
+      inp.placeholder = String(dv.period);
+    }
+  }
+
+  /* ---- Rotate MIDI Number — where the octave itself turns over ---- */
+  $('m-mrot-row').style.display = stacked ? 'none' : '';
+  $('m-mrot-rig').style.display = stacked ? '' : 'none';
+  if (!stacked) {
+    $('m-mrot-v').textContent = mod(T.midiRot, N);
+  } else {
+    const rigDevs = (typeof window.rigDevices === 'function' ? window.rigDevices() : [])
+      .slice().sort((a, b) => a.slot - b.slot);
+    const upper = rigDevs.find((d) => /upper/.test(d.label)) || rigDevs[rigDevs.length - 1];
+    const lower = rigDevs.find((d) => /lower/.test(d.label)) || rigDevs[0];
+    for (const [dv, vid] of [[upper, 'm-mrot-upper-v'], [lower, 'm-mrot-lower-v']]) {
+      if (!dv) continue;
+      $(vid).textContent = mod((T.midiRotByDevice || {})[dv.slot] | 0, dv.period);
+    }
+  }
 }
 
 function bind() {
@@ -909,9 +1136,51 @@ function bind() {
     T.trStep = (Number.isFinite(v) && v >= 1 && v <= 128) ? v : null;
     /* The distance one press covers has changed, so a shift taken at the old
      * size may now be past the end of what can be heard. */
-    T.equaveShift = Math.max(-shiftLimit(), Math.min(shiftLimit(), T.equaveShift));
+    const L = shiftLimitRig();
+    T.equaveShift = Math.max(-L, Math.min(L, T.equaveShift));
     refresh();
   };
+
+  /* ---- the same, per device, on a stacked rig ---- */
+  const findDevice = (upper) => {
+    const devs = typeof window.rigDevices === 'function' ? window.rigDevices() : [];
+    return devs.find((d) => (upper ? /upper/ : /lower/).test(d.label)) ||
+      (upper ? devs[devs.length - 1] : devs[0]);
+  };
+  const bindDeviceStep = (inputId, upper) => {
+    const inp = $(inputId);
+    inp.oninput = () => {
+      const dv = findDevice(upper);
+      if (!dv) return;
+      const v = parseInt(inp.value, 10);
+      T.trStepByDevice = T.trStepByDevice || {};
+      if (Number.isFinite(v) && v >= 1 && v <= 128) T.trStepByDevice[dv.slot] = v;
+      else delete T.trStepByDevice[dv.slot];
+      const L = shiftLimitRig();
+      T.equaveShift = Math.max(-L, Math.min(L, T.equaveShift));
+      refresh();
+    };
+  };
+  bindDeviceStep('m-tr-step-upper', true);
+  bindDeviceStep('m-tr-step-lower', false);
+
+  /* ---- Rotate MIDI Number — where the octave itself turns over ---- */
+  const mrot = (id, span) => { $(id).onclick = () => { T.midiRot += span; refresh(); }; };
+  mrot('m-mrot-dn', -1);
+  mrot('m-mrot-up', +1);
+  const mrotDevice = (prefix, upper, span) => {
+    $(prefix).onclick = () => {
+      const dv = findDevice(upper);
+      if (!dv) return;
+      T.midiRotByDevice = T.midiRotByDevice || {};
+      T.midiRotByDevice[dv.slot] = ((T.midiRotByDevice[dv.slot] | 0) + span);
+      refresh();
+    };
+  };
+  mrotDevice('m-mrot-upper-dn', true, -1);
+  mrotDevice('m-mrot-upper-up', true, +1);
+  mrotDevice('m-mrot-lower-dn', false, -1);
+  mrotDevice('m-mrot-lower-up', false, +1);
 
   /* Leaving Custom puts the editor away: the strip in Auto has nothing to
    * type on, and an armed keyboard that will not take a keystroke would be
@@ -959,7 +1228,10 @@ function adopt(next) {
   T.oct = Math.max(-4, Math.min(7, T.oct | 0));
   if (T.system !== 'auto' && T.system !== 'custom') T.system = 'auto';
   if (!T.custom || typeof T.custom !== 'object') T.custom = {};
+  if (!T.trStepByDevice || typeof T.trStepByDevice !== 'object') T.trStepByDevice = {};
+  if (!T.midiRotByDevice || typeof T.midiRotByDevice !== 'object') T.midiRotByDevice = {};
   T.rot |= 0;
+  T.midiRot |= 0;
   T.trStep = Number.isFinite(+T.trStep) && +T.trStep >= 1 && +T.trStep <= 128
     ? (+T.trStep | 0) : null;
   T.equaveShift = Math.max(-shiftLimit(), Math.min(shiftLimit(), T.equaveShift | 0));
