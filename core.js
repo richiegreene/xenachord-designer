@@ -994,6 +994,7 @@
         if (!t) continue;
         for (const k of keySpans(L)) {
           if (k.layer !== part) continue;
+          if (k.half && k.half !== hn) continue;
           const a = Math.max(k.x0, half.x0), b = Math.min(k.x1, half.x1);
           const z0 = Math.max(band.z0Drafted, t[0]);
           const z1 = Math.min(band.z1Drafted, t[1]);
@@ -1702,7 +1703,7 @@
       objName.set(n.type + '@' + Math.round(r.cx * 1e4), nm);
       const lb = white ? r.ctxL : null, rb = white ? r.ctxR : null;
       const bs = XM.keyBackSpan(r.cx, w, n.type, lb, rb);
-      const lap = bs ? XM.tongueLaps(L.spineKind, spec.layer, bs) : [];
+      const lap = bs ? XM.tongueLaps(L.spineKind, spec.layer, bs, r.half) : [];
       p('    ("', nm, '", "', n.type, '", ',
         pn(r.cx), ', ', pn(w), ', ', f(e.y1 - e.y0), ', "', n.profileKey, '", ',
         f(r.cx + W.x0, 4), ', ', f(W.y0, 4), ', ', f(e.z0 + W.z0), ', ',
@@ -1752,15 +1753,12 @@
     p('    # faces a boolean solver cannot join.  (layer, x0, x1, z0, z1) —');
     p('    # z is the TONGUE\'s own, the drafted band clipped to it.');
     p('    #');
-    p('    # "fillet" is the 45-degree gusset laid in the corner where that');
-    p('    # tongue meets the spine — under it, over the same x span.');
-    p('    # The tongue is the ENTIRE joint between a key and the spine — a');
-    p('    # flange about a millimetre thick, five printed layers — and it');
-    p('    # used to butt into the band square, with air on both sides: the');
-    p('    # slicer had no corner to wrap and the sharp root was where the');
-    p('    # bending moment peaked.  The gusset costs no clearance: it is');
-    p('    # the band\'s own filament, in front of the spine face, over the');
-    p('    # key\'s own back span.');
+    p('    # "fillet" is the 45-degree gusset that USED to be laid in the');
+    p('    # corner where a tongue meets the spine.  Nothing builds it now —');
+    p('    # not model.js, not this file: the joint is the boss and the lap,');
+    p('    # and the ramp only put a visible edge on a face meant to read');
+    p('    # flush.  The number is kept on record, and so is the shape, in');
+    p('    # push_root_fillet below.');
     p('    "boss_depth": ', pn(XM.FIT.engage), ',');
     p('    "fillet": ', pn(XM.FIT.fillet), ',');
     p('    "gap":    ', pn(XM.FIT.gap), ',   # clearance between colours');
@@ -1777,6 +1775,14 @@
         pn(XM.SPINE.channel[hn].y1), '),');
     p('    },');
     p('    "channel_z": ', pn(XM.SPINE.channel.zTop), ',');
+    p('    # THE RIBBON CABLE COMES OUT OF THE BACK OF HALF A.  One rectangle');
+    p('    # is taken out of that half\'s back edge, the full height of the');
+    p('    # stack so the notch reads the same in every band, and deeper than');
+    p('    # the channel\'s back wall so the channel opens straight out of the');
+    p('    # back rather than into a blind pocket.  Half B is untouched: one');
+    p('    # exit, on the side the cable is on.  (half, x0, x1, depth)');
+    p('    "ribbon": ("', XM.RIBBON.half, '", ', pn(XM.RIBBON.x0), ', ',
+      pn(XM.RIBBON.x1), ', ', pn(XM.RIBBON.depth), '),');
     p('    # 8 obround mounting holes per half — NOT rectangles.  The bottom');
     p('    # layer takes the wide bore, every layer above it the narrow one.');
     p('    "hole_r": (', pn(XM.SPINE.hole.rLower), ', ', pn(XM.SPINE.hole.rUpper), '),');
@@ -2559,7 +2565,15 @@ def push_spine_slab(t, x0, x1, y0, y1, z0, z1, holes):
     """EACH HOLE'S WASHER IS A CLOSED BODY: lid, floor, the bore wall between
     them on the inside, and the skin that shuts its outer edge.  Built as
     four faces of one solid rather than as three loose surfaces — see
-    push_hole_outer_wall for what that was costing."""
+    push_hole_outer_wall for what that was costing.
+
+    ONLY THE BORES THIS RECTANGLE ACTUALLY CONTAINS.  A slab drawn in more
+    than one x segment -- see the ribbon notch -- asks for the whole half's
+    bore list each time, and a washer built for a bore that is not in this
+    rectangle is a second copy of a body already there."""
+    holes = [h for h in (holes or [])
+             if min(x1, h["x1"]) - max(x0, h["x0"]) > 1e-4
+             and min(y1, h["y1"]) - max(y0, h["y0"]) > 1e-4]
     rect_with_holes(x0, x1, y0, y1,
                     [(h["x0"], h["x1"], h["y0"], h["y1"]) for h in holes],
                     lambda a, b, c, d: push_box(t, a, b, c, d, z0, z1))
@@ -2585,7 +2599,11 @@ def push_x_prism(t, x0, x1, poly):
 
 
 def push_root_fillet(t, x0, x1, y_g, t0, t1, r):
-    """The gusset at a tongue root: a 45-degree ramp off the band's front
+    """NOTHING BUILDS THIS ANY MORE -- kept only so the shape is on record,
+    exactly as model.js keeps pushRootFillet.  The joint is the boss and the
+    lap; the gusset only put a visible ramp on a face that should read flush.
+
+    The gusset at a tongue root: a 45-degree ramp off the band's front
     face onto the UNDERSIDE of the tongue, over the x span the key presents
     at the spine.  t0/t1 are the TONGUE's own z.  Under and not over,
     because the parts print playing-face down: this ramp starts full width
@@ -2600,19 +2618,51 @@ def push_root_fillet(t, x0, x1, y_g, t0, t1, r):
     push_x_prism(t, x0, x1, [(y_g, t0), (y_g, t0 - r), (y_g + r, t0)])
 
 
+def back_segments(half, x0, x1, y_back):
+    """The x segments a half's slab is drawn in, and the back edge each one
+    stands on: three where the ribbon notch bites into it, one otherwise.
+    Every band steps back the same way, so the notch reads as one rectangle
+    through the whole stack -- see "ribbon" in SPINE."""
+    whole = [(x0, x1, y_back)]
+    rhalf, rx0, rx1, rdepth = SPINE["ribbon"]
+    if half != rhalf:
+        return whole
+    a, b = max(x0, rx0), min(x1, rx1)
+    if b - a <= 1e-4:
+        return whole
+    out = []
+    if a - x0 > 1e-4:
+        out.append((x0, a, y_back))
+    out.append((a, b, y_back + rdepth))
+    if x1 - b > 1e-4:
+        out.append((b, x1, y_back))
+    return out
+
+
 def build_spine_slab(half, x0, x1, y_back, y_front, z0, z1, bottom):
     """One (half, layer).  The bottom layer carries the PCB channel: below
     the ceiling it is two strips, front and back; above it, the full section
-    with the wide bore.  Every layer above takes the narrow bore."""
+    with the wide bore.  Every layer above takes the narrow bore.
+
+    The back edge is not one straight line: the ribbon notch takes a bite out
+    of half A, so the slab is drawn segment by segment (back_segments).  The
+    channel's back strip is drawn only where the notch has not already taken
+    it away, which is what opens the channel out of the back."""
     t = []
+    segs = back_segments(half, x0, x1, y_back)
     if bottom:
         zc = SPINE["channel_z"]
         cy0, cy1 = SPINE["channel"][half]
-        push_box(t, x0, x1, y_back, cy0, z0, zc)
+        for (gx0, gx1, gy_back) in segs:
+            if cy0 - gy_back > 1e-4:
+                push_box(t, gx0, gx1, gy_back, cy0, z0, zc)
+            push_spine_slab(t, gx0, gx1, gy_back, y_front, zc, z1,
+                            spine_holes(half, False))
         push_box(t, x0, x1, cy1, y_front, z0, zc)
-        push_spine_slab(t, x0, x1, y_back, y_front, zc, z1, spine_holes(half, False))
     else:
-        push_spine_slab(t, x0, x1, y_back, y_front, z0, z1, spine_holes(half, True))
+        for (gx0, gx1, gy_back) in segs:
+            push_spine_slab(t, gx0, gx1, gy_back, y_front, z0, z1,
+                            spine_holes(half, True))
     return t
 
 
@@ -2889,8 +2939,11 @@ def build():
                 tris = build_spine_slab(hname, hx0, hx1, hy_back,
                                         hy_front, lz0, lz1, li == 0)
 
-                # carry this band forward into the keys of its own colour,
-                # and gusset the corner the tongue roots in
+                # carry this band forward into the keys of its own colour.
+                # NO GUSSET.  The tongue root used to carry a 45-degree ramp
+                # along the spine face under every tongue; it is gone from
+                # model.js -- the joint is the boss and the lap, and the ramp
+                # only put a visible edge on a face meant to read flush.
                 for (blayer, bx0, bx1, bz0, bz1) in SPINE["boss"]:
                     if blayer != lname:
                         continue
@@ -2899,11 +2952,6 @@ def build():
                         continue
                     push_box(tris, a, b, hy_front,
                              hy_front + SPINE["boss_depth"], bz0, bz1)
-                    y_g = hy_front
-                    if bz0 - SPINE["fillet"] < lz0 - 1e-6:
-                        y_g += SPINE["gap"]
-                    push_root_fillet(tris, a, b, y_g, bz0, bz1,
-                                     SPINE["fillet"])
                 if lname not in spine_mats:
                     spine_mats[lname] = get_spine_material(spine_kind, lname)
                 make_mesh_object("Spine_%s_%s" % (hname, lname), tris,
