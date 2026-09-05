@@ -1520,9 +1520,10 @@
     let o = 84;
     for (let t = 0; t < n; t++) {
       const i9 = t * 9;
-      const ax = tris[i9], ay = tris[i9+1], az = tris[i9+2];
-      const bx = tris[i9+3], by = tris[i9+4], bz = tris[i9+5];
-      const cx = tris[i9+6], cy = tris[i9+7], cz = tris[i9+8];
+      // mirror on X, swapping b/c to keep winding (and normals) outward-facing
+      const ax = -tris[i9],   ay = tris[i9+1],   az = tris[i9+2];
+      const bx = -tris[i9+6], by = tris[i9+7],   bz = tris[i9+8];
+      const cx = -tris[i9+3], cy = tris[i9+4],   cz = tris[i9+5];
       const ux = bx-ax, uy = by-ay, uz = bz-az;
       const vx = cx-ax, vy = cy-ay, vz = cz-az;
       let nx = uy*vz-uz*vy, ny = uz*vx-ux*vz, nz = ux*vy-uy*vx;
