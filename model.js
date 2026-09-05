@@ -1170,6 +1170,62 @@
    *  no height is not a face.  The profile is marked `flushTongue`, which *
    *  is what tells the bevel to leave the tongue's outline alone.         *
    * ==================================================================== */
+  /* ==================================================================== *
+   *  THE SHELL'S CEILING IS DROPPED, AND THE BACK RAMP EASES WITH IT     *
+   *                                                                      *
+   *  A white is a shell: WALL thick over a hollow, and the ceiling of     *
+   *  that hollow — CAVITY_Z, one millimetre under the playing surface —   *
+   *  is the FIRST layer of the print, because a white prints playing-face *
+   *  down.  One millimetre is three or four layers, and everything above  *
+   *  the ceiling is what the finger presses on and what the sensor press  *
+   *  hangs off; everything the key does structurally, it does through it. *
+   *                                                                      *
+   *  So the ceiling comes down ROOF_DROP.  Two things follow, and both    *
+   *  are the point of it:                                                *
+   *                                                                      *
+   *    THE TOP IS THICKER.  The wall between the roof and the playing     *
+   *    face goes from WALL to WALL + ROOF_DROP — 1.8077 mm — which is     *
+   *    what carries the key's bending and what the press stands on.       *
+   *                                                                      *
+   *    THE BACK RAMP IS GENTLER.  The corner behind the cavity is filled  *
+   *    in on a ramp from the tongue's underside forward to the ceiling    *
+   *    (see THE CAVITY'S BACK CORNER IS RAMPED).  Its run is unchanged    *
+   *    and its foot is unchanged, so a lower ceiling is a shallower       *
+   *    climb: it rises 0.731 mm over BACK_RAMP_RUN instead of 1.539 mm,   *
+   *    about 4.8 degrees off flat instead of 10.  The layer under the     *
+   *    tongue steps out less per layer, which is the whole reason the     *
+   *    ramp is there.                                                     *
+   *                                                                      *
+   *  It runs AFTER the nose and the back ramp, both of which find their   *
+   *  corners by the drafted ceiling height, and it moves every vertex     *
+   *  standing on that plane — the ceiling itself, the ramp's top edge and *
+   *  the tops of the inner walls that carry them — so the cavity keeps    *
+   *  its shape exactly and only gets shallower.                           *
+   * ==================================================================== */
+  const ROOF_DROP = 0.807703;          // how far the shell's ceiling comes down
+
+  const ROOF_SRC = new WeakMap();
+  /** the white with the ceiling of its shell dropped ROOF_DROP */
+  function whiteRoofDrop(p) {
+    if (!(ROOF_DROP > 1e-6)) return p;
+    const hit = ROOF_SRC.get(p);
+    if (hit) return hit;
+    const v = p.v.slice();
+    let moved = 0;
+    for (let i = 0; i < p.nv; i++) {
+      const j = i * 4 + 3;
+      if (Math.abs(v[j] - CAVITY_Z) > 1e-3) continue;
+      v[j] = +(v[j] - ROOF_DROP).toFixed(5);
+      moved++;
+    }
+    if (!moved) throw new Error('whiteRoofDrop: the shell has no ceiling at ' + CAVITY_Z);
+    const out = { w0: p.w0, widths: p.widths, nv: p.nv, nf: p.nf, v, f: p.f.slice(),
+                  nose: p.nose, backRamp: p.backRamp, derived: p.derived,
+                  back: p.back, roof: true };
+    ROOF_SRC.set(p, out);
+    return out;
+  }
+
   const FLUSH_SRC = new WeakMap();
   /** the white with its tongue raised flush into the playing surface */
   function whiteFlushTongue(p) {
@@ -1759,7 +1815,8 @@
               (mid ? '|' + mid.side + mid.at.outer + '@' + mid.h : '');
     if (!DERIVED_WHITE[k]) {
       if (DERIVED_WHITE_N > 512) { DERIVED_WHITE = {}; DERIVED_WHITE_N = 0; }
-      const src = backReach(whiteBackRamp(akm320Nose(KP.P[KP.INDEX['Full Sized White']['n|n']])));
+      const src = backReach(whiteRoofDrop(
+                    whiteBackRamp(akm320Nose(KP.P[KP.INDEX['Full Sized White']['n|n']]))));
       let base;
       if (halfR > 0) {
         const bk = stepR.outer + '|' + stepR.inner;
@@ -5282,7 +5339,7 @@
     rigStep, rigBase, rigNoteAuto,
     KEY_TYPES, TYPE_ORDER, LAYOUTS,
     whiteProfile, twoSidedWhiteBase, deriveWhiteProfile, akm320Nose, whiteBackRamp,
-    whiteFlushTongue, onFlushTongue, WHITE_RISE,
+    whiteFlushTongue, onFlushTongue, WHITE_RISE, whiteRoofDrop, ROOF_DROP,
     NOSE_SHIFT, NOSE_LEG_RAMP, NOSE_LEG_REAR, NOSE_LEG_IN, NOSE_LEG_OUT,
     NOSE_ROOF_Z, NOSE_FLOOR_Z,
     KEY_PAIRS, PAIR_ORDER, PALETTE_ORDER, TYPE_ALIASES,
