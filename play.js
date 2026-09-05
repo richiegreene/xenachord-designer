@@ -324,6 +324,43 @@ for (const type of ['pointerup', 'pointercancel']) {
   window.addEventListener(type, (ev) => release(ev.pointerId));
 }
 
+/* ---------------------------------------------------------------------
+ *  TAKING THE GESTURE OFF THE BROWSER
+ *
+ *  `touch-action: none` is a promise about SCROLLING, and on a phone that is
+ *  only part of what a held, dragged finger means.  The rest of it the
+ *  browser still claims for itself: a slow drag starts a text selection and
+ *  raises the magnifier over the key being played, a drag from near the edge
+ *  is read as back/forward and swipes the whole page away, and a second tap
+ *  is a zoom.  Every one of those ends the note, and the last two can leave
+ *  the instrument altogether.
+ *
+ *  The only thing that actually declines all of them is preventDefault on
+ *  the TOUCH events, which is why these exist beside the pointer handlers
+ *  above rather than instead of them.  It costs nothing: preventing a touch
+ *  default suppresses the compatibility mouse events, not the pointer
+ *  events, so the whole of Play still runs off the pointer path — one code
+ *  path for a finger, a mouse and a MIDI key, as before.
+ *
+ *  Passive must be false or the preventDefault is ignored, and the listener
+ *  must be on the strip alone so the drawer above it still scrolls normally.
+ */
+for (const type of ['touchstart', 'touchmove', 'touchend']) {
+  strip.addEventListener(type, (ev) => {
+    if (!playable() || inEditor(ev)) return;
+    if (ev.cancelable) ev.preventDefault();
+  }, { passive: false, capture: true });
+}
+
+/* The selection the browser may have begun before any of this was reachable
+ * — on the drawer, say — must not stay drawn over the keys while they are
+ * being played. */
+strip.addEventListener('pointerdown', () => {
+  if (!playable()) return;
+  const sel = window.getSelection && window.getSelection();
+  if (sel && !sel.isCollapsed) sel.removeAllRanges();
+}, true);
+
 /* A click is dispatched after the pointer sequence and is what the design
  * handlers are actually bound to, so it is stopped in its own right. */
 for (const type of ['click', 'dragover', 'drop', 'dragstart']) {
