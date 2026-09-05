@@ -823,7 +823,6 @@ function syncUI() {
   btn.textContent = armed ? '✓ Done editing' : '✎ Edit Keys on the Strip';
   btn.style.borderColor = armed ? 'var(--ok)' : '';
   btn.style.color = armed ? 'var(--ok)' : '';
-  $('t-cus-help').style.display = armed ? '' : 'none';
   if (custom) {
     const t = typedCount();
     $('t-cus-read').innerHTML = t
