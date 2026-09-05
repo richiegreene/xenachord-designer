@@ -1044,109 +1044,55 @@
   }
 
   /* ==================================================================== *
-   *  THE CAVITY'S BACK CORNER IS RAMPED, NOT SQUARE                      *
+   *  THE CAVITY REACHES BACK WITH THE KEY, AND THE RAMP IS GONE          *
    *                                                                      *
-   *  The shell cavity ends at the back on a square corner: the 1 mm      *
-   *  ceiling runs back to the wall behind the tongue and turns straight  *
-   *  down it.  A white prints playing-face down, so that ceiling is the  *
-   *  first millimetre of the print and everything below it — the walls,  *
-   *  and the TONGUE, which starts a millimetre and a half further up and *
-   *  reaches back over open air — is carried by whatever the layer under *
-   *  it happens to touch.  At the square corner that is a 1 mm wall, and *
-   *  the tongue sets out over nothing from a knife edge.                 *
+   *  Two things used to be true of the back of a white's shell, and      *
+   *  neither is any more.                                                *
    *                                                                      *
-   *  So the corner is "filled in": the ceiling is thickened toward the   *
-   *  back on a ramp that lands on the cavity's back wall exactly at the  *
-   *  height of the TONGUE'S UNDERSIDE, and the two faces the corner was  *
-   *  made of — the strip of ceiling in front of the wall, and the top of *
-   *  the wall itself — go with it.  By the layer the tongue starts on,   *
-   *  the key is solid for BACK_RAMP_RUN * (1 - t) in front of the wall   *
-   *  rather than one millimetre, so the tongue leaves a shelf, not an    *
-   *  edge.  The ramp only ever grows material and every layer of it sits *
-   *  inside the one below, so it needs no support of its own.            *
+   *  THE WALL WAS 4 mm THICK.  The cavity's back wall is drafted 1 mm in *
+   *  front of the drafted back face, which is where the key used to end. *
+   *  Then BACK_REACH carried the back 3 mm further toward the spine and  *
+   *  left the wall where it was, so the key ran out in 4 mm of solid —   *
+   *  four times the shell's own wall, and all of it filament spent       *
+   *  behind a cavity that stopped short.  The wall follows the back      *
+   *  again: it stands at BACK_Y + WALL, which is 1 mm of rear wall, and  *
+   *  the underside behind the cavity gains the other 3 mm.               *
    *                                                                      *
-   *  It runs on the SOURCE profile, after the nose and before either     *
-   *  white base, so both the plain and the two-sided path inherit it.    *
-   *  Its two new corners carry the rear's own inner-wall betas, so the   *
-   *  rear derivation restates them with the walls they belong to and     *
-   *  needs no special case.                                              *
+   *  AND THE CORNER WAS RAMPED.  The ceiling used to be thickened        *
+   *  toward the back on a 8.72 mm ramp landing on the wall at the        *
+   *  tongue's underside, because the tongue set out over open air from a *
+   *  1 mm knife edge and the first layers of the print had nothing to    *
+   *  bear on.  That reasoning is spent: the tongue is 2.54 mm thick and  *
+   *  runs flush into the playing surface (see THE TONGUE'S ROOF IS THE   *
+   *  KEY'S OWN TOP), and the roof it starts from is 1.8 mm of solid      *
+   *  rather than 1 mm (see THE SHELL'S CEILING IS DROPPED).  The corner  *
+   *  is square again, which is what it was drafted as.                   *
    * ==================================================================== */
   const BACK_WALL_Y   = 6.068805;          // drafted: the cavity's back wall
-  const BACK_RAMP_Z   = Z.whiteTongue[0];  // 6.08924, the tongue's underside
-  const BACK_RAMP_RUN = 8.72;              // how far forward the ramp reaches
+  const BACK_WALL_AT  = BACK_Y + WALL;     // 3.0688, where it stands now
 
-  let BACK_SRC = null;
-  /** the white with the back of its cavity ramped into the ceiling */
-  function whiteBackRamp(p) {
-    if (BACK_SRC) return BACK_SRC;
-    const V = [];
+  const BACK_SRC = new WeakMap();
+  /** the white with its cavity's back wall carried back to BACK_WALL_AT */
+  function whiteBackWall(p) {
+    const hit = BACK_SRC.get(p);
+    if (hit) return hit;
+    const v = p.v.slice();
+    let moved = 0;
     for (let i = 0; i < p.nv; i++) {
-      const j = i * 4;
-      V.push({ a: p.v[j], b: +p.v[j + 1].toFixed(6),
-               y: +p.v[j + 2].toFixed(4), z: +p.v[j + 3].toFixed(4) });
+      const j = i * 4 + 2;
+      if (Math.abs(v[j] - BACK_WALL_Y) > 1e-3) continue;
+      v[j] = +BACK_WALL_AT.toFixed(4);
+      moved++;
     }
-    let F = [];
-    for (let i = 0; i < p.f.length;) { const n = p.f[i]; F.push(p.f.slice(i + 1, i + 1 + n)); i += n + 1; }
-
-    const near = (a, b) => Math.abs(a - b) < 1e-3;
-    const find = (b, y, z) => {
-      for (let i = 0; i < V.length; i++)
-        if (near(V[i].b, b) && near(V[i].y, y) && near(V[i].z, z)) return i;
-      throw new Error('whiteBackRamp: no vertex at ' + [b, y, z]);
-    };
-    /* the cavity's back wall is carried by the REAR's two inner walls */
-    const L_IN = W_ROLE.L_IN, R_IN = W_ROLE.R_IN;
-    const backL = find(L_IN, BACK_WALL_Y, CAVITY_Z);
-    const backR = find(R_IN, BACK_WALL_Y, CAVITY_Z);
-
-    /* 1. THE RAMP'S TWO NEW CORNERS, where it meets the ceiling */
-    const add = v => (V.push(v), V.length - 1);
-    const rampL = add({ a: 0, b: L_IN, y: BACK_WALL_Y + BACK_RAMP_RUN, z: CAVITY_Z });
-    const rampR = add({ a: 0, b: R_IN, y: BACK_WALL_Y + BACK_RAMP_RUN, z: CAVITY_Z });
-
-    /* 2. THE CEILING gives up its back strip: the face that is ALL ceiling
-     *    now stops on the ramp's top edge instead of on the wall.      */
-    const allAt = (f, k, v) => f.every(i => near(V[i][k], v));
-    let ceiling = -1;
-    F = F.map((f, k) => {
-      if (f.indexOf(backL) < 0 || f.indexOf(backR) < 0) return f;
-      if (!allAt(f, 'z', CAVITY_Z)) return f;
-      ceiling = k;
-      return f.map(i => i === backL ? rampL : i === backR ? rampR : i);
-    });
-    if (ceiling < 0)
-      throw new Error('whiteBackRamp: the cavity ceiling is not where it was');
-
-    /* 3. THE WALL gives up its top: both corners drop to the tongue's
-     *    underside, which shortens the back wall's own ring in place. */
-    V[backL].z = BACK_RAMP_Z;
-    V[backR].z = BACK_RAMP_Z;
-
-    /* 4. THE TWO CAVITY SIDE WALLS follow the new outline: where one ran
-     *    along the ceiling into the corner it now turns onto the ramp. */
-    F = F.map((f, k) => {
-      if (k === ceiling || f.length < 3) return f;
-      for (const [c, r] of [[backL, rampL], [backR, rampR]]) {
-        const at = f.indexOf(c);
-        if (at < 0) continue;
-        const prev = f[(at + f.length - 1) % f.length], next = f[(at + 1) % f.length];
-        if (near(V[prev].z, CAVITY_Z) && !near(V[next].z, CAVITY_Z))
-          return f.slice(0, at).concat([r], f.slice(at));
-        if (near(V[next].z, CAVITY_Z) && !near(V[prev].z, CAVITY_Z))
-          return f.slice(0, at + 1).concat([r], f.slice(at + 1));
-      }
-      return f;
-    });
-
-    /* 5. THE RAMP ITSELF, wound to face down and forward into the cavity */
-    F.push([backL, rampL, rampR, backR]);
-
-    const v = [], f = [];
-    for (const q of V) v.push(q.a, q.b, +q.y.toFixed(4), +q.z.toFixed(5));
-    for (const r of F) { f.push(r.length); for (const i of r) f.push(i); }
-    BACK_SRC = { w0: p.w0, widths: p.widths, nv: V.length, nf: F.length, v, f,
-                 nose: true, backRamp: true };
-    return BACK_SRC;
+    /* the wall is four corners and nothing else stands on its plane — the
+     * two inner walls' feet and the two the ceiling ends on */
+    if (moved !== 4)
+      throw new Error('whiteBackWall: the cavity back wall is ' + moved + ' vertices, not 4');
+    const out = { w0: p.w0, widths: p.widths, nv: p.nv, nf: p.nf, v, f: p.f.slice(),
+                  nose: p.nose, derived: p.derived, back: p.back, roof: p.roof,
+                  backWall: true };
+    BACK_SRC.set(p, out);
+    return out;
   }
 
   /* ==================================================================== *
@@ -1171,7 +1117,7 @@
    *  is what tells the bevel to leave the tongue's outline alone.         *
    * ==================================================================== */
   /* ==================================================================== *
-   *  THE SHELL'S CEILING IS DROPPED, AND THE BACK RAMP EASES WITH IT     *
+   *  THE SHELL'S CEILING IS DROPPED                                      *
    *                                                                      *
    *  A white is a shell: WALL thick over a hollow, and the ceiling of     *
    *  that hollow — CAVITY_Z, one millimetre under the playing surface —   *
@@ -1180,27 +1126,18 @@
    *  the ceiling is what the finger presses on and what the sensor press  *
    *  hangs off; everything the key does structurally, it does through it. *
    *                                                                      *
-   *  So the ceiling comes down ROOF_DROP.  Two things follow, and both    *
-   *  are the point of it:                                                *
+   *  So the ceiling comes down ROOF_DROP, and the wall between the roof   *
+   *  and the playing face goes from WALL to WALL + ROOF_DROP — 1.8077 mm  *
+   *  — which is what carries the key's bending, what the finger presses   *
+   *  on, and what the tongue sets out from at the back.  It is also why   *
+   *  the back corner needs no ramp any more: the first millimetre and a   *
+   *  half of the print is solid where it used to be one wall thick (see   *
+   *  THE CAVITY REACHES BACK WITH THE KEY).                               *
    *                                                                      *
-   *    THE TOP IS THICKER.  The wall between the roof and the playing     *
-   *    face goes from WALL to WALL + ROOF_DROP — 1.8077 mm — which is     *
-   *    what carries the key's bending and what the press stands on.       *
-   *                                                                      *
-   *    THE BACK RAMP IS GENTLER.  The corner behind the cavity is filled  *
-   *    in on a ramp from the tongue's underside forward to the ceiling    *
-   *    (see THE CAVITY'S BACK CORNER IS RAMPED).  Its run is unchanged    *
-   *    and its foot is unchanged, so a lower ceiling is a shallower       *
-   *    climb: it rises 0.731 mm over BACK_RAMP_RUN instead of 1.539 mm,   *
-   *    about 4.8 degrees off flat instead of 10.  The layer under the     *
-   *    tongue steps out less per layer, which is the whole reason the     *
-   *    ramp is there.                                                     *
-   *                                                                      *
-   *  It runs AFTER the nose and the back ramp, both of which find their   *
-   *  corners by the drafted ceiling height, and it moves every vertex     *
-   *  standing on that plane — the ceiling itself, the ramp's top edge and *
-   *  the tops of the inner walls that carry them — so the cavity keeps    *
-   *  its shape exactly and only gets shallower.                           *
+   *  It runs AFTER the nose, which finds its corners by the drafted       *
+   *  ceiling height, and it moves every vertex standing on that plane —   *
+   *  the ceiling itself and the tops of the inner walls that carry it —   *
+   *  so the cavity keeps its shape exactly and only gets shallower.       *
    * ==================================================================== */
   const ROOF_DROP = 0.807703;          // how far the shell's ceiling comes down
 
@@ -1220,7 +1157,7 @@
     }
     if (!moved) throw new Error('whiteRoofDrop: the shell has no ceiling at ' + CAVITY_Z);
     const out = { w0: p.w0, widths: p.widths, nv: p.nv, nf: p.nf, v, f: p.f.slice(),
-                  nose: p.nose, backRamp: p.backRamp, derived: p.derived,
+                  nose: p.nose, backWall: p.backWall, derived: p.derived,
                   back: p.back, roof: true };
     ROOF_SRC.set(p, out);
     return out;
@@ -1274,7 +1211,7 @@
     for (const q of V) v.push(q.a, q.b, +q.y.toFixed(4), +q.z.toFixed(5));
     for (const r of F) { f.push(r.length); for (const i of r) f.push(i); }
     const out = { w0: p.w0, widths: p.widths, nv: V.length, nf: F.length, v, f,
-                  nose: p.nose, backRamp: p.backRamp, derived: p.derived,
+                  nose: p.nose, backWall: p.backWall, derived: p.derived,
                   back: p.back, flushTongue: true };
     FLUSH_SRC.set(p, out);
     return out;
@@ -1346,7 +1283,7 @@
     for (const q of V) v.push(q.a, q.b, +q.y.toFixed(4), q.z);
     for (const r of F) { f.push(r.length); for (const i of r) f.push(i); }
     const out = { w0: p.w0, widths: p.widths, nv: V.length, nf: F.length, v, f,
-                  nose: p.nose, backRamp: p.backRamp, derived: p.derived,
+                  nose: p.nose, backWall: p.backWall, derived: p.derived,
                   back: true };
     REACH_SRC.set(p, out);
     return out;
@@ -1815,8 +1752,8 @@
               (mid ? '|' + mid.side + mid.at.outer + '@' + mid.h : '');
     if (!DERIVED_WHITE[k]) {
       if (DERIVED_WHITE_N > 512) { DERIVED_WHITE = {}; DERIVED_WHITE_N = 0; }
-      const src = backReach(whiteRoofDrop(
-                    whiteBackRamp(akm320Nose(KP.P[KP.INDEX['Full Sized White']['n|n']]))));
+      const src = whiteBackWall(backReach(whiteRoofDrop(
+                    akm320Nose(KP.P[KP.INDEX['Full Sized White']['n|n']]))));
       let base;
       if (halfR > 0) {
         const bk = stepR.outer + '|' + stepR.inner;
@@ -5338,7 +5275,7 @@
     rigNote, rigLabel, rigSlot, rigSlotCol, rigSlotRow, RIG_SLOTS,
     rigStep, rigBase, rigNoteAuto,
     KEY_TYPES, TYPE_ORDER, LAYOUTS,
-    whiteProfile, twoSidedWhiteBase, deriveWhiteProfile, akm320Nose, whiteBackRamp,
+    whiteProfile, twoSidedWhiteBase, deriveWhiteProfile, akm320Nose, whiteBackWall,
     whiteFlushTongue, onFlushTongue, WHITE_RISE, whiteRoofDrop, ROOF_DROP,
     NOSE_SHIFT, NOSE_LEG_RAMP, NOSE_LEG_REAR, NOSE_LEG_IN, NOSE_LEG_OUT,
     NOSE_ROOF_Z, NOSE_FLOOR_Z,
