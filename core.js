@@ -1292,6 +1292,39 @@
   }
 
   /* ------------------------------------------------------------------ *
+   *  EACH ACCIDENTAL ROW LIES ON ITS OWN FACE                           *
+   *                                                                     *
+   *  The build is turned onto the WHITE deck (see ONE BED FRAME), which *
+   *  is right for the whites and wrong for the accidentals: black and   *
+   *  gray tops are raked about two degrees off that deck, so in the     *
+   *  shared frame they leave the printer resting on an edge and the     *
+   *  playing surface prints as a shallow overhang.                      *
+   *                                                                     *
+   *  So the two folded rows of a black or gray file are each given the  *
+   *  small extra turn that lays THAT row's key tops on the glass —      *
+   *  measured on that row's own keys, independently, because the two    *
+   *  halves are drafted apart and their rakes need not agree.  The      *
+   *  turn is taken about a line through the row's own middle, so the    *
+   *  row stays where the fold put it in x and y and only lies down.     *
+   *                                                                     *
+   *  THE WHITE FILE IS UNTOUCHED: it is the deck, already flat, and it  *
+   *  is the datum the accidental rows are measured from.  The two       *
+   *  accidental files therefore no longer sit in register with the      *
+   *  white one on the bed — that is the point, and they are three       *
+   *  separate prints that are assembled afterwards through the spine.   *
+   * ------------------------------------------------------------------ */
+  function halfTilt(meshes, part, half) {
+    const sp = ((meshes.spans || {}).keys || {})[part] || [];
+    const src = meshes[part] || [];
+    const tris = [];
+    for (const s of sp) {
+      if (s.half !== half) continue;
+      for (let i = s.i0; i < s.i1; i++) tris.push(src[i]);
+    }
+    return tris.length ? bedTilt(tris) : null;
+  }
+
+  /* ------------------------------------------------------------------ *
    *  ONE BED FRAME FOR THE WHOLE INSTRUMENT                             *
    *                                                                     *
    *  The three colours are three files, but they are ONE keyboard: the  *
@@ -1373,7 +1406,7 @@
         if (X < x0) x0 = X; if (Y < y0) y0 = Y; if (Z < z0) z0 = Z;
       }
     }
-    f = { th, c, sn, dx, dy,
+    f = { th, tilt: Math.PI - th, c, sn, dx, dy,
           x0: isFinite(x0) ? x0 : 0,
           y0: isFinite(y0) ? y0 : 0,
           z0: isFinite(z0) ? z0 : 0 };
@@ -1456,19 +1489,63 @@
      * WHOLE INSTRUMENT. */
     const F = bedFrame(meshes);
     const c = F.c, sn = F.sn;
+    /* the build's turn, then — for an accidental — each row's own small
+     * extra turn onto its key tops.  See EACH ACCIDENTAL ROW LIES ON ITS
+     * OWN FACE.  Δ is the difference between the deck's rake and this
+     * row's, so a row already parallel to the deck gets nothing. */
+    const extra = {};
+    if (part !== 'white') {
+      for (const half of ['A', 'B']) {
+        const t = halfTilt(meshes, part, half);
+        const d = (t === null) ? 0 : (F.tilt - t);
+        extra[half] = { d, c: Math.cos(d), sn: Math.sin(d), py: 0, pz: 0 };
+      }
+      /* the line each row turns about: the middle of that row's own
+       * footprint in the bed frame, on the bed, so the row lies down
+       * where it already stands instead of swinging across the plate */
+      const rng = {};
+      for (const r of runs) {
+        const oy = r.half === 'B' ? F.dy : 0;
+        const g = rng[r.half] = rng[r.half] || { y0: Infinity, y1: -Infinity };
+        for (let i = r.i0; i < r.i1; i += 3) {
+          const Y = r.src[i + 1] * c - r.src[i + 2] * sn + oy - F.y0;
+          if (Y < g.y0) g.y0 = Y;
+          if (Y > g.y1) g.y1 = Y;
+        }
+      }
+      for (const half of ['A', 'B'])
+        if (rng[half] && isFinite(rng[half].y0))
+          extra[half].py = (rng[half].y0 + rng[half].y1) / 2;
+    }
+    const place = (X, Y, Z, half) => {
+      const e = extra[half];
+      if (!e || !e.d) return [X, Y, Z];
+      const dy = Y - e.py, dz = Z - e.pz;
+      return [X, e.py + dy * e.c - dz * e.sn, e.pz + dy * e.sn + dz * e.c];
+    };
+    /* AND SET DOWN ON THE BED.  Turned about x through the origin the part
+     * ends up under it; a slicer would drop it anyway, but a file that says
+     * where it sits can be opened and measured without one.  The drop is
+     * the build's, so a colour that happens not to reach the bed's front-
+     * left corner does not get shoved into it — except in z, where a row
+     * that has just been turned onto its own face is dropped back onto the
+     * plate, because nothing else will do it for it. */
+    let zLow = Infinity;
+    const pts = [];
     for (const r of runs) {
       const ox = r.half === 'B' ? F.dx : 0, oy = r.half === 'B' ? F.dy : 0;
       copy(r.src, r.i0, r.i1, (x, y, z) => {
-        /* AND SET DOWN ON THE BED.  Turned about x through the origin the
-         * part ends up under it; a slicer would drop it anyway, but a file
-         * that says where it sits can be opened and measured without one.
-         * The drop is the build's, so a colour that happens not to reach
-         * the bed's front-left corner does not get shoved into it. */
-        out.push(x + ox - F.x0,
-                 y * c - z * sn + oy - F.y0,
-                 y * sn + z * c - F.z0);
+        const P = place(x + ox - F.x0,
+                        y * c - z * sn + oy - F.y0,
+                        y * sn + z * c - F.z0, r.half);
+        if (P[2] < zLow) zLow = P[2];
+        pts.push(P[0], P[1], P[2]);
       });
     }
+    const turned = Object.values(extra).some(e => e.d);
+    const drop = (turned && isFinite(zLow)) ? zLow : 0;
+    for (let i = 0; i < pts.length; i += 3)
+      out.push(pts[i], pts[i + 1], pts[i + 2] - drop);
     return out;
   }
 
@@ -3193,7 +3270,7 @@ if __name__ == "__main__":
 
   const api = {
     presetDesign, clearedDesign, scaleOf, slotAt, designColours,
-    computeLayout, pairKeys, printMesh, printParts, printBounds, printAudit, bedAngle,
+    computeLayout, pairKeys, printMesh, printParts, printBounds, printAudit, bedAngle, halfTilt,
     buildMeshes, toSTL, makeZip,
     pythonLog, summary, notesPerPeriod, layerCount, templateColours,
     whiteCount, widthAt, suggestScale,
