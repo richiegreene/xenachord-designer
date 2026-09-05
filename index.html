@@ -515,8 +515,11 @@
   body.mobile.gl-collapsed.strip-collapsed #glwrap{display:block}
   /* With the model away the strip has the whole screen, so it is centred in
      it rather than left sitting against the top edge. */
+  /* Down at the bottom rather than centred: a phone is held from below, and
+     the keys should meet the thumb that is already there. */
   body.mobile.gl-collapsed #strip{flex:1 1 auto;
-    display:flex;flex-direction:column;justify-content:center}
+    display:flex;flex-direction:column;justify-content:flex-end;
+    padding-bottom:6px}
 
   /* ---- the switch ----
      It lives in the collapse handle, which was already the bar you tap to
@@ -551,12 +554,18 @@
      Portrait fits the whole keyboard across ~390px, which makes the keys
      narrow; landscape roughly doubles them.  Said once, on the strip
      itself, and dismissed by being tapped or by turning the phone. */
-  #rotate-hint{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);
+  #main{position:relative}
+  #rotate-hint{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);
     z-index:30;display:none;align-items:center;gap:7px;
     background:var(--panel);border:1px solid var(--line);border-radius:999px;
     color:var(--dim);font-size:11.5px;padding:5px 12px;cursor:pointer;
     box-shadow:0 3px 14px rgba(0,0,0,.4)}
-  body.mobile.mode-play.hint-rotate #rotate-hint{display:flex}
+  /* It is advice about the KEYBOARD; with the model up instead there is no
+     keyboard on screen for it to be about. */
+  body.mobile.mode-play.hint-rotate:not(.strip-collapsed) #rotate-hint{display:flex}
+  /* With only the keyboard on screen the foot of it is where the keys and
+     the view switch are; the room going spare is at the top. */
+  body.mobile.gl-collapsed #rotate-hint{top:12px;bottom:auto}
   @media (orientation:landscape){ #rotate-hint{display:none!important} }
 </style>
 </head>
@@ -1149,8 +1158,10 @@
       </div>
       <div id="camread"></div>
       <div id="inspect"></div>
-      <div id="rotate-hint" title="tap to dismiss">&#8635; turn sideways for a wider keyboard</div>
     </div>
+    <!-- Not inside #glwrap: it is about the keyboard, and on a phone showing
+         only the keyboard there is no #glwrap to sit in. -->
+    <div id="rotate-hint" title="tap to dismiss">&#8635; turn sideways for a wider keyboard</div>
     <div id="strip"><div id="stripInner"></div></div>
     <div id="stripHandle" title="tap to hide the keyboard editor"><span class="grip"></span>
       <!-- Phone only (see #mview in the stylesheet): which of the two the
@@ -1233,9 +1244,14 @@ const MOBILE_Q = window.matchMedia(
   '(max-width: 760px), (pointer: coarse) and (max-width: 1100px)');
 const isMobile = () => MOBILE_Q.matches;
 
+/* What else has to be re-answered when the screen crosses the breakpoint.
+ * A list rather than a call, because the things that care are defined
+ * further down this file and boot must not depend on the order. */
+const onMobileChange = [];
 function applyMobile(){
   document.body.classList.toggle('mobile', isMobile());
-  if (typeof fitStripHeight === 'function') fitStripHeight();
+  for (const f of onMobileChange) f();
+  fitStripHeight();
   showRotateHint();
 }
 /* Rotating the phone, or dragging a desktop window narrow, re-answers it. */
@@ -2364,6 +2380,10 @@ let stripZx = 1, stripZy = 1;   // what it is actually drawn at
  * sliver into something a thumb can actually land on without moving a single
  * key sideways or changing what the picture says. */
 const STRIP_STRETCH_MAX = 2.2;
+/* With the 3D view switched away there is no second thing to be fair to, so
+ * the keys may reach further down the screen. Still bounded: past about this
+ * a white key stops reading as a key and starts reading as a column. */
+const STRIP_STRETCH_SOLO = 4.2;
 
 function stripFitsMobile(){
   /* A PICTURE IS NOT A SCREEN.  The SVG/PNG export traces the strip's real
@@ -2391,20 +2411,31 @@ function stripFitsMobile(){
  * than a fingertip; the height it buys back is the whole reason the keyboard
  * reads as one on that screen.
  */
+/** Whether the phone has given the whole screen to the keyboard. */
+function stripSolo(){
+  return isMobile() && document.body.classList.contains('gl-collapsed') &&
+         !document.body.classList.contains('strip-collapsed');
+}
+
 function wantStripZoom(cap){
   if (!stripFitsMobile() || !(stripW > 0) || !(stripH > 0)) return [1, 1];
   const avail = $('strip').clientWidth;
   if (!(avail > 0)) return [1, 1];
   const zx = Math.max(0.4, Math.min(avail / stripW, 1));
-  const zy = Math.max(zx, Math.min((cap - 20) / stripH, zx * STRIP_STRETCH_MAX));
+  const stretch = stripSolo() ? STRIP_STRETCH_SOLO : STRIP_STRETCH_MAX;
+  const zy = Math.max(zx, Math.min((cap - 20) / stripH, zx * stretch));
   return [zx, zy];
 }
 
 function fitStripHeight(){
-  /* Half the window on a desktop; on a phone in Play the strip leads and the
-     3D view takes what is left of the screen rather than the other way up. */
-  const cap = stripFitsMobile() ? Math.max(150, innerHeight * 0.5)
-                                : Math.max(190, innerHeight * 0.5);
+  /* Half the window on a desktop, and half on a phone still showing the 3D
+     view — but the whole of what is left when the keyboard is on its own,
+     which is measured off the app rather than the window because iOS reports
+     a window taller than the glass while its URL bar is up. */
+  const room = $('app') ? $('app').clientHeight : 0;
+  const cap = !stripFitsMobile() ? Math.max(190, innerHeight * 0.5)
+            : stripSolo()        ? Math.max(150, (room || innerHeight) - 44)
+                                 : Math.max(150, (room || innerHeight) * 0.5);
   [stripZx, stripZy] = wantStripZoom(cap);
   const inner = $('stripInner');
   if (inner && stripW > 0){
@@ -2419,7 +2450,11 @@ function fitStripHeight(){
      * across scale — the key is taller, the ratio on it is not. */
     inner.style.setProperty('--kb-unstretch', stripZx / stripZy);
   }
-  $('strip').style.height = Math.min(stripH * stripZy + 20, cap) + 'px';
+  /* On its own the strip is a flex item told to fill and centre what it
+     holds (see the mobile block), so an explicit height would be the one
+     thing stopping it. */
+  $('strip').style.height =
+    stripSolo() ? '' : Math.min(stripH * stripZy + 20, cap) + 'px';
 }
 addEventListener('resize', fitStripHeight);
 
@@ -4818,6 +4853,9 @@ function drawPart(b, colour, ofs){
 function draw(){
   if(!gl||!RIG.length) return;
   const w=canvas.clientWidth,h=canvas.clientHeight;
+  /* Switched away on a phone: there is no viewport to project into, and an
+     aspect ratio of 0/0 is not a picture anybody is waiting for. */
+  if(!(w>0&&h>0)) return;
   if(canvas.width!==w*devicePixelRatio||canvas.height!==h*devicePixelRatio){
     canvas.width=w*devicePixelRatio; canvas.height=h*devicePixelRatio; }
   gl.viewport(0,0,canvas.width,canvas.height);
@@ -5172,11 +5210,15 @@ addEventListener('resize', showRotateHint);
  * of the design is, so it stays shut across a reload if that's how the
  * user left it. */
 const STRIP_LS = 'xenachord-strip-collapsed';
-function setStripCollapsed(on){
+function setStripCollapsed(on, remember = true){
   document.body.classList.toggle('strip-collapsed', on);
   $('stripHandle').classList.toggle('collapsed', on);
   $('stripHandle').title = on ? 'tap to show the keyboard editor'
                               : 'tap to hide the keyboard editor';
+  /* The phone drives this flag from its own switch and keeps its own
+   * memory of it (MVIEW_LS): letting that write here would hand a desktop
+   * back a collapsed strip it never asked to collapse. */
+  if (!remember) return;
   try{ localStorage.setItem(STRIP_LS, on ? '1' : '0'); }catch(e){}
 }
 $('stripHandle').onclick = (e) => {
@@ -5197,7 +5239,7 @@ const MVIEW_LS = 'xenachord-mobile-view';
 function setMobileView(which){
   const keys = which !== 'model';
   document.body.classList.toggle('gl-collapsed', keys);
-  setStripCollapsed(!keys);
+  setStripCollapsed(!keys, false);
   for (const b of $('mview').querySelectorAll('button')){
     const on = (b.dataset.view === 'keys') === keys;
     b.classList.toggle('on', on);
@@ -5218,13 +5260,15 @@ for (const b of $('mview').querySelectorAll('button'))
 function applyMobileView(){
   if (!isMobile()){
     document.body.classList.remove('gl-collapsed');
-    setStripCollapsed(localStorage.getItem(STRIP_LS) === '1');
+    setStripCollapsed(localStorage.getItem(STRIP_LS) === '1', false);
     return;
   }
   let want = 'keys';
   try { if (localStorage.getItem(MVIEW_LS) === 'model') want = 'model'; } catch(e){}
   setMobileView(want);
 }
+onMobileChange.push(applyMobileView);
+applyMobileView();
 
 /* The viewport is what the panel gives back, and it is measured rather than
  * computed — the width animates, so one redraw at the end would show a
