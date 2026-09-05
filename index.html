@@ -489,6 +489,34 @@
      the foot of the keyboard would sit under it. dvh is the height that is
      actually there. */
   body.mobile #shell{height:100dvh}
+
+  /* ---------- THE WAYS A PHONE ZOOMS ITSELF IN, DECLINED ----------
+     A page zoom on a phone is sticky: nothing puts it back, it survives a
+     rotate, and after one the layout that was fitted to the screen is a
+     keyboard three keys wide.  It is never asked for here — it is arrived
+     at by accident, three ways, and all three are ordinary things to do to
+     an instrument:
+
+     A SECOND TAP IS A REPEATED NOTE, not a request to zoom.  Any two quick
+     taps anywhere outside the strip are read as a double-tap zoom; the
+     strip itself already declines them with touch-action:none, and
+     `manipulation` says the same thing for the rest of the app while
+     leaving ordinary scrolling and a deliberate pinch alone.
+
+     A FIELD UNDER 16px IS AN INVITATION.  iOS zooms the page in to focus a
+     control whose text it thinks is too small to type into, and it does not
+     zoom back out afterwards — so opening Play's drawer and touching the
+     1/1 field would leave the keyboard behind it magnified. Sized up to the
+     threshold rather than fought with, which is a better touch target
+     anyway. (Ranges, checkboxes and radios have no text to type.) */
+  body.mobile{touch-action:manipulation}
+  body.mobile input:not([type=range]):not([type=checkbox]):not([type=radio]),
+  body.mobile select,
+  body.mobile textarea,
+  /* named again past the one rule that carries an id, which would otherwise
+     out-rank the line above and keep the Custom tuning box at 11.5px — the
+     one field in the app most likely to be typed into on a phone. */
+  body.mobile #play-tuning textarea{font-size:16px}
   body.mobile #panel{width:52px;min-width:52px;transition:none}
   body.mobile .rail{width:51px;padding:7px 0;gap:6px}
   body.mobile .rail-btn{width:38px;height:38px}
@@ -1257,6 +1285,45 @@ function applyMobile(){
 (MOBILE_Q.addEventListener
   ? MOBILE_Q.addEventListener('change', applyMobile)
   : MOBILE_Q.addListener(applyMobile));
+
+/* ---- THE THIRD WAY IN, AND THE WAY BACK OUT ----
+ *
+ * TWO FINGERS ON A KEYBOARD IS A CHORD.  It is also, to a phone, a pinch —
+ * so playing an interval can zoom the page, which is the one gesture an
+ * instrument must be allowed to have. Safari's gesture events are where that
+ * is decided, and they are declined for gestures that begin over the
+ * instrument itself.
+ *
+ * NOT EVERYWHERE, deliberately. Over the rail and the drawer a pinch still
+ * works, because that is a real thing to want on a phone — and because it is
+ * the way out if a zoom is arrived at by some route not listed here.
+ */
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(type, (ev) => {
+    if (!isMobile() || !ev.target || !ev.target.closest) return;
+    if (ev.target.closest('#main') && ev.cancelable) ev.preventDefault();
+  }, { passive: false });
+}
+
+/**
+ * Put a page zoom back to 1:1.
+ *
+ * A ZOOM CANNOT BE SET FROM SCRIPT, only re-clamped: pinning maximum-scale
+ * for a moment leaves the browser no room above 1 and it comes back down,
+ * and lifting it again hands pinch-zoom back rather than taking it away for
+ * good. Only ever on a rotate — the screen has just changed shape and the
+ * layout is being re-fitted to it anyway, so a scale left over from the
+ * shape before it is stale by definition. A zoom set deliberately while the
+ * phone is held still is left exactly where it was put.
+ */
+const VP_BASE = 'width=device-width, initial-scale=1';
+function resetPageZoom(){
+  const vp = document.querySelector('meta[name=viewport]');
+  const vv = window.visualViewport;
+  if (!vp || !vv || !(vv.scale > 1.01)) return;
+  vp.setAttribute('content', VP_BASE + ', maximum-scale=1');
+  setTimeout(() => vp.setAttribute('content', VP_BASE), 400);
+}
 
 /* ---- said once ----
  * Portrait fits the whole keyboard into ~390px, which is narrow keys;
@@ -2464,7 +2531,7 @@ function refitSoon(){
   setTimeout(refitStrip, 320);
 }
 addEventListener('resize', refitSoon);
-addEventListener('orientationchange', refitSoon);
+addEventListener('orientationchange', () => { resetPageZoom(); refitSoon(); });
 /* The one that moves when iOS slides its URL bar away, which `resize` does
  * not always report. */
 if (window.visualViewport)
