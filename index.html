@@ -204,10 +204,18 @@
   #stripInner, #stripInner *{box-sizing:border-box}
   .kb-white{position:absolute;background:var(--spine);border:1px solid #55565f;
     border-radius:0 0 3px 3px;color:var(--key-text,#444);font-size:9px;text-align:center}
-  .kb-white .nm{position:absolute;bottom:18px;left:2px;right:2px;display:block;
-    white-space:nowrap;text-align:center}
-  .kb-m .nm{position:absolute;left:2px;right:2px;top:50%;display:block;
-    white-space:nowrap;text-align:center;color:#f0f0f2}
+  /* CENTRED ON THE KEY'S CENTRE LINE, NOT INSIDE A BOX.  A label is pinned at
+     the key's midpoint and pulled back by half of ITSELF, so whatever it is
+     made of — a digit, a Bravura sagittal, a HEJI accidental, a mixed run of
+     all three — its own drawn width is what gets halved.  A left/right-inset
+     block would centre the BOX instead, which is only the same thing while
+     the text fits; the moment it doesn't, the box stops moving and the text
+     drifts off the key.  Widths are handled by shrinking the type in
+     applyLabelSizing(), never by clipping, because a clip eats one side. */
+  .kb-white .nm{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);
+    display:block;white-space:nowrap;text-align:center}
+  .kb-m .nm{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    display:block;white-space:nowrap;text-align:center;color:#f0f0f2}
   .kb-m.g .nm{color:#141419}
   .kb-slot{position:absolute;border-radius:3px;
     outline:1px dashed transparent;outline-offset:-1px}
@@ -311,7 +319,10 @@
   /* In Play the enumeration is not drawn, so the name takes the foot of the
      key it used to share — the same seat, and the whole of it. */
   .kb-white .kb-tune{bottom:16px;color:var(--key-text,#26272c);font-size:10px}
-  .kb-m .kb-tune{color:#f0f0f2;font-size:9px}
+  /* Black and gray keys carry the name at their own middle, vertically as
+     well — one transform doing both, so nothing downstream has to rebuild
+     the horizontal half and risk dropping it. */
+  .kb-m .kb-tune{top:50%;transform:translate(-50%,-50%);color:#f0f0f2;font-size:9px}
   .kb-m.g .kb-tune{color:#141419}
   /* A key answers one question at a time: in Design it is the position it
      holds in the arrangement, in Play the pitch it carries. Both at once is
@@ -2561,30 +2572,48 @@ function buildStrip(){
 }
 
 let labelScale = 1;
+/**
+ * Set every key label to the sizing slider's scale, and make it fit.
+ *
+ * CENTRING IS THE STYLESHEET'S JOB AND STAYS THERE.  A label is placed at
+ * left:50% and pulled back by half its own width, so it is centred on what it
+ * actually draws — which is the only rule that survives a change of font or
+ * notation, where a sagittal, a HEJI accidental and a plain digit are three
+ * different widths for the same key.  This pass therefore CLEARS its inline
+ * position and transform rather than writing new ones: an earlier version
+ * rebuilt the transform for the vertical nudge and dropped the horizontal
+ * half with it, which slid every accidental's name half its width to the
+ * right.  Nothing here may set left/right/transform again.
+ *
+ * Fitting is done by shrinking the type, never by clipping: overflow:hidden
+ * on a centred label eats the right-hand side only, so a name that no longer
+ * fits would stop looking centred exactly when it most needs to.
+ */
 function applyLabelSizing(){
   const inner = $('stripInner');
   if (!inner) return;
   for (const key of inner.querySelectorAll('.kb-white, .kb-m')){
+    const room = Math.max(0, key.clientWidth - 4);
     for (const label of key.querySelectorAll('.nm, .kb-tune')){
       label.style.fontSize = '';
-      label.style.maxWidth = 'none';
-      label.style.overflow = 'visible';
-      label.style.transform = key.classList.contains('kb-m')
-        ? 'translateY(-50%)' : 'none';
-      if (key.classList.contains('kb-m')) {
-        label.style.left = '2px';
-        label.style.right = '2px';
-        label.style.top = '50%';
-      }
+      label.style.maxWidth = '';
+      label.style.overflow = '';
+      label.style.transform = '';
+      label.style.left = '';
+      label.style.right = '';
+      label.style.top = '';
       const base = label.classList.contains('kb-tune') && key.classList.contains('kb-white')
         ? 10 : 9;
-      label.style.fontSize = (base * labelScale) + 'px';
-      const room = Math.max(0, key.clientWidth - 4);
-      const width = label.getBoundingClientRect().width;
-      if (width > room && width > 0)
-        label.style.fontSize = (base * labelScale * room / width) + 'px';
-      label.style.maxWidth = room + 'px';
-      label.style.overflow = 'hidden';
+      let size = base * labelScale;
+      label.style.fontSize = size + 'px';
+      /* Hinting and glyph fallback mean width is not quite linear in size, so
+       * the ratio is applied and then checked — twice is enough to land. */
+      for (let pass = 0; pass < 2 && room > 0; pass++){
+        const width = label.getBoundingClientRect().width;
+        if (width <= room || width <= 0) break;
+        size *= room / width;
+        label.style.fontSize = size + 'px';
+      }
     }
   }
 }
